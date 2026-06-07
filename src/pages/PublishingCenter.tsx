@@ -6,11 +6,13 @@ import { StandardGameValidator } from '@/publishing-center/validator/StandardGam
 import { GameCodeAnalyzer } from '@/publishing-center/ai/GameCodeAnalyzer';
 import { SkillRecommender } from '@/publishing-center/ai/SkillRecommender';
 import { savePublishedGame } from '@/services/publishedGameService';
+import { useAuth } from '@/contexts/authContext';
 import { toast } from 'sonner';
 import { Wand2, Sparkles, ArrowRight, CheckCircle } from 'lucide-react';
 
 export default function PublishingCenter() {
   const location = useLocation();
+  const { currentUser } = useAuth();
   const [pipeline] = useState(() => new PublishingPipeline());
   const [validator] = useState(() => new StandardGameValidator());
   const [analyzer] = useState(() => new GameCodeAnalyzer());
@@ -143,6 +145,7 @@ export default function PublishingCenter() {
           validator={validator}
           analyzer={analyzer}
           recommender={recommender}
+          currentUser={currentUser ? { id: currentUser.id, username: currentUser.username } : null}
           onPublishComplete={handlePublishComplete}
           onPublishError={handlePublishError}
           preloadedFiles={preloadedFiles}

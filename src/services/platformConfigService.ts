@@ -193,6 +193,18 @@ class PlatformConfigService {
    */
   private saveConfig(config: Record<string, any>): void {
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(config));
+    // CloudBase 双写
+    import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+      if (!isCloudBaseReady()) return;
+      const db = getCloudBaseApp().database();
+      db.collection('platform_treasury').where({ id: 'platform_config' }).get().then(res => {
+        if (res.data.length > 0) {
+          db.collection('platform_treasury').doc(res.data[0]._id).update({ config, _updatedAt: Date.now() }).catch(() => {});
+        } else {
+          db.collection('platform_treasury').add({ id: 'platform_config', config, _createdAt: Date.now(), _updatedAt: Date.now() }).catch(() => {});
+        }
+      }).catch(() => {});
+    }).catch(() => {});
   }
 
   /**

@@ -3,88 +3,122 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useContext } from 'react';
 import { AuthContext } from '@/contexts/authContext';
 import { toast } from 'sonner';
-import { useLanguage } from '@/contexts/LanguageContext';
-import { getDict, t } from '@/utils/i18n';
 import { validateUser, getTestAccountCredentials } from '@/data/testAccounts';
-const crossPlatformAuthService = {} as any;
 
 export default function Login() {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { lang } = useLanguage();
-  const dict = getDict(lang);
   const [showTestAccounts, setShowTestAccounts] = useState(false);
-  const { setIsAuthenticated, setCurrentUser } = useContext(AuthContext);
+  const { login, setIsAuthenticated, setCurrentUser } = useContext(AuthContext);
   const navigate = useNavigate();
 
   const testCredentials = getTestAccountCredentials();
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    
-    // 验证测试账号
-    setTimeout(async () => {
-      if (username && password) {
-        const account = validateUser(username, password);
-        if (account) {
-          // 保存用户数据到localStorage
-          localStorage.setItem('currentUser', JSON.stringify(account));
-          
-          // 触发自定义事件，通知 AuthContext 更新状态
-          window.dispatchEvent(new CustomEvent('localStorageChange'));
-          
-          setCurrentUser(account as any);
-          setIsAuthenticated(true);
-          navigate('/');
-          
-          
-          // 登录 New Day API（CORS 已修复）
-          try {
-            // 1. 先生成跨平台令牌（用于 getCurrentUser）
-            await crossPlatformAuthService.generateCrossPlatformToken({
-              userId: account.id,
-              username: account.username,
-              email: account.email || `${account.username}@test.com`,
-              platform: 'allinone'
-            });
-
-            // 2. 再生成 New Day 令牌（用于 getNewDayToken）
-            const newDayToken = await crossPlatformAuthService.generateNewDayToken({
-              userId: account.id,
-              username: account.username,
-              email: account.email || `${account.username}@test.com`,
-              platform: 'allinone'
-            });
-
-            if (newDayToken) {
-              console.log('✅ New Day 登录成功，token:', newDayToken.substring(0, 30) + '...');
-              toast.success(`欢迎回来，${account.profile.nickname}！(New Day 已连接)`);
-            } else {
-              console.warn('⚠️ New Day 登录失败');
-              toast.success(`欢迎回来，${account.profile.nickname}！`);
-            }
-          } catch (error) {
-            console.warn('New Day 登录出错:', error);
-            toast.success(`欢迎回来，${account.profile.nickname}！`);
-          }
-          
-          navigate('/');
-        } else {
-          toast.error('用户名或密码错误');
-        }
-      } else {
-        toast.error('请输入用户名和密码');
+  // ==================== 从 localStorage 读取钱包余额 ====================
+  const getWalletFromStorage = (userId: string) => {
+    try {
+      const data = JSON.parse(localStorage.getItem('wallet_v3') || localStorage.getItem('wallet_v2') || '{}');
+      const wallet = data[userId];
+      if (wallet) {
+        console.log(`[Login] 从 wallet 读取到 ${userId} 余额: G=${wallet.gameCoins}`);
+        return { gameCoins: wallet.gameCoins || 0 };
       }
-      setIsLoading(false);
-    }, 1000);
+    } catch { /* ignore */ }
+    console.log(`[Login] wallet 中无 ${userId} 数据，使用默认值`);
+    return { gameCoins: 1000 };
   };
 
+  // ==================== 同步 wallet_v3 ====================
+  const syncWalletV3 = (userId: string, gameCoins: number) => {
+    try {
+      const walletData = JSON.parse(localStorage.getItem('wallet_v3') || '{}');
+      if (!walletData[userId] || walletData[userId].gameCoins === undefined) {
+        walletData[userId] = {
+          gameCoins,
+          instantVouchers: walletData[userId]?.instantVouchers ?? 0,
+          algorithmVouchers: walletData[userId]?.algorithmVouchers ?? 0,
+          lastUpdated: Date.now(),
+        };
+        localStorage.setItem('wallet_v3', JSON.stringify(walletData));
+        console.log(`[Login] wallet_v3 已同步 ${userId}: G=${gameCoins}`);
+      }
+    } catch { /* ignore */ }
+  };
+
+  // ==================== 保存用户到两个 localStorage 键 ====================
+  const persistTestUser = (account: any, wallet: { gameCoins: number }) => {
+    // 构建 AuthUser 对象（role 从测试账号元数据读取）
+    const authUser = {
+      id: account.id,
+      uid: account.id,
+      username: account.username,
+      email: `${account.username}@allinone.test`,
+      nickname: account.nickname,
+      role: account.role || 'player',
+      gameCoins: wallet.gameCoins,
+    };
+
+    // 写入两个 key：AuthProvider 读 allinone_user，旧代码读 currentUser
+    localStorage.setItem('currentUser', JSON.stringify(account));
+    localStorage.setItem('allinone_user', JSON.stringify(authUser));
+
+    // 通知事件
+    window.dispatchEvent(new CustomEvent('localStorageChange'));
+    window.dispatchEvent(new Event('allinoneAuthChange'));
+
+    // 更新 React 状态
+    setCurrentUser(authUser);
+    setIsAuthenticated(true);
+  };
+
+  // ==================== CloudBase / AuthSkill 登录 ====================
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) {
+      toast.error('请输入邮箱和密码');
+      return;
+    }
+    setIsLoading(true);
+
+    try {
+      const result = await login(email, password);
+      if (result.success) {
+        toast.success('登录成功！');
+        navigate('/');
+      } else {
+        // CloudBase Auth 失败，尝试本地账号（从 email 提取 username）
+        const usernameFromEmail = email.includes('@') ? email.split('@')[0] : email;
+        const account = validateUser(usernameFromEmail, password);
+        if (account) {
+          console.log(`[Login] 本地测试账号匹配: id=${account.id}, username=${account.username}`);
+          const wallet = getWalletFromStorage(account.id);
+          syncWalletV3(account.id, wallet.gameCoins);
+          persistTestUser(account, wallet);
+          toast.success(`欢迎回来，${account.nickname}！`);
+          navigate('/');
+        } else {
+          toast.error(result.error || '邮箱或密码错误');
+        }
+      }
+    } catch (err: any) {
+      toast.error(err?.message || '登录失败，请稍后重试');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ==================== 测试账号快捷登录 ====================
   const handleTestAccountLogin = (testUsername: string, testPassword: string) => {
-    setUsername(testUsername);
-    setPassword(testPassword);
+    const account = validateUser(testUsername, testPassword);
+    if (!account) { toast.error('测试账号不可用'); return; }
+    console.log(`[Login] 测试账号快捷登录: id=${account.id}, username=${account.username}`);
+    const wallet = getWalletFromStorage(account.id);
+    syncWalletV3(account.id, wallet.gameCoins);
+    persistTestUser(account, wallet);
+    toast.success(`欢迎回来，${account.nickname}！`);
     setShowTestAccounts(false);
+    navigate('/');
   };
 
   return (
@@ -97,27 +131,27 @@ export default function Login() {
             </div>
             <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">AllinONE</span>
           </div>
-          <h1 className="text-2xl font-bold">{t(dict,'login.title')}</h1>
-          <p className="text-slate-600 dark:text-slate-300">{t(dict,'login.subtitle')}</p>
+          <h1 className="text-2xl font-bold">欢迎回来</h1>
+          <p className="text-slate-600 dark:text-slate-300">登录您的账户，继续游戏之旅</p>
         </div>
         
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6 md:p-8">
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
-              <label htmlFor="username" className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">
-                {t(dict,'login.labels.username')}
+              <label htmlFor="email" className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">
+                邮箱
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <i className="fa-solid fa-user text-slate-400"></i>
+                  <i className="fa-solid fa-envelope text-slate-400"></i>
                 </div>
                 <input
-                  type="text"
-                  id="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  type="email"
+                  id="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  placeholder={t(dict,'login.placeholders.username')}
+                  placeholder="your@email.com"
                   required
                 />
               </div>
@@ -125,7 +159,7 @@ export default function Login() {
             
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">
-                {t(dict,'login.labels.password')}
+                密码
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -137,29 +171,9 @@ export default function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  placeholder={t(dict,'login.placeholders.password')}
+                  placeholder="请输入密码"
                   required
                 />
-              </div>
-            </div>
-            
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <input
-                  id="remember-me"
-                  name="remember-me"
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                />
-                <label htmlFor="remember-me" className="ml-2 block text-sm text-slate-700 dark:text-slate-300">
-                  {t(dict,'login.labels.rememberMe')}
-                </label>
-              </div>
-              
-              <div className="text-sm">
-                <a href="#" className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">
-                  {t(dict,'login.labels.forgotPassword')}
-                </a>
               </div>
             </div>
             
@@ -172,23 +186,23 @@ export default function Login() {
                 {isLoading ? (
                   <>
                     <i className="fa-solid fa-spinner fa-spin mr-2"></i>
-                    {t(dict,'common.buttons.loadingLogin')}
+                    登录中...
                   </>
-                ) : t(dict,'common.buttons.login')
-                }
+                ) : '登录'}
               </button>
             </div>
           </form>
           
           <div className="mt-6 text-center">
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              {t(dict,'login.noAccountPrompt')}{' '}
+              还没有账户？{' '}
               <Link to="/register" className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">
-                {t(dict,'login.registerLink')}
+                立即注册
               </Link>
             </p>
           </div>
           
+          {/* 测试账号入口（仅开发环境） */}
           <div className="mt-8">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
@@ -196,7 +210,7 @@ export default function Login() {
               </div>
               <div className="relative flex justify-center text-sm">
                 <span className="px-2 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400">
-                  {t(dict,'login.test.title')}
+                  测试账号
                 </span>
               </div>
             </div>
@@ -207,14 +221,14 @@ export default function Login() {
                 className="w-full flex justify-center items-center gap-2 py-3 px-4 border border-slate-300 dark:border-slate-600 rounded-lg shadow-sm text-sm font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
               >
                 <i className="fa-solid fa-vial text-green-600"></i>
-                {showTestAccounts ? t(dict,'login.test.hide') : t(dict,'login.test.show')}
+                {showTestAccounts ? '隐藏测试账号' : '显示测试账号'}
                 <i className={`fa-solid fa-chevron-${showTestAccounts ? 'up' : 'down'} text-xs`}></i>
               </button>
               
               {showTestAccounts && (
                 <div className="mt-4 space-y-2 max-h-64 overflow-y-auto">
                   <div className="text-xs text-slate-500 dark:text-slate-400 mb-2 px-2">
-                    {t(dict,'login.test.clickTip')}
+                    点击任意账号自动填入登录信息
                   </div>
                   {testCredentials.map((account, index) => (
                     <div
@@ -228,7 +242,7 @@ export default function Login() {
                             {account.nickname}
                           </div>
                           <div className="text-xs text-slate-500 dark:text-slate-400">
-                            {account.username}
+                            {account.username}@allinone.test
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -239,32 +253,13 @@ export default function Login() {
                         </div>
                       </div>
                       <div className="mt-1 text-xs text-slate-400 dark:text-slate-500">
-                        {t(dict,'login.test.password')}: {account.password}
+                        密码: {account.password}
                       </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-            
-              <div className="mt-6 text-center">
-                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
-                  <div className="flex items-center justify-center gap-2 text-green-700 dark:text-green-300 text-sm">
-                    <i className="fa-solid fa-info-circle"></i>
-                    <span className="font-medium">{t(dict,'login.test.infoTitle')}</span>
-                  </div>
-                  <p className="text-xs text-green-600 dark:text-green-400 mt-1 mb-2">
-                    {t(dict,'login.test.infoDesc')}
-                  </p>
-                  <Link 
-                    to="/test-accounts"
-                    className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-300 hover:text-green-800 dark:hover:text-green-200 font-medium underline"
-                  >
-                    <i className="fa-solid fa-external-link"></i>
-                    {t(dict,'login.test.viewList')}
-                  </Link>
-                </div>
-              </div>
           </div>
         </div>
       </div>

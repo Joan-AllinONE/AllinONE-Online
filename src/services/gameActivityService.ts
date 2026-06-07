@@ -1,8 +1,33 @@
-// MVP v1.0: computing types removed, stubbed
-type GameActivityData = any;
-type PlayerActivityStats = any;
-type ComputingPowerBreakdown = any;
-type NetworkActivityData = any;
+// S4-3 修复：定义具体接口替换 any 类型
+interface GameActivityData {
+  userId: string;
+  sessionId: string;
+  gameId: string;
+  gameName: string;
+  startTime: Date;
+  endTime: Date;
+  duration: number;
+  score: number;
+  level: number;
+  achievements: string[];
+  computingPowerEarned: number;
+  gameCoinsEarned: number;
+  activityType: string;
+}
+
+interface PlayerActivityStats {
+  totalSessions: number;
+  totalDuration: number;
+  averageScore: number;
+  bestScore: number;
+  totalComputingPower: number;
+  totalGameCoins: number;
+  lastSessionAt: Date;
+}
+
+// 已废弃类型 — 保留引用兼容（MVP v1.0: computing types removed）
+type ComputingPowerBreakdown = Record<string, unknown>;
+type NetworkActivityData = Record<string, unknown>;
 
 class GameActivityService {
   private activities: GameActivityData[] = [];

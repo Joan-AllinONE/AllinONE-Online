@@ -8,7 +8,7 @@
  * - 全程零 create、零 destroy，仅 transfer
  */
 import { voucherService } from '@/voucher-system/services/VoucherService';
-import { Voucher, Transaction, VoucherStatus, VoucherSourceType } from '@/voucher-system/types';
+import { Voucher, Transaction, VoucherStatus, VoucherSourceType, isCurrencyVoucher } from '@/voucher-system/types';
 
 // ==================== 平台账户常量 ====================
 
@@ -26,6 +26,8 @@ const POOL_SIZE_PER_DENOMINATION = 100; // 每种面额预创建数量
 
 class VoucherPaymentService {
   private initialized = false;
+  // 🔒 S2-3 修复：用户级支付锁，防止并发超额消费
+  private paymentLocks = new Map<string, Promise<void>>();
 
   /**
    * 初始化平台凭证库存
@@ -70,6 +72,7 @@ class VoucherPaymentService {
 
   /**
    * 使用凭证A币（testA币）支付
+   * 🔒 S2-3 修复：用户级锁，同一用户并发支付串行化，防止超额消费
    * 
    * 流程：
    * 1. 获取用户活跃凭证，按面额从大到小排序
@@ -95,9 +98,41 @@ class VoucherPaymentService {
     transactions: Transaction[];
     message: string;
   } {
-    // 1. 获取用户活跃凭证（不限类型）
+    // 🔒 用户级支付锁：同一用户并发支付串行化
+    while (this.paymentLocks.has(userId)) {
+      // 等待前一个支付完成
+    }
+
+    let resolveLock: () => void;
+    const lock = new Promise<void>(r => { resolveLock = r; });
+    this.paymentLocks.set(userId, lock);
+
+    try {
+      return this._payWithVoucherInternal(userId, userName, amount, description);
+    } finally {
+      this.paymentLocks.delete(userId);
+      resolveLock!();
+    }
+  }
+
+  /**
+   * 内部支付实现（在锁内执行，无并发干扰）
+   */
+  private _payWithVoucherInternal(
+    userId: string,
+    userName: string,
+    amount: number,
+    description: string
+  ): {
+    success: boolean;
+    consumedVouchers: Voucher[];
+    changeVouchers: Voucher[];
+    transactions: Transaction[];
+    message: string;
+  } {
+    // 1. 获取用户活跃凭证（仅A币类凭证，排除道具/物品类）
     const userVouchers = voucherService.getUserVouchers(userId)
-      .filter(v => v.status === VoucherStatus.ACTIVE);
+      .filter(v => v.status === VoucherStatus.ACTIVE && isCurrencyVoucher(v.sourceType));
 
     const totalValue = userVouchers.reduce((s, v) => s + v.denomination, 0);
 
@@ -228,7 +263,7 @@ class VoucherPaymentService {
    */
   getUserVoucherBalance(userId: string): number {
     const vouchers = voucherService.getUserVouchers(userId)
-      .filter(v => v.status === VoucherStatus.ACTIVE);
+      .filter(v => v.status === VoucherStatus.ACTIVE && isCurrencyVoucher(v.sourceType));
     return vouchers.reduce((s, v) => s + v.denomination, 0);
   }
 
@@ -237,7 +272,7 @@ class VoucherPaymentService {
    */
   getUserVouchers(userId: string): Voucher[] {
     return voucherService.getUserVouchers(userId)
-      .filter(v => v.status === VoucherStatus.ACTIVE);
+      .filter(v => v.status === VoucherStatus.ACTIVE && isCurrencyVoucher(v.sourceType));
   }
 
   /**

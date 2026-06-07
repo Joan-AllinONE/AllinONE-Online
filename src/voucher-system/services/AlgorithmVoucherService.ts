@@ -688,17 +688,12 @@ export class AlgorithmVoucherService {
   }
 
   /**
-   * 计算公式结果（支持基础运算）
+   * 计算公式结果（使用 mathjs 沙箱解析，无代码执行风险）
    */
   private evaluateGamePoolFormula(formula: string, metrics: Record<string, number>): number {
     try {
-      // 替换变量
-      let expr = formula;
-      for (const [key, value] of Object.entries(metrics)) {
-        expr = expr.replace(new RegExp(`\\b${key}\\b`, 'g'), String(value));
-      }
-      // 使用 Function 计算（仅作演示，生产环境应使用安全公式引擎）
-      const result = new Function(`"use strict"; return (${expr});`)();
+      const { evaluate } = require('mathjs');
+      const result = evaluate(formula, metrics);
       return typeof result === 'number' ? result : 0;
     } catch {
       console.warn(`[AlgorithmVoucherService] 公式计算失败: ${formula}`);

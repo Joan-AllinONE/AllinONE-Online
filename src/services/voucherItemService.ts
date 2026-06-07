@@ -28,10 +28,13 @@ import {
   VoucherStatus,
   TransactionType,
   Voucher,
+  isCurrencyVoucher,
   VoucherMetadata,
 } from '@/voucher-system/types';
 import { skillGateway } from '@/skills';
 import { redeemCodeService } from './redeemCodeService';
+import { gameDeveloperService } from './gameDeveloperService';
+import { getGameDeveloperAccountId } from '@/types/gameDeveloper';
 import { RedeemCode, RedeemCodeStatus, ItemType } from '@/types/redeemCode';
 import {
   GameProposalType,
@@ -108,6 +111,23 @@ function loadTemplates(): ItemVoucherTemplate[] {
 
 function saveTemplates(templates: ItemVoucherTemplate[]): void {
   localStorage.setItem(ITEM_TEMPLATE_STORAGE_KEY, JSON.stringify(templates));
+  syncTemplatesToCloud(templates);
+}
+
+function syncTemplatesToCloud(templates: ItemVoucherTemplate[]): void {
+  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+    if (!isCloudBaseReady()) return;
+    const db = getCloudBaseApp().database();
+    for (const t of templates.slice(-10)) {
+      db.collection('voucher_templates').where({ id: t.id }).get().then(res => {
+        if (res.data.length > 0) {
+          db.collection('voucher_templates').doc(res.data[0]._id).update(t as any).catch(() => {});
+        } else {
+          db.collection('voucher_templates').add(t as any).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+  }).catch(() => {});
 }
 
 function loadPurchases(): ItemVoucherPurchase[] {
@@ -121,6 +141,23 @@ function loadPurchases(): ItemVoucherPurchase[] {
 
 function savePurchases(purchases: ItemVoucherPurchase[]): void {
   localStorage.setItem(ITEM_PURCHASE_STORAGE_KEY, JSON.stringify(purchases));
+  syncPurchasesToCloud(purchases);
+}
+
+function syncPurchasesToCloud(purchases: ItemVoucherPurchase[]): void {
+  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+    if (!isCloudBaseReady()) return;
+    const db = getCloudBaseApp().database();
+    for (const p of purchases.slice(-10)) {
+      db.collection('purchases').where({ id: p.id }).get().then(res => {
+        if (res.data.length > 0) {
+          db.collection('purchases').doc(res.data[0]._id).update(p as any).catch(() => {});
+        } else {
+          db.collection('purchases').add(p as any).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+  }).catch(() => {});
 }
 
 // ==================== 服务类 ====================
@@ -334,31 +371,47 @@ class VoucherItemService {
 
     try {
       if (request.paymentMethod === 'voucher' && template.pricing.acceptVoucher !== false) {
-        // 凭证支付：调用凭证据支付
+        // ===== 凭证支付 =====
         const voucherPrice = template.pricing.voucherPrice || price;
-        const userVouchers = voucherService.getUserVouchers(request.userId)
-          .filter(v => v.status === VoucherStatus.ACTIVE)
+
+        // 仅选取 A币类型凭证（排除道具凭证），确保余额计算准确
+        const userAcoinVouchers = voucherService.getUserVouchers(request.userId)
+          .filter(v => v.status === VoucherStatus.ACTIVE && isCurrencyVoucher((v as any).sourceType))
           .sort((a, b) => a.denomination - b.denomination);
 
+        const currentBalance = userAcoinVouchers.reduce((sum, v) => sum + v.denomination, 0);
+
+        // 明确余额不足提示
+        if (currentBalance < voucherPrice) {
+          if (currentBalance === 0) {
+            return {
+              success: false,
+              message: `A币凭证余额为 0，无法支付「${template.name}」（需要 ${voucherPrice} A币）。请获取A币凭证或切换为「游戏币支付」`,
+            };
+          }
+          return {
+            success: false,
+            message: `A币凭证余额不足：当前 ${currentBalance} A币，需要 ${voucherPrice} A币，还差 ${voucherPrice - currentBalance} A币`,
+          };
+        }
+
+        // 凑单：从小到大选取凭证，直到覆盖价格
         let totalSelected = 0;
         const selectedVouchers: Voucher[] = [];
-        for (const v of userVouchers) {
+        for (const v of userAcoinVouchers) {
           selectedVouchers.push(v);
           totalSelected += v.denomination;
           if (totalSelected >= voucherPrice) break;
         }
 
-        if (totalSelected < voucherPrice) {
-          return { success: false, message: `凭证余额不足，需要 ${voucherPrice} A币` };
-        }
-
-        // 转移用户凭证到平台
+        // 转移用户凭证到游戏商账户（game-{gameId}）
+        const developerAccountId = getGameDeveloperAccountId(request.gameId);
         for (const v of selectedVouchers) {
           voucherService.transferVoucher(
             {
               voucherId: v.id,
-              toUserId: PLATFORM_POOL_ID,
-              toUserName: PLATFORM_POOL_NAME,
+              toUserId: developerAccountId,
+              toUserName: `${template.gameName || '游戏'} 开发者`,
               note: `购买道具凭证: ${template.name}`,
             },
             request.userId,
@@ -366,7 +419,18 @@ class VoucherItemService {
           );
         }
 
-        // 找零
+        // 🆕 记录收入到游戏开发者账户
+        gameDeveloperService.recordPurchaseRevenue({
+          gameId: request.gameId,
+          gameName: template.gameName || '游戏',
+          amount: voucherPrice,
+          itemName: template.name,
+          templateId: request.templateId,
+          buyerId: request.userId,
+          buyerName: request.userName,
+        });
+
+        // 找零（由开发者账户铸造）
         const change = totalSelected - voucherPrice;
         if (change > 0) {
           voucherService.createVoucher(
@@ -381,21 +445,35 @@ class VoucherItemService {
               },
               note: '凭证支付找零',
             },
-            PLATFORM_POOL_ID,
-            PLATFORM_POOL_NAME
+            developerAccountId,
+            `${template.gameName || '游戏'} 开发者`
           );
         }
-      } else {
-        // 钱包支付（使用 targetCurrency 而非模板货币，支持 gameCoins 等）
+      } else if (request.paymentMethod === 'wallet') {
+        // ===== 钱包支付 =====
         const spendResult = await skillGateway.execute('wallet', 'spend', {
           currency: targetCurrency,
           amount: price,
-          reason: `购买道具凭证: ${template.name}`,
-        });
+          description: `购买道具凭证: ${template.name}`,
+        }, { userId: request.userId, sessionId: 'web' });
 
         if (!spendResult.success) {
           return { success: false, message: spendResult.error?.message || '支付失败' };
         }
+
+        // 🆕 记录收入到游戏开发者账户
+        gameDeveloperService.recordPurchaseRevenue({
+          gameId: request.gameId,
+          gameName: template.gameName || '游戏',
+          amount: price,
+          itemName: template.name,
+          templateId: request.templateId,
+          buyerId: request.userId,
+          buyerName: request.userName,
+        });
+      } else {
+        // 用户选了凭证支付但模板未启用凭证 → 明确报错，不静默降级扣游戏币
+        return { success: false, message: `「${template.name}」未启用凭证支付，请切换为游戏币支付后重试` };
       }
 
       // 转移道具凭证给用户
@@ -551,26 +629,14 @@ class VoucherItemService {
     }
 
     const gameEffect = customData.gameEffect;
-    const isConsumable = customData.consumable !== false;
 
-    // 如果是消耗品，销毁凭证；否则标记状态
-    if (isConsumable) {
-      // 对于消耗品，使用 DESTROY 交易类型
-      voucherService.destroyVoucher(request.voucherId, request.userId, request.userName);
-    } else {
-      // 非消耗品：通过 freeze 或记录 EXCHANGE 来标记
-      // 由于没有直接的 "REDEEM" 操作，我们将创建一个 TRANSFER 到游戏账户
-      voucherService.transferVoucher(
-        {
-          voucherId: request.voucherId,
-          toUserId: `game_${request.gameId}`,
-          toUserName: `${customData.gameId || request.gameId} 游戏`,
-          note: `兑换道具: ${voucher.metadata?.name || '未知'}`,
-        },
-        request.userId,
-        request.userName
-      );
-    }
+    // 统一标记凭证为已使用（REDEEMED），保留在用户记录中
+    voucherService.redeemVoucher(
+      request.voucherId,
+      request.userId,
+      request.userName,
+      `兑换道具: ${voucher.metadata?.name || '未知'} → ${customData.gameId}`
+    );
 
     // 更新购买记录
     const purchases = loadPurchases();
@@ -589,9 +655,7 @@ class VoucherItemService {
 
     return {
       success: true,
-      message: isConsumable
-        ? `已兑换 ${voucher.metadata?.name}，该道具凭证已消耗`
-        : `已兑换 ${voucher.metadata?.name}，该凭证已转入游戏账户`,
+      message: `已使用 ${voucher.metadata?.name}，该凭证已标记为已使用`,
       gameInfo,
     };
   }

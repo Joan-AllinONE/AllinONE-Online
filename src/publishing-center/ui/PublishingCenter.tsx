@@ -89,6 +89,8 @@ interface PublishingCenterProps {
   validator: StandardGameValidator;
   analyzer: GameCodeAnalyzer;
   recommender: SkillRecommender;
+  /** 当前用户信息（用于记录发布者） */
+  currentUser?: { id: string; username: string } | null;
   onPublishComplete?: (result: { 
     gameId: string; 
     url: string; 
@@ -200,6 +202,7 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
   validator,
   analyzer,
   recommender,
+  currentUser,
   onPublishComplete,
   onPublishError,
   preloadedFiles,
@@ -229,7 +232,7 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
   const [isLoadingTemplate, setIsLoadingTemplate] = useState(false);
   // 发布指南
   const [showGuide, setShowGuide] = useState(false);
-  const [guideTab, setGuideTab] = useState<'overview' | 'modes' | 'items' | 'faq'>('overview');
+  const [guideTab, setGuideTab] = useState<'overview' | 'modes' | 'items' | 'case' | 'faq'>('overview');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -515,6 +518,8 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
       const publishConfig: any = {
         gameId: config.gameId,
         gameType: GameType.STANDARD,
+        publisherId: currentUser?.id,
+        publisherName: currentUser?.username || currentUser?.nickname,
         protocolMode: protocolMode,
         analysisResult: analysisResult,
         skillRecommendations: recommendations?.recommendations.map(id => ({
@@ -1412,6 +1417,243 @@ AllinONE.onItemRedeemed(function(data) {
         </div>
       ),
     },
+    case: {
+      title: '实战案例',
+      icon: <Sparkles className="w-5 h-5" />,
+      content: (
+        <div className="space-y-5 text-sm text-gray-300 leading-relaxed">
+          <section className="p-4 bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/30 rounded-xl">
+            <h5 className="text-white font-bold mb-3 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-cyan-400" />
+              案例：消消乐 (Match3Game) 道具接入全流程
+            </h5>
+            <p className="text-gray-400">下面以消消乐游戏为例，展示如何让您的游戏道具接入平台。该游戏有 3 种道具（炸弹/闪电/彩虹），使用 <strong className="text-cyan-400">Mode A（注入模式）</strong>，零 SDK 依赖，纯 HTML/CSS/JS。</p>
+          </section>
+
+          <section>
+            <h5 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center text-xs font-bold">1</span>
+              在游戏中定义道具元数据
+            </h5>
+            <p className="mb-2">在游戏脚本顶部添加 <code className="px-1 py-0.5 bg-slate-700 rounded text-green-300">POWERUP_META</code> 常量——平台发布时会自动读取并创建商店商品：</p>
+            <pre className="p-3 bg-slate-900 rounded-lg text-xs text-green-300 overflow-x-auto">{`const POWERUP_META = {
+  bomb: {
+    itemId: 'match3_bomb',       // ← 与平台兑换码系统一致
+    effectType: 'bomb',
+    name: '💣 炸弹道具',
+    price: 50,
+    currency: 'gameCoins',
+    description: '消除 3×3 范围宝石',
+  },
+  lightning: { itemId: 'match3_lightning', name: '⚡ 闪电道具', ... },
+  rainbow:   { itemId: 'match3_rainbow',   name: '🌈 彩虹道具', ... },
+};`}</pre>
+          </section>
+
+          <section>
+            <h5 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center text-xs font-bold">2</span>
+              添加通信桥接层 (PlatformBridge)
+            </h5>
+            <p className="mb-2">添加极简桥接代码（~50 行），监听平台兑换成功后分发的 <code className="px-1 py-0.5 bg-slate-700 rounded text-cyan-300">allinone:item-redeemed</code> 事件：</p>
+            <pre className="p-3 bg-slate-900 rounded-lg text-xs text-cyan-300 overflow-x-auto">{`const PlatformBridge = (() => {
+  const ITEM_MAP = {
+    'match3_bomb': 'bomb',        // itemId → 游戏内道具类型
+    'match3_lightning': 'lightning',
+    'match3_rainbow': 'rainbow',
+  };
+
+  function onItemRedeemed(e) {
+    const puType = ITEM_MAP[e.detail?.itemId];
+    if (!puType) return;
+    gameStats.powerUps[puType]++;  // 本地计数 +1
+    updateUI();                     // 刷新界面
+  }
+
+  function init() {
+    // ⚠️ 关键：始终注册监听器
+    window.addEventListener('allinone:item-redeemed', onItemRedeemed);
+    // 独立模式赠送默认道具数量
+    if (!window.__ALLINONE_CONFIG__) {
+      gameStats.powerUps = { bomb: 2, lightning: 1, rainbow: 1 };
+    }
+    updateUI();
+  }
+  return { init };
+})();
+PlatformBridge.init();`}</pre>
+          </section>
+
+          <section>
+            <h5 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center text-xs font-bold">3</span>
+              避免 __ALLINONE_CONFIG__ 字面量
+            </h5>
+            <p className="mb-2">平台发布时检查 HTML 中是否已含 <code className="px-1 py-0.5 bg-slate-700 rounded">__ALLINONE_CONFIG__</code> 来决定是否注入配置。如果游戏代码中出现此字面量，注入会被跳过。</p>
+            <pre className="p-3 bg-slate-900 rounded-lg text-xs text-yellow-300 overflow-x-auto">{`// ✅ 正确：拆分字符串
+const CONFIG_KEY = '__ALL' + 'INONE_CONFIG__';
+
+// ❌ 错误：直接写完整字面量
+const CONFIG_KEY = '__ALLINONE_CONFIG__';`}</pre>
+          </section>
+
+          <section>
+            <h5 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center text-xs font-bold">4</span>
+              道具使用（纯本地操作）
+            </h5>
+            <p className="mb-2">道具使用只需本地扣除数量，不需要调用任何 API：</p>
+            <pre className="p-3 bg-slate-900 rounded-lg text-xs text-purple-300 overflow-x-auto">{`function usePowerUp(type) {
+  if (!gameStats.powerUps[type]) return;
+  gameStats.powerUps[type]--;  // 纯本地扣除
+  // ...执行道具效果...
+}`}</pre>
+          </section>
+
+          <section className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+            <h5 className="text-amber-400 font-semibold mb-2 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" />
+              常见陷阱（已踩过坑）
+            </h5>
+            <ul className="space-y-2 pl-2">
+              <li className="flex items-start gap-2">
+                <span className="text-red-400 mt-0.5">❌</span>
+                <span><strong className="text-white">不要用 fetch 调平台 API。</strong> 平台 Skill 系统运行在内存中，没有 HTTP 端点。唯一通信渠道是 <code className="px-1 py-0.5 bg-slate-700 rounded text-amber-300">allinone:item-redeemed</code> CustomEvent。</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-red-400 mt-0.5">❌</span>
+                <span><strong className="text-white">不要用 if(isPlatform) 守卫监听器。</strong> 在 IIFE 中检测 <code className="px-1 py-0.5 bg-slate-700 rounded text-amber-300">__ALLINONE_CONFIG__</code> 可能因时序问题得到 <code className="px-1 py-0.5 bg-slate-700 rounded text-amber-300">false</code>，导致监听器永不注册。始终注册即可。</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-red-400 mt-0.5">❌</span>
+                <span><strong className="text-white">不要同时监听两个事件名。</strong> SDK 同时分发 <code className="px-1 py-0.5 bg-slate-700 rounded text-amber-300">allinone:item-redeemed</code> 和 <code className="px-1 py-0.5 bg-slate-700 rounded text-amber-300">allinone-item-redeemed</code>，只监听一个即可，否则会重复计数。</span>
+              </li>
+            </ul>
+          </section>
+
+          {/* ===== 分隔线 + Mode B 案例 ===== */}
+          <div className="border-t border-slate-700/50 pt-5 mt-2">
+            <section className="p-4 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/30 rounded-xl">
+              <h5 className="text-white font-bold mb-3 flex items-center gap-2">
+                <Wand2 className="w-4 h-4 text-cyan-400" />
+                案例：ZUMA × Mode B（SDK 集成模式）
+              </h5>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div className="p-3 bg-slate-700/30 rounded-lg text-center">
+                  <div className="text-lg mb-1">🎮</div>
+                  <p className="text-white text-xs font-semibold">ZUMA 弹珠消除</p>
+                  <p className="text-gray-500 text-xs">22KB 单文件</p>
+                </div>
+                <div className="p-3 bg-slate-700/30 rounded-lg text-center">
+                  <div className="text-lg mb-1">🔧</div>
+                  <p className="text-cyan-400 text-xs font-semibold">Mode B</p>
+                  <p className="text-gray-500 text-xs">SDK 集成模式</p>
+                </div>
+                <div className="p-3 bg-slate-700/30 rounded-lg text-center">
+                  <div className="text-lg mb-1">🎁</div>
+                  <p className="text-white text-xs font-semibold">4 种道具</p>
+                  <p className="text-gray-500 text-xs">难度降低/分数翻倍/清除弹珠</p>
+                </div>
+              </div>
+              <p className="text-gray-400 text-xs leading-relaxed">与 Mode A 的区别：<strong className="text-cyan-400">游戏方通过 postMessage 自主控制效果</strong>，适合需要精确操控的深度游戏。</p>
+            </section>
+
+            <section className="mt-4">
+              <h5 className="text-white font-semibold mb-3">Mode B 集成步骤（5 步）</h5>
+              <div className="space-y-3">
+                {[
+                  ['1', '在 &lt;head&gt; 引入 SDK', '<code class="px-1 py-0.5 bg-slate-700 rounded text-blue-300">&lt;script src="https://cdn.allinone.game/sdk/v1/standard-sdk.js"&gt;&lt;/script&gt;</code>'],
+                  ['2', '定义道具 + 发送 PROTOCOL:READY', '声明 REDEEM_ITEMS，通过 postMessage 发送协议就绪信号'],
+                  ['3', '实现效果处理函数', '为每个 itemId 编写效果逻辑（如 g.moveSpeed *= 0.6 降低难度）'],
+                  ['4', '监听兑换事件', '监听 allinone-item-redeemed 和 REDEEM_RESULT 消息'],
+                  ['5', '打包单文件 ZIP 上传', '所有代码内联到一个 index.html，平台自动检测 SDK 选择 Mode B'],
+                ].map(([num, title, desc]) => (
+                  <div key={num} className="flex items-start gap-3">
+                    <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">{num}</span>
+                    <div><strong className="text-white text-xs">{title}</strong><p className="text-gray-400 text-xs mt-0.5" dangerouslySetInnerHTML={{__html: desc}} /></div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="mt-4 p-4 bg-red-500/5 border border-red-500/20 rounded-xl">
+              <h5 className="text-red-400 font-semibold mb-2 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4" />
+                ZUMA 案例踩过的坑（Mode B 专属）
+              </h5>
+              <div className="space-y-2 text-xs">
+                {[
+                  ['SDK 检测失败：上传后未被识别为 Mode B', 'StandardGameValidator 优先检查结构文件，不检测 SDK。修复：SDK 检测移到所有检查之前，扫描范围扩展为 .html。'],
+                  ['试玩时 JS/CSS 文件 404', '平台通过 iframe srcdoc 加载，外部文件引用必然 404。必须将所有 JS/CSS 内联到单个 index.html。'],
+                  ['SDK CDN 不可用 (ERR_NAME_NOT_RESOLVED)', 'cdn.allinone.game 是内部域名，本地不可用。SDK 加载失败不影响核心流程，Pipeline 自动注入协议桥接层。'],
+                ].map(([q, a]) => (
+                  <details key={q} className="group">
+                    <summary className="flex items-center gap-2 cursor-pointer text-gray-300 font-medium group-open:text-red-400">
+                      <ChevronDown className="w-3 h-3 transition-transform group-open:rotate-180" />
+                      {q}
+                    </summary>
+                    <p className="mt-2 pl-5 text-gray-400">{a}</p>
+                  </details>
+                ))}
+              </div>
+            </section>
+
+            <section className="mt-4 p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl">
+              <h5 className="text-blue-400 font-semibold mb-2 flex items-center gap-2">
+                <CheckCircle className="w-4 h-4" />
+                Mode A vs Mode B 选择指南
+              </h5>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="border-b border-slate-600">
+                    <th className="text-left py-2 px-2 text-gray-400">对比</th>
+                    <th className="text-left py-2 px-2 text-purple-400">Mode A（消消乐）</th>
+                    <th className="text-left py-2 px-2 text-cyan-400">Mode B（ZUMA）</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-slate-700/50">
+                    <tr><td className="py-1.5 px-2 text-gray-400">修改量</td><td className="py-1.5 px-2 text-white">~50 行 PlatformBridge</td><td className="py-1.5 px-2 text-white">~200 行集成脚本</td></tr>
+                    <tr><td className="py-1.5 px-2 text-gray-400">效果控制</td><td className="py-1.5 px-2 text-white">CustomEvent 计数</td><td className="py-1.5 px-2 text-white">游戏方自主控制</td></tr>
+                    <tr><td className="py-1.5 px-2 text-gray-400">适用场景</td><td className="py-1.5 px-2 text-white">快速发布、简单道具</td><td className="py-1.5 px-2 text-white">复杂效果、深度集成</td></tr>
+                    <tr><td className="py-1.5 px-2 text-gray-400">SDK 依赖</td><td className="py-1.5 px-2 text-white">无需引入</td><td className="py-1.5 px-2 text-white">需引入标准 SDK</td></tr>
+                    <tr><td className="py-1.5 px-2 text-gray-400">Schema 扩展</td><td className="py-1.5 px-2 text-white">不支持</td><td className="py-1.5 px-2 text-white">完整支持</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <section className="p-4 bg-green-500/5 border border-green-500/20 rounded-xl">
+            <h5 className="text-green-400 font-semibold mb-2 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4" />
+              让 AI 帮您自动适配
+            </h5>
+            <p className="mb-3">项目中已提供两份 AI 适配文档，选择对应模式复制给 AI 助手，附上游戏文件即可自动完成接入：</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <a
+                href="/docs/ai-game-integration-prompt.md"
+                download="ai-game-integration-prompt-mode-a.md"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg font-medium text-sm hover:from-purple-400 hover:to-pink-400 transition-all"
+              >
+                <Zap className="w-4 h-4" />
+                Mode A 适配文档
+              </a>
+              <a
+                href="/docs/ai-game-integration-prompt-mode-b.md"
+                download="ai-game-integration-prompt-mode-b.md"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg font-medium text-sm hover:from-cyan-400 hover:to-blue-400 transition-all"
+              >
+                <Wand2 className="w-4 h-4" />
+                Mode B 适配文档
+              </a>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              文件位置：<code className="px-1.5 py-0.5 bg-slate-700 rounded text-gray-300">docs/ai-game-integration-prompt.md</code> (Mode A) ｜ 
+              <code className="px-1.5 py-0.5 bg-slate-700 rounded text-gray-300">docs/ai-game-integration-prompt-mode-b.md</code> (Mode B)
+            </p>
+          </section>
+        </div>
+      ),
+    },
     faq: {
       title: '常见问题',
       icon: <HelpCircle className="w-5 h-5" />,
@@ -1945,7 +2187,7 @@ AllinONE.onItemRedeemed(function(data) {
             </div>
             {/* 标签页切换 */}
             <div className="flex items-center gap-1 p-3 border-b border-slate-700/50 flex-shrink-0 overflow-x-auto bg-slate-800/50">
-              {(['overview', 'modes', 'items', 'faq'] as const).map((tab) => (
+              {(['overview', 'modes', 'items', 'case', 'faq'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setGuideTab(tab)}

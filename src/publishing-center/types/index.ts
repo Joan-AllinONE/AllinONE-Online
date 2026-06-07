@@ -231,6 +231,8 @@ export interface StandardGameConfig {
     type: 'free' | 'paid' | 'freemium';
     price?: number;
     currency?: string;
+    /** 🆕 平台分成比例 (0-100)，默认 10 */
+    revenueSharePercent?: number;
   };
 }
 
@@ -280,6 +282,12 @@ export interface PublishingConfig {
   redeemItems?: RedeemItemConfig[];
   /** 协议模式: inject=注入适配(默认), integrated=标准集成, hybrid=混合 */
   protocolMode?: ProtocolMode;
+  /** 🆕 发布者用户ID */
+  publisherId?: string;
+  /** 🆕 发布者名称 */
+  publisherName?: string;
+  /** 🆕 平台分成比例 (0-100)，默认 10 */
+  revenueSharePercent?: number;
 }
 
 export interface PublishResult {

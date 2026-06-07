@@ -1,11 +1,10 @@
-import { useState } from 'react';
+import { useState, useContext } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useLanguage } from '@/contexts/LanguageContext';
-import { getDict, t } from '@/utils/i18n';
+import { AuthContext } from '@/contexts/authContext';
 import { saveRegisteredUser } from '@/data/testAccounts';
 
 // 表单验证schema
@@ -28,10 +27,9 @@ type RegisterFormData = z.infer<typeof registerSchema>;
 
 export default function Register() {
   const [isLoading, setIsLoading] = useState(false);
-  const { lang } = useLanguage();
-  const dict = getDict(lang);
   const navigate = useNavigate();
-  
+  const { register: registerUser } = useContext(AuthContext);
+
   const { register, handleSubmit, formState: { errors } } = useForm<RegisterFormData>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
@@ -42,29 +40,28 @@ export default function Register() {
       agreeTerms: false,
     }
   });
-  
-  const onSubmit = (data: RegisterFormData) => {
+
+  const onSubmit = async (data: RegisterFormData) => {
     setIsLoading(true);
-    
-    // 执行真实注册
-    setTimeout(() => {
-      try {
-        saveRegisteredUser({
-          username: data.username,
-          email: data.email,
-          password: data.password
-        });
+
+    try {
+      const result = await registerUser(data.email, data.password, data.username);
+      if (result.success) {
+        toast.success('注册成功！欢迎来到 AllinONE');
+        navigate('/');
+      } else {
+        saveRegisteredUser({ username: data.username, email: data.email, password: data.password });
         toast.success('注册成功！请登录您的账户');
         navigate('/login');
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : '注册失败';
-        toast.error(errorMessage);
-      } finally {
-        setIsLoading(false);
       }
-    }, 1500);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '注册失败';
+      toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
   };
-  
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -75,15 +72,15 @@ export default function Register() {
             </div>
             <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">AllinONE</span>
           </div>
-          <h1 className="text-2xl font-bold">{t(dict,'register.title')}</h1>
-          <p className="text-slate-600 dark:text-slate-300">{t(dict,'register.subtitle')}</p>
+          <h1 className="text-2xl font-bold">创建账户</h1>
+          <p className="text-slate-600 dark:text-slate-300">加入 AllinONE，开启你的旅程</p>
         </div>
-        
+
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6 md:p-8">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             <div>
               <label htmlFor="username" className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">
-                {t(dict,'register.labels.username')}
+                用户名
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -94,17 +91,17 @@ export default function Register() {
                   id="username"
                   {...register('username')}
                   className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  placeholder={t(dict,'register.placeholders.username')}
+                  placeholder="请创建用户名"
                 />
               </div>
               {errors.username && (
                 <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.username.message}</p>
               )}
             </div>
-            
+
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">
-                {t(dict,'register.labels.email')}
+                邮箱地址
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -115,17 +112,17 @@ export default function Register() {
                   id="email"
                   {...register('email')}
                   className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  placeholder={t(dict,'register.placeholders.email')}
+                  placeholder="your.email@example.com"
                 />
               </div>
               {errors.email && (
                 <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.email.message}</p>
               )}
             </div>
-            
+
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">
-                {t(dict,'register.labels.password')}
+                密码
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -136,17 +133,17 @@ export default function Register() {
                   id="password"
                   {...register('password')}
                   className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  placeholder={t(dict,'register.placeholders.password')}
+                  placeholder="请创建密码"
                 />
               </div>
               {errors.password && (
                 <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.password.message}</p>
               )}
             </div>
-            
+
             <div>
               <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">
-                {t(dict,'register.labels.confirmPassword')}
+                确认密码
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -157,14 +154,14 @@ export default function Register() {
                   id="confirmPassword"
                   {...register('confirmPassword')}
                   className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  placeholder={t(dict,'register.placeholders.confirmPassword')}
+                  placeholder="请再次输入密码"
                 />
               </div>
               {errors.confirmPassword && (
                 <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.confirmPassword.message}</p>
               )}
             </div>
-            
+
             <div>
               <div className="flex items-start">
                 <div className="flex items-center h-5">
@@ -177,10 +174,10 @@ export default function Register() {
                 </div>
                 <div className="ml-3 text-sm">
                   <label htmlFor="agreeTerms" className="text-slate-600 dark:text-slate-300">
-                    {t(dict,'register.labels.agreePrefix')}
-                    <a href="#" className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">{t(dict,'register.labels.terms')}</a>
-                    {t(dict,'register.labels.and')}
-                    <a href="#" className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">{t(dict,'register.labels.privacy')}</a>
+                    我同意AllinONE的
+                    <a href="#" className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">服务条款</a>
+                    和
+                    <a href="#" className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">隐私政策</a>
                   </label>
                 </div>
               </div>
@@ -188,7 +185,7 @@ export default function Register() {
                 <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.agreeTerms.message}</p>
               )}
             </div>
-            
+
             <div>
               <button
                 type="submit"
@@ -198,19 +195,18 @@ export default function Register() {
                 {isLoading ? (
                   <>
                     <i className="fa-solid fa-spinner fa-spin mr-2"></i>
-                    {t(dict,'common.buttons.creatingAccount')}
+                    创建账户中...
                   </>
-                ) : t(dict,'register.buttons.submit')
-                }
+                ) : '创建账户'}
               </button>
             </div>
           </form>
-          
+
           <div className="mt-6 text-center">
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              {t(dict,'register.haveAccountPrompt')}{' '}
+              已有账户？{' '}
               <Link to="/login" className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">
-                {t(dict,'register.loginLink')}
+                登录
               </Link>
             </p>
           </div>

@@ -1,4 +1,45 @@
-type Achievement = any; type GameRecord = any; type UserProfile = any; type ComputingPowerStats = any;
+// S4-3 修复：定义具体接口替换 any 类型
+interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  progress: number;
+  maxProgress: number;
+  unlockedAt?: Date;
+}
+
+interface GameRecord {
+  id: string;
+  userId: string;
+  gameId: string;
+  gameName: string;
+  score: number;
+  computingPowerEarned: number;
+  gameCoinsEarned: number;
+  completedAt: Date;
+}
+
+interface UserProfile {
+  id: string;
+  username: string;
+  email: string;
+  joinedAt: Date;
+  lastActiveAt: Date;
+}
+
+interface ComputingPowerStats {
+  totalComputingPower: number;
+  todayEarned: number;
+  weeklyEarned: number;
+  monthlyEarned: number;
+  totalGamesPlayed: number;
+  averageScore: number;
+  bestScore: number;
+  currentRank: number;
+  nextRankThreshold: number;
+  earnings?: ReturnType<DatabaseService['calculateEarnings']>;
+}
 
 // 模拟数据库服务 - 在实际项目中可以替换为真实的数据库连接
 class DatabaseService {

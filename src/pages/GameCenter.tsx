@@ -1,9 +1,6 @@
 import { useState, useCallback, useEffect, useContext } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useLanguage } from '@/contexts/LanguageContext';
-import { getDict, t } from '@/utils/i18n';
-const crossPlatformAuthService = {} as any;
 import { getPublishedGames, type PublishedGame } from '@/services/publishedGameService';
 import { platformBindingService, GameType, type PlatformBindingConfig } from '@/voucher-system';
 import { AuthContext } from '@/contexts/authContext';
@@ -26,16 +23,6 @@ interface GameCard {
 }
 
 const games: GameCard[] = [
-  {
-    id: 'match3',
-    name: '消消乐',
-    description: '经典三消游戏，消除相同颜色的方块获得算力奖励',
-    icon: 'fa-solid fa-gem',
-    difficulty: 'easy',
-    rewards: { computingPower: 50, gameCoins: 50 },
-    players: 1234,
-    status: 'available'
-  },
   {
     id: 'newday',
     name: 'New Day',
@@ -104,8 +91,6 @@ const statusText = {
 };
 
 export default function GameCenter() {
-  const { lang } = useLanguage();
-  const dict = getDict(lang);
   const { currentUser } = useContext(AuthContext);
   const [publishedGames, setPublishedGames] = useState<GameCard[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -180,24 +165,7 @@ export default function GameCenter() {
    * 生成带自动登录参数的游戏 URL
    */
   const getAutoLoginUrl = useCallback((baseUrl: string): string => {
-    // 获取当前登录用户信息
-    const user = crossPlatformAuthService.getCurrentUser();
-    const token = crossPlatformAuthService.getNewDayToken();
-
-    if (!user || !token) {
-      console.warn('⚠️ 用户未登录或没有 New Day token，无法自动登录');
-      return baseUrl;
-    }
-
-    // 构建带登录参数的 URL
-    const url = new URL(baseUrl);
-    url.searchParams.set('autoLogin', 'true');
-    url.searchParams.set('token', token);
-    url.searchParams.set('userId', user.userId);
-    url.searchParams.set('username', user.username);
-
-    console.log('🔗 生成自动登录 URL:', url.toString());
-    return url.toString();
+    return baseUrl;
   }, []);
 
   /**
@@ -361,7 +329,7 @@ export default function GameCenter() {
                 <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">AllinONE</span>
               </Link>
               <div className="hidden md:block w-px h-6 bg-slate-300 dark:bg-slate-600"></div>
-              <h1 className="hidden md:block text-lg font-semibold text-slate-700 dark:text-slate-200">{t(dict, 'gameCenter.header.title')}</h1>
+              <h1 className="hidden md:block text-lg font-semibold text-slate-700 dark:text-slate-200">游戏中心</h1>
             </div>
             
             <div className="flex items-center gap-4">
@@ -374,11 +342,11 @@ export default function GameCenter() {
               </Link>
               <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                 <i className="fa-solid fa-coins text-yellow-500"></i>
-                <span>{t(dict, 'gameCenter.header.networkPower')} <span className="font-semibold text-blue-600 dark:text-blue-400">1,234</span></span>
+                <span>全网算力: <span className="font-semibold text-blue-600 dark:text-blue-400">1,234</span></span>
               </div>
               <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                 <i className="fa-solid fa-gem text-purple-500"></i>
-                <span>{t(dict, 'gameCenter.header.networkGameCoins')} <span className="font-semibold text-purple-600 dark:text-purple-400">5,678</span></span>
+                <span>全网游戏币: <span className="font-semibold text-purple-600 dark:text-purple-400">5,678</span></span>
               </div>
             </div>
           </div>
@@ -399,7 +367,7 @@ export default function GameCenter() {
               </div>
               <div>
                 <div className="text-2xl font-bold text-slate-900 dark:text-white">12</div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">{t(dict, 'gameCenter.stats.todaySessions')}</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">今日游戏次数</div>
               </div>
             </div>
           </motion.div>
@@ -416,7 +384,7 @@ export default function GameCenter() {
               </div>
               <div>
                 <div className="text-2xl font-bold text-slate-900 dark:text-white">856</div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">{t(dict, 'gameCenter.stats.todayComputingPower')}</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">今日获得算力</div>
               </div>
             </div>
           </motion.div>
@@ -433,7 +401,7 @@ export default function GameCenter() {
               </div>
               <div>
                 <div className="text-2xl font-bold text-slate-900 dark:text-white">4.8</div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">{t(dict, 'gameCenter.stats.avgRating')}</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">平均游戏评分</div>
               </div>
             </div>
           </motion.div>
@@ -450,7 +418,7 @@ export default function GameCenter() {
               </div>
               <div>
                 <div className="text-2xl font-bold text-slate-900 dark:text-white">7</div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">{t(dict, 'gameCenter.stats.streakDays')}</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">连续游戏天数</div>
               </div>
             </div>
           </motion.div>
@@ -475,16 +443,16 @@ export default function GameCenter() {
                   </div>
                   <div className="flex flex-col gap-2">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[game.status]}`}>
-                      {t(dict, `gameCenter.status.${game.status === 'coming-soon' ? 'comingSoon' : game.status}`)}
+                      {game.status === 'coming-soon' ? statusText['coming-soon'] : statusText[game.status]}
                     </span>
                   </div>
                 </div>
                 
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-                  {game.isPublished ? game.name : t(dict, `gameCenter.games.${game.id}.name`)}
+                  {game.name}
                 </h3>
                 <p className="text-slate-600 dark:text-slate-300 text-sm mb-4 line-clamp-2">
-                  {game.isPublished ? game.description : t(dict, `gameCenter.games.${game.id}.desc`)}
+                  {game.description}
                 </p>
                 {game.isPublished && (
                   <span className="inline-block px-2 py-1 mb-2 text-xs font-medium text-purple-600 bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400 rounded-full">
@@ -534,14 +502,14 @@ export default function GameCenter() {
                           onClick={() => handleExternalGameClick(game)}
                           className="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-center py-2 px-4 rounded-lg font-medium transition-colors"
                         >
-                          {t(dict, 'gameCenter.buttons.start')}
+                          开始游戏
                         </button>
                       ) : (
                         <Link
                           to={`/game/${game.id}`}
                           className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-center py-2 px-4 rounded-lg font-medium transition-colors"
                         >
-                          {t(dict, 'gameCenter.buttons.start')}
+                          开始游戏
                         </Link>
                       )}
                     </>
@@ -550,7 +518,7 @@ export default function GameCenter() {
                       disabled
                       className="flex-1 bg-slate-300 dark:bg-slate-600 text-slate-500 dark:text-slate-400 text-center py-2 px-4 rounded-lg font-medium cursor-not-allowed"
                     >
-                      {game.status === 'coming-soon' ? t(dict, 'gameCenter.buttons.comingSoon') : t(dict, 'gameCenter.buttons.maintenance')}
+                      {game.status === 'coming-soon' ? '敬请期待' : '维护中'}
                     </button>
                   )}
                   <button className="px-4 py-2 border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">

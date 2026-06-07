@@ -39,6 +39,13 @@ export class VoucherDatabase {
   private transactionCache: Map<string, Transaction> = new Map();
   private cacheInitialized = false;
 
+  // 🔒 S3-4 修复：脏标记 + 批量持久化（减少 localStorage 写入频率）
+  private voucherDirty = false;
+  private transactionDirty = false;
+  private indexDirty = false;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly PERSIST_DELAY = 500; // 500ms 批量窗口
+
   private constructor() {
     this.initCache();
   }
@@ -84,32 +91,82 @@ export class VoucherDatabase {
       }
 
       this.cacheInitialized = true;
+      this.initCloudBaseSync().catch(() => {});
     } catch (error) {
       console.error('[VoucherDatabase] 缓存初始化失败:', error);
     }
   }
 
   /**
-   * 持久化凭证数据（模拟事务提交）
+   * 调度批量持久化（S3-4：500ms 窗口合并多次写入）
    */
-  private persistVouchers(): void {
+  private schedulePersist(): void {
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.flush();
+      this.persistTimer = null;
+    }, this.PERSIST_DELAY);
+  }
+
+  /**
+   * 立即刷新所有脏数据到 localStorage
+   */
+  private flush(): void {
+    if (this.voucherDirty) this._persistVouchers();
+    if (this.transactionDirty) this._persistTransactions();
+    if (this.indexDirty) this._persistIndex();
+  }
+
+  /**
+   * 持久化凭证数据（内部实现）
+   */
+  private _persistVouchers(): void {
     if (typeof window === 'undefined') return;
 
     const vouchers = Array.from(this.voucherCache.values());
     localStorage.setItem(STORAGE_KEYS.VOUCHERS, JSON.stringify(vouchers));
+    this.syncVouchersToCloud();
+    this.voucherDirty = false;
 
-    // 更新索引
-    this.updateHolderIndex();
+    // 标记索引需更新（延迟执行）
+    this.indexDirty = true;
   }
 
   /**
-   * 持久化交易数据
+   * 持久化交易数据（内部实现，S3-4）
    */
-  private persistTransactions(): void {
+  private _persistTransactions(): void {
     if (typeof window === 'undefined') return;
 
     const transactions = Array.from(this.transactionCache.values());
     localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
+    this.syncTransactionsToCloud();
+    this.transactionDirty = false;
+  }
+
+  /**
+   * 持久化索引数据（S3-4）
+   */
+  private _persistIndex(): void {
+    if (typeof window === 'undefined') return;
+    this.updateHolderIndex();
+    this.indexDirty = false;
+  }
+
+  /**
+   * 持久化交易数据（旧接口，通过 schedulePersist 批量写入）
+   */
+  private persistTransactions(): void {
+    this.transactionDirty = true;
+    this.schedulePersist();
+  }
+
+  /**
+   * 持久化凭证数据（旧接口，通过 schedulePersist 批量写入）
+   */
+  private persistVouchers(): void {
+    this.voucherDirty = true;
+    this.schedulePersist();
   }
 
   /**
@@ -492,6 +549,77 @@ export class VoucherDatabase {
    */
   getRemainingCapacity(): number {
     return SYSTEM_CAPACITY - this.voucherCache.size;
+  }
+
+  // ==================== CloudBase 双写 ====================
+
+  private syncVouchersToCloud(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      import('../../services/cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+        if (!isCloudBaseReady()) return;
+        const db = getCloudBaseApp().database();
+        const vouchers = Array.from(this.voucherCache.values());
+        for (const v of vouchers.slice(-20)) {
+          db.collection('vouchers').where({ id: v.id }).get().then(res => {
+            if (res.data.length > 0) {
+              db.collection('vouchers').doc(res.data[0]._id).update(v as any).catch(() => {});
+            } else {
+              db.collection('vouchers').add(v as any).catch(() => {});
+            }
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    } catch { /* ignore */ }
+  }
+
+  private syncTransactionsToCloud(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      import('../../services/cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+        if (!isCloudBaseReady()) return;
+        const db = getCloudBaseApp().database();
+        const txs = Array.from(this.transactionCache.values());
+        for (const tx of txs.slice(-20)) {
+          db.collection('voucher_transactions').where({ id: tx.id }).get().then(res => {
+            if (res.data.length > 0) {
+              db.collection('voucher_transactions').doc(res.data[0]._id).update(tx as any).catch(() => {});
+            } else {
+              db.collection('voucher_transactions').add(tx as any).catch(() => {});
+            }
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    } catch { /* ignore */ }
+  }
+
+  async syncFromCloudBase(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      const { isCloudBaseReady, getCloudBaseApp } = await import('../../services/cloudbase');
+      if (!isCloudBaseReady()) return;
+      const db = getCloudBaseApp().database();
+      const vRes = await db.collection('vouchers').limit(500).get();
+      for (const doc of vRes.data) {
+        if (!this.voucherCache.has(doc.id)) {
+          this.voucherCache.set(doc.id, doc as any);
+        }
+      }
+      const tRes = await db.collection('voucher_transactions').limit(500).get();
+      for (const doc of tRes.data) {
+        if (!this.transactionCache.has(doc.id)) {
+          this.transactionCache.set(doc.id, doc as any);
+        }
+      }
+      if (vRes.data.length > 0 || tRes.data.length > 0) {
+        this.persistVouchers();
+        this.persistTransactions();
+      }
+    } catch { /* ignore */ }
+  }
+
+  private async initCloudBaseSync(): Promise<void> {
+    await this.syncFromCloudBase();
   }
 }
 

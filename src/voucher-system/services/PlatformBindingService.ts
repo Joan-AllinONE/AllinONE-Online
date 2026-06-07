@@ -16,6 +16,7 @@ import type {
 } from '../types/platform';
 import { PRESET_GAMES, GameType } from '../types/platform';
 import { voucherService } from './VoucherService';
+import { VoucherStatus } from '../types';
 import { voucherRuleEngine } from '../engine/RuleEngine';
 import type { DistributionRule, RecycleRule, ExchangeRate, VoucherRules } from '../types';
 import { PLATFORM_CURRENCY_TEMPLATE } from '../templates';
@@ -666,6 +667,10 @@ export class PlatformBindingService {
       this.saveToStorage();
 
       console.log('[PlatformBindingService] 简单奖励发放成功:', record);
+
+      // 通知钱包刷新凭证余额
+      window.dispatchEvent(new CustomEvent('wallet-updated', { detail: { userId } }));
+
       return { success: true, record };
     } catch (error) {
       console.error('[PlatformBindingService] 简单奖励发放失败:', error);
@@ -819,8 +824,10 @@ export class PlatformBindingService {
   }
 
   /**
-   * 向平台奖池充值（显式铸币）
-   * 在奖池中创建凭证，供后续游戏奖励分发使用
+   * 🏦 向平台奖池划拨凭证（从平台库存 transfer，而非铸币）
+   *
+   * 从 platform_pool（平台总账户）中转移已有凭证到 SYSTEM（平台奖池），
+   * 供后续游戏奖励分发使用。不创建新凭证——凭证总量不变，仅改变持有者。
    */
   fundSystemPool(
     amount: number,
@@ -831,40 +838,49 @@ export class PlatformBindingService {
     note?: string
   ): { success: boolean; created: number; totalAmount: number; error?: string } {
     try {
-      let created = 0;
-      let totalAmount = 0;
+      // 1. 从 platform_pool 获取指定面额的可用凭证
+      const poolVouchers = voucherService.getUserVouchers('platform_pool')
+        .filter(v => v.status === VoucherStatus.ACTIVE && v.denomination === denomination);
 
-      for (let i = 0; i < count; i++) {
-        const voucher = voucherService.createVoucher(
-          {
-            denomination,
-            recipientId: 'SYSTEM',
-            recipientName: '平台奖池',
-            metadata: {
-              name: '平台奖池充值',
-              description: note || `平台奖池充值 - ${denomination}A币 x${count}`,
-              category: 'pool_funding',
-              issuer: 'platform',
-            },
-            note: note || `平台奖池充值: ${operatorName} 充值 ${denomination}A币`,
-          },
-          operatorId,
-          operatorName
-        );
-        created++;
-        totalAmount += voucher.denomination;
+      if (poolVouchers.length < count) {
+        return {
+          success: false,
+          created: 0,
+          totalAmount: 0,
+          error: `平台库存不足：需要 ${count} 张面额 ${denomination} A币，实际可用 ${poolVouchers.length} 张。（请先通过平台管理→商店管理确保障证库存充足，或联系管理员向 platform_pool 注入凭证）`,
+        };
       }
 
-      console.log(`[PlatformBindingService] 平台奖池充值成功: ${totalAmount}A币 (${created}张), 操作者: ${operatorName}`);
-      return { success: true, created, totalAmount };
+      // 2. 按需划拨（贪心取前 count 张）
+      let transferred = 0;
+      let totalAmount = 0;
+      const toTransfer = poolVouchers.slice(0, count);
+
+      for (const v of toTransfer) {
+        voucherService.transferVoucher(
+          {
+            voucherId: v.id,
+            toUserId: 'SYSTEM',
+            toUserName: '平台奖池',
+            note: note || `平台库存划拨至奖池: ${denomination}A币 (操作者: ${operatorName})`,
+          },
+          'platform_pool',
+          '平台总账户'
+        );
+        transferred++;
+        totalAmount += v.denomination;
+      }
+
+      console.log(`[PlatformBindingService] 奖池划拨成功: ${totalAmount}A币 (${transferred}张), 操作者: ${operatorName}`);
+      return { success: true, created: transferred, totalAmount };
     } catch (error) {
-      console.error('[PlatformBindingService] 平台奖池充值失败:', error);
+      console.error('[PlatformBindingService] 奖池划拨失败:', error);
       return { success: false, created: 0, totalAmount: 0, error: String(error) };
     }
   }
 
   /**
-   * 清空平台奖池（管理功能）
+   * 🔙 清空平台奖池（划拨回 platform_pool，而非销毁）
    */
   clearSystemPool(operatorId: string, operatorName: string): { success: boolean; clearedCount: number } {
     const systemVouchers = voucherService.filterVouchers({
@@ -875,14 +891,23 @@ export class PlatformBindingService {
     let clearedCount = 0;
     for (const v of systemVouchers) {
       try {
-        voucherService.destroyVoucher(v.id, operatorId, operatorName, '平台奖池清空');
+        voucherService.transferVoucher(
+          {
+            voucherId: v.id,
+            toUserId: 'platform_pool',
+            toUserName: '平台总账户',
+            note: `奖池回收: ${operatorName} 清空奖池，凭证回库`,
+          },
+          'SYSTEM',
+          '平台奖池'
+        );
         clearedCount++;
       } catch (e) {
-        console.warn(`[PlatformBindingService] 销毁凭证失败: ${v.id}`, e);
+        console.warn(`[PlatformBindingService] 回收凭证失败: ${v.id}`, e);
       }
     }
 
-    console.log(`[PlatformBindingService] 平台奖池已清空: ${clearedCount}张凭证, 操作者: ${operatorName}`);
+    console.log(`[PlatformBindingService] 奖池已清空: ${clearedCount}张凭证回收至 platform_pool, 操作者: ${operatorName}`);
     return { success: true, clearedCount };
   }
 

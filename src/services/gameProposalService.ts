@@ -20,9 +20,7 @@ import type {
   PenaltyLog,
   PlayerMetrics,
 } from '@/types/gameProposal';
-const generateSimulatedPlayers = (() => []) as any;
-const generatePlayerMetrics = (() => ({})) as any;
-const calculateVoteWeight = (() => 1) as any;
+import { generateSimulatedPlayers, generatePlayerMetrics, calculateVoteWeight } from '@/data/simulatedPlayers';
 import { voteVoucherService } from '@/voucher-system/services/VoteVoucherService';
 import { voteFraudDetector } from '@/voucher-system/services/VoteFraudDetector';
 import { VoteSettlementStatus } from '@/voucher-system/types/vote';
@@ -54,6 +52,20 @@ function loadProposals(): GameProposal[] {
 
 function saveProposals(proposals: GameProposal[]): void {
   localStorage.setItem(PROPOSALS_STORAGE_KEY, JSON.stringify(proposals));
+  // CloudBase 双写
+  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+    if (!isCloudBaseReady()) return;
+    const db = getCloudBaseApp().database();
+    for (const proposal of proposals.slice(-10)) {
+      db.collection('proposals').where({ id: proposal.id }).get().then(res => {
+        if (res.data.length > 0) {
+          db.collection('proposals').doc(res.data[0]._id).update(proposal as any).catch(() => {});
+        } else {
+          db.collection('proposals').add(proposal as any).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+  }).catch(() => {});
 }
 
 function loadThresholds(): Record<string, GameVoteThreshold> {

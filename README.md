@@ -38,74 +38,81 @@ AllinONE 是一个面向游戏与社区生态的综合平台，提供平台管�
 
 ## 技术栈
 
-- 前端框架：React 18、React Router
-- 构建工具：Vite 6、TypeScript、PostCSS、Tailwind CSS
-- 动效与表单：Framer Motion、React Hook Form、Zod
-- UI 资源：Font Awesome
-- 数据与事件：localStorage、CustomEvent（钱包/分红更新通知）
+### 前端
+- React 18 / React Router 7 / TypeScript 5.7
+- Vite 6 / Tailwind CSS 3 / PostCSS
+- shadcn/ui 组件 + Lucide Icons
+- Framer Motion / React Hook Form / Zod / Recharts
+
+### 后端
+- Express 4.21 / JWT 认证 / Helmet 安全头
+- PostgreSQL (生产) / 内存数据库 (开发)
+- pino 结构化日志 / prom-client 监控
+- CloudBase CloudRun 部署
+
+### 测试
+- Vitest + jsdom
+- 22 个 P0 核心测试（兑换码/凭证支付/凭证服务）
+- GitHub Actions CI 流水线
+
+### 安全
+- CORS 白名单 / 速率限制 / JWT Bearer Token
+- mathjs 沙箱公式求值（替代 eval）
+- Helmet 安全头 / 日志脱敏 / 错误净化
 
 ## 运行与构建
 
 ### 环境要求
-- Node.js 18+
-- pnpm（推荐）
+- Node.js 20+
+- pnpm 10+
 
 ### 安装与开发
 ```bash
 pnpm install
-pnpm dev           # 或 pnpm dev:client (vite --host --port 3000)
-# 访问 http://localhost:3000
+pnpm dev           # 并行启动 server.js + Vite dev server
+# 前端: http://localhost:3001
+# API: http://localhost:3000/api/v1
 ```
 
 ### 构建
-项目已适配 Windows / macOS / Linux 的跨平台构建脚本：
 ```bash
-pnpm build         # 清理 dist、构建到 dist/static、复制 package.json、生成 build.flag
-# 产物位于 dist/static
+pnpm build         # 编译 server TS → dist/server + Vite 构建前端 → dist/static
+pnpm build:server  # 仅编译后端 TypeScript
+pnpm build:client  # 仅构建前端
 ```
 
-如需仅构建前端静态资源：
+### 测试
 ```bash
-pnpm build:client  # 仅执行 vite build --outDir dist/static
+pnpm test          # 运行全部测试
+pnpm test:watch    # 监听模式
+pnpm test:coverage # 生成覆盖率报告
 ```
 
-## 部署流程
+### 环境变量
+参考 `.env.example`，关键变量：
+- `JWT_SECRET` — 生产环境必须设置
+- `USE_MEMORY_DB` — 开发用 `true`，生产用 `false`
+- `CORS_ORIGIN` — CORS 白名单域名
+- `LOG_LEVEL` — `debug` | `info` | `warn` | `error`
 
-本项目为纯前端静态站点，构建后可直接托管到任意静态资源服务。
+## 部署
 
-- 本地/简易静态部署
-  1. 执行 `pnpm build`
-  2. 将 `dist/static` 目录内容复制到服务器的站点目录（如 `C:/inetpub/wwwroot` 或 `/var/www/html`）
-  3. 用任意静态服务器（如 `npx serve dist/static`）或 IIS/Apache/Node 静态服务启动
+### CloudBase (推荐)
+1. 配置 `cloudbase.json` 中的 `envId` 和环境参数
+2. 构建并部署：
+```bash
+pnpm build
+tcb cloudrun deploy
+```
 
-- Nginx 部署（Linux 示例）
-  ```
-  server {
-    listen 80;
-    server_name your.domain.com;
-    root /var/www/allinone/dist/static;
-    index index.html;
-    location / {
-      try_files $uri $uri/ /index.html;
-    }
-    # 如有 API，配置反向代理到后端
-    # location /api/ { proxy_pass http://localhost:3001/; }
-  }
-  ```
-  1. 将 `dist/static` 上传到 `/var/www/allinone/dist/static`
-  2. 重载 Nginx：`sudo nginx -s reload`
+### Docker
+```bash
+docker build -t allinone-gaming .
+docker run -p 3000:3000 -e JWT_SECRET=xxx -e USE_MEMORY_DB=false allinone-gaming
+```
 
-- GitHub Pages
-  1. 将 `dist/static` 内容推送到仓库的 `gh-pages` 分支根目录
-  2. 在仓库 Settings -> Pages 选择 `gh-pages` 分支作为来源
-
-- Vercel/Netlify
-  1. 连接仓库，设置构建命令 `pnpm build:client`，输出目录 `dist/static`
-  2. 一键部署并获得托管域名
-
-- 可选后端 API
-  - `src/services/realWalletService.ts` 中使用 `window.REACT_APP_API_URL || 'http://localhost:3001/api'` 作为真实 API 基址
-  - 如需启用，请将后端部署到对应地址，并在页面注入全局变量 `REACT_APP_API_URL` 或修改服务配置
+## API 文档
+详见 [docs/api.md](docs/api.md)
 
 ## 截图目录约定
 
@@ -121,55 +128,61 @@ pnpm build:client  # 仅执行 vite build --outDir dist/static
 
 ```
 src/
-  components/platform/       # 平台管理相关 UI 组件
-  contexts/                  # 全局上下文（平台管理等）
-  data/                      # 演示/模拟数据
-  hooks/                     # 自定义钩子（钱包等）
-  pages/                     # 页面（PlatformManagement, FundPool, GamePersonalCenter 等）
-  services/                  # 核心业务服务（钱包、资金池、分红、市场、商店、期权等）
-  types/                     # 类型定义
-  utils/                     # 工具函数（重复交易清理等）
+  server/                    # 后端服务
+    auth/jwt.ts              # JWT 认证模块
+    routes/                  # API 路由（health/inventory/redeem）
+    logger.ts                # pino 结构化日志
+    requestId.ts             # Request ID 中间件
+    metrics.ts               # Prometheus metrics
+    memoryDatabase.ts        # 内存数据库适配器
+    redeemCodeStore.ts       # 兑换码存储（含双花防护）
+  services/                  # 核心业务服务
+    voucherPaymentService.ts # A币支付（含并发锁）
+    gameDeveloperService.ts  # 游戏商账户 + 每日结算（幂等）
+    marketplaceService.ts    # 交易市场
+  voucher-system/            # 凭证系统
+    services/VoucherService.ts
+    storage/VoucherDatabase.ts
+  skills/                    # Skill 插件引擎
+    auth/ wallet/ inventory/ store/ voucher/ proposal/ game-connector/
+  components/ pages/ hooks/ contexts/ types/ utils/
 
 顶层：
-  package.json               # 脚本与依赖
-  vite.config.ts             # Vite 配置
-  tailwind.config.js         # Tailwind 配置
-  index.html                 # 入口模板
-  docs/screenshots/          # 截图与文档素材（建议创建）
+  server.js                  # Express 入口（S4 精简至 ~290 行）
+  Dockerfile                 # 多阶段构建 + 非 root 用户
+  vitest.config.ts           # 测试配置
+  tsconfig.server.json       # 服务端 TS 编译
+  .github/workflows/test.yml # CI 流水线
+  docs/api.md                # API 文档
+  docs/adr/                  # 架构决策记录 (×5)
+  docs/runbooks/             # 运维 Runbook (×3)
 ```
 
-## 核心模块说明
+## 安全基线
 
-- src/services/walletService.ts
-  - 本地存储键：`wallet_data`
-  - 交易入账 `addTransaction`：统一更新余额、统计、总价值
-  - 幂等保护：`distributeCashDividend(periodId)` 对同一分红周期（`relatedId=periodId`、`category=dividend`）仅入账一次
-  - 期权解禁与事件通知：触发 `wallet-updated` 事件供 UI 刷新
+| 措施 | 实现 |
+|------|------|
+| JWT 认证 | `authMiddleware` 阻断无效/过期 token |
+| CORS 白名单 | 仅允许 CloudBase 域名 + localhost |
+| 速率限制 | 通用 100req/15min + 兑换码 10req/min |
+| eval 移除 | `new Function()` → `mathjs.evaluate()` 沙箱 |
+| Helmet | X-Content-Type-Options, X-Frame-Options, CSP |
+| 日志脱敏 | pino 结构化日志，不输出 token/userId 原文 |
+| 错误净化 | 生产环境不暴露 error.message 详情 |
 
-- src/services/dividendWeightService.ts
-  - 权重计算：基于历史绩效（衰减因子、可配置权重）
-  - 记录存储键：`dividend_weights` / `dividend_records`
-  - 去重逻辑：
-    - 保存权重/分红记录时同一 `userId+periodId` 覆盖旧值
-    - 执行分红前按用户与最新 `calculationDate` 去重，再循环发放
-  - 事件通知：`dividend-weights-calculated` / `cash-dividend-distributed`
+## 数据可靠性
 
-- src/services/fundPoolService.ts
-  - 平台净收入、A币/O币分发与分红（模拟）
-  - 交易类别与余额统计，支持图表展示所需数据
+- 兑换码原子化：code-level mutex 防双花
+- 支付并发锁：用户级锁防超额消费
+- 结算幂等：batchId + 逐账户独立保存
+- 哈希替换：djb2 → FNV-1a，Math.random → crypto.randomUUID()
 
-- 其他服务
-  - oCoinService：O币买卖、期权、分红记录
-  - marketplaceService / officialStoreService：市场与商店的交易入账与佣金
-  - optionsManagementService：期权解锁记录
+## 可观测性
 
-## 数据与事件
-
-- 数据存储：localStorage（便于演示与重置）
-- 事件驱动：
-  - `wallet-updated`：钱包更新通知
-  - `dividend-weights-calculated`：分红权重计算完成
-  - `cash-dividend-distributed`：现金分红执行完成
+- `/api/v1/health` — 含 PG ping 延迟
+- `/api/metrics` — Prometheus 格式指标
+- pino 结构化日志（开发: pino-pretty, 生产: JSON）
+- X-Request-Id 注入/透传
 
 
 ## 贡献

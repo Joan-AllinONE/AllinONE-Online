@@ -56,6 +56,18 @@ const statusConfig = {
     icon: Trash2,
     label: '已销毁',
   },
+  [VoucherStatus.REDEEMED]: {
+    color: 'bg-purple-500/20 text-purple-600 border-purple-500/30',
+    icon: CheckCircle2,
+    label: '已兑换',
+  },
+};
+
+/** 未知状态的兜底配置（防止未来新增状态值导致崩溃） */
+const DEFAULT_STATUS = {
+  color: 'bg-gray-500/20 text-gray-600 border-gray-500/30',
+  icon: AlertCircle,
+  label: '未知',
 };
 
 export const VoucherCard = forwardRef<HTMLDivElement, VoucherCardProps>(function VoucherCardInner({
@@ -72,7 +84,7 @@ export const VoucherCard = forwardRef<HTMLDivElement, VoucherCardProps>(function
   isOwner,
 }, ref) {
   const [copied, setCopied] = useState(false);
-  const status = statusConfig[voucher.status];
+  const status = statusConfig[voucher.status] || DEFAULT_STATUS;
   const StatusIcon = status.icon;
   
   // 判断凭证来源类型

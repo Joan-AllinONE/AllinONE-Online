@@ -7,6 +7,7 @@
  */
 
 import { saveToDB, loadFromDB, deleteFromDB, migrateGameFromLS, trySaveLS, tryLoadLS, deleteLS } from './gameFileDb';
+import { gameDeveloperService } from './gameDeveloperService';
 
 /**
  * 效果类型 - 支持内置类型和自定义扩展
@@ -77,6 +78,12 @@ export interface PublishedGame {
   redeemItems?: RedeemItemConfig[];
   /** 协议模式: inject=注入适配(默认), integrated=标准集成 */
   protocolMode?: 'inject' | 'integrated' | 'hybrid';
+  /** 🆕 发布者用户ID（谁发布的这个游戏） */
+  publisherId?: string;
+  /** 🆕 发布者名称 */
+  publisherName?: string;
+  /** 🆕 平台分成比例 (0-100)，默认 10 */
+  revenueSharePercent?: number;
 }
 
 const STORAGE_KEY = 'allinone_published_games';
@@ -92,6 +99,9 @@ export function savePublishedGame(game: Omit<PublishedGame, 'players' | 'status'
     ...game,
     players: 0,
     status: 'available',
+    publisherId: game.publisherId || 'admin',
+    publisherName: game.publisherName || '平台管理员',
+    revenueSharePercent: game.revenueSharePercent ?? 10,
   };
   
   // 检查是否已存在同名游戏
@@ -103,6 +113,35 @@ export function savePublishedGame(game: Omit<PublishedGame, 'players' | 'status'
   }
   
   localStorage.setItem(STORAGE_KEY, JSON.stringify(games));
+  
+  // CloudBase 双写
+  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+    if (!isCloudBaseReady()) return;
+    const db = getCloudBaseApp().database();
+    db.collection('published_games').where({ id: newGame.id }).get().then(res => {
+      if (res.data.length > 0) {
+        db.collection('published_games').doc(res.data[0]._id).update(newGame as any).catch(() => {});
+      } else {
+        db.collection('published_games').add(newGame as any).catch(() => {});
+      }
+    }).catch(() => {});
+  }).catch(() => {});
+  
+  // 🆕 自动创建/更新游戏开发者账户
+  if (game.publisherId || game.publisherName) {
+    try {
+      gameDeveloperService.ensureAccount({
+        gameId: game.id,
+        gameName: game.name || game.id,
+        publisherId: game.publisherId || 'admin',
+        publisherName: game.publisherName || '平台管理员',
+        revenueSharePercent: game.revenueSharePercent ?? 10,
+      });
+    } catch (e) {
+      console.warn('[PublishedGame] 创建开发者账户失败:', e);
+    }
+  }
+  
   // 派发自定义事件，通知同一页面内的其他组件刷新游戏列表
   window.dispatchEvent(new CustomEvent('game-published', { detail: { game: newGame } }));
   console.log('[PublishedGame] 游戏已保存:', newGame.name);
@@ -142,6 +181,15 @@ export async function deletePublishedGame(id: string): Promise<boolean> {
 
   if (filtered.length < games.length) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    // CloudBase 删除
+    import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+      if (!isCloudBaseReady()) return;
+      getCloudBaseApp().database().collection('published_games').where({ id: id }).get().then(res => {
+        for (const doc of res.data) {
+          getCloudBaseApp().database().collection('published_games').doc(doc._id).remove().catch(() => {});
+        }
+      }).catch(() => {});
+    }).catch(() => {});
     // 同时删除游戏文件存储
     await deleteGameFiles(id);
     console.log('[PublishedGame] 游戏已删除:', id);
@@ -235,6 +283,15 @@ export async function saveGameFiles(
   }
 
   const json = JSON.stringify(storableFiles);
+
+  // 后台异步上传到 CloudBase 云存储（best-effort，不阻塞返回）
+  import('./cloudbaseStorage').then(({ uploadGameFiles }) => {
+    uploadGameFiles(gameId, files.map(f => ({
+      name: f.name,
+      path: f.path,
+      content: typeof f.content === 'string' ? f.content : String(f.content),
+    }))).catch(() => {});
+  }).catch(() => {});
 
   // ① 优先尝试 localStorage（同步、快速）
   if (trySaveLS(gameId, json)) {

@@ -2,41 +2,81 @@
  * GameBase - 游戏化首页（MVP v1.0）
  * 展示玩家的个人基地，包含建筑卡片、HUD状态栏、事件横幅和底部导航
  */
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/authContext';
 import { useWallet } from '@/hooks/useWallet';
 
-// ==================== 内联组件（简化版，后续可拆分为独立文件） ====================
+// ==================== 内联组件 ====================
 
 function HUD() {
-  const { currentUser } = useAuth();
+  const { currentUser, isAuthenticated, logout } = useAuth();
   const { wallet } = useWallet();
+  const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // 点击外部关闭菜单
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    if (menuOpen) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 bg-slate-800/80 backdrop-blur border-b border-slate-700/50">
+    <div className="relative flex items-center justify-between px-4 py-3 bg-slate-800/80 backdrop-blur border-b border-slate-700/50">
       <div className="flex items-center gap-5">
         <div className="flex items-center gap-1.5">
           <span className="text-lg">💰</span>
           <span className="font-bold text-yellow-300">{wallet?.gameCoins?.toLocaleString() || '0'}</span>
-          <span className="text-xs text-slate-400">金币</span>
+          <span className="text-xs text-slate-400">游戏币</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-lg">🎫</span>
-          <span className="font-bold text-purple-400">{wallet?.instantVouchers || 0}</span>
-          <span className="text-xs text-slate-400">凭证</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-lg">⚖️</span>
-          <span className="font-bold text-cyan-400">{(wallet?.aCoins || 0).toFixed(1)}</span>
-          <span className="text-xs text-slate-400">权重</span>
+          <span className="font-bold text-purple-400">{wallet?.voucherBalance?.toLocaleString() || '0'}</span>
+          <span className="text-xs text-slate-400">A币</span>
         </div>
       </div>
-      <div className="flex items-center gap-3 ml-auto">
-        <span className="text-sm text-slate-300">{currentUser?.nickname || '冒险者'}</span>
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold">
-          {(currentUser?.nickname || 'A')[0].toUpperCase()}
-        </div>
+      <div className="flex items-center gap-3 ml-auto" ref={menuRef}>
+        {isAuthenticated ? (
+          <>
+            <span className="text-sm text-slate-300">{currentUser?.nickname || '冒险者'}</span>
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold hover:ring-2 hover:ring-purple-400 transition-all"
+            >
+              {(currentUser?.nickname || 'A')[0].toUpperCase()}
+            </button>
+            {menuOpen && (
+              <div className="absolute top-12 right-4 w-36 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden z-50">
+                <button
+                  onClick={() => { setMenuOpen(false); navigate('/login'); }}
+                  className="w-full px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-700 text-left transition-colors"
+                >
+                  🔄 切换账号
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(false); logout(); }}
+                  className="w-full px-4 py-2.5 text-sm text-red-400 hover:bg-slate-700 text-left transition-colors border-t border-slate-700"
+                >
+                  🚪 退出登录
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <button
+            onClick={() => navigate('/login')}
+            className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 rounded-full text-sm font-medium text-white transition-colors"
+          >
+            🔑 登录
+          </button>
+        )}
       </div>
     </div>
   );
@@ -91,9 +131,10 @@ function BottomNav() {
   const navigate = useNavigate();
   const navs = [
     { icon: '🏰', label: '基地', route: '/' },
+    { icon: '🏪', label: '市场', route: '/marketplace' },
     { icon: '🎒', label: '背包', route: '/personal-center' },
     { icon: '🗳️', label: '议事厅', route: '/voucher-system' },
-    { icon: '⚙️', label: '设置', route: '/personal-center' },
+    { icon: '🛒', label: '商店', route: '/game-store' },
   ];
   return (
     <div className="fixed bottom-0 left-0 right-0 flex justify-around items-center py-3 bg-slate-800/90 backdrop-blur border-t border-slate-700/50 z-50">
@@ -110,16 +151,18 @@ function BottomNav() {
 
 // ==================== 主组件 ====================
 
-import { useState, useEffect } from 'react';
-
 export default function GameBase() {
+  const { currentUser } = useAuth();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'platform';
+
   const buildings = [
     { icon: '🔨', label: '凭证工坊', description: '铸造与管理凭证', route: '/voucher-system' },
     { icon: '🏛️', label: '议事厅', description: '社区投票与治理', route: '/voucher-system' },
-    { icon: '🛒', label: '道具商店', description: '浏览与购买道具', route: '/voucher-system' },
+    { icon: '🛒', label: '游戏商店', description: '外部游戏道具与兑换码', route: '/game-store' },
+    { icon: '🏪', label: '交易市场', description: '玩家P2P道具交易', route: '/marketplace' },
     { icon: '🎒', label: '背包', description: '查看我的凭证', route: '/personal-center' },
-    { icon: '📊', label: '数据中心', description: '统计与交易记录', route: '/personal-center' },
     { icon: '🎮', label: '游戏世界', description: '探索游戏', route: '/game-center' },
+    ...(isAdmin ? [{ icon: '⚙️', label: '平台管理', description: '金库·商店·运营', route: '/platform-admin' }] : []),
   ];
 
   return (

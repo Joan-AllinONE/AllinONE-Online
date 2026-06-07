@@ -340,21 +340,30 @@ export class VoucherRuleEngine {
             );
             break;
           case 'treasury':
-            // 转移到国库（这里简化处理，实际应该有国库账户）
+            // 转移到平台金库账户（system-platform）
             voucherService.transferVoucher(
               {
                 voucherId: voucher.id,
-                toUserId: 'TREASURY',
-                toUserName: '系统国库',
-                note: `${rule.name} - 回收至国库`,
+                toUserId: 'system-platform',
+                toUserName: '平台金库',
+                note: `${rule.name} - 回收至金库`,
               },
               context.userId,
               context.userName || context.userId
             );
             break;
           case 'platform':
-            // 平台收取手续费
-            // 实际实现可能需要创建手续费凭证
+            // 平台收取手续费 → 转入金库账户
+            voucherService.transferVoucher(
+              {
+                voucherId: voucher.id,
+                toUserId: 'system-platform',
+                toUserName: '平台金库',
+                note: `${rule.name} - 平台手续费`,
+              },
+              context.userId,
+              context.userName || context.userId
+            );
             break;
         }
 
@@ -477,9 +486,9 @@ export class VoucherRuleEngine {
         console.log('[VoucherRuleEngine] 公式计算:', { original: formula, evaluated: evalFormula });
       }
 
-      // 安全计算（仅支持基本运算）
-      // eslint-disable-next-line no-new-func
-      const result = new Function('return ' + evalFormula)();
+      // 安全计算（使用 mathjs 沙箱解析，无代码执行风险）
+      const { evaluate } = require('mathjs');
+      const result = evaluate(evalFormula);
       const finalResult = Math.floor(result);
       
       if (this.config.enableLogging) {

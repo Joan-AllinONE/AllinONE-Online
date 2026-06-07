@@ -1,13 +1,17 @@
 /**
- * useWallet - MVP v1.0 精简钱包 Hook
- * 从 WalletSkill + localStorage 读取余额数据
+ * useWallet - MVP v1.1 钱包 Hook
+ *
+ * 读取 gameCoins（钱包）和 voucherBalance（仅A币类凭证余额，排除道具凭证）
+ * voucherBalance 通过 voucherPaymentService.getUserVoucherBalance() 读取，
+ * 该方法内部已按 isCurrencyVoucher() 过滤，道具凭证（sourceType='item'）不计入。
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/authContext';
+import { voucherPaymentService } from '@/services/voucherPaymentService';
 
 export interface WalletData {
   gameCoins: number;
-  aCoins: number;
+  voucherBalance: number;  // A币余额（凭证合计）
   instantVouchers: number;
   algorithmVouchers: number;
   lastUpdated: number;
@@ -22,43 +26,55 @@ export function useWallet() {
     if (!isAuthenticated) { setLoading(false); return; }
     try {
       setLoading(true);
-      // Try wallet Skill first (CloudBase)
+      const uid = currentUser?.uid || currentUser?.id || 'anonymous';
+
+      // 读钱包 gameCoins
+      let gameCoins = 0;
       try {
         const { skillGateway } = await import('@/skills/index');
         const result = await skillGateway.execute('wallet', 'getBalance', {}, {
-          userId: currentUser?.uid || currentUser?.id || 'anonymous',
+          userId: uid,
           sessionId: 'web',
         } as any);
         if (result.success && result.data) {
-          setWallet({
-            gameCoins: result.data.gameCoins || 0,
-            aCoins: result.data.aCoins || 0,
-            instantVouchers: result.data.instantVouchers || 0,
-            algorithmVouchers: result.data.algorithmVouchers || 0,
-            lastUpdated: result.data.lastUpdated || Date.now(),
-          });
-          setLoading(false);
-          return;
+          const raw = result.data as any;
+          const walletData = raw?.data ?? raw;
+          gameCoins = walletData.gameCoins || 0;
+          console.log('[useWallet] wallet.getBalance result: gameCoins=', gameCoins);
         }
-      } catch { /* Skill not ready yet, fallback */ }
+      } catch { /* Skill not ready, fallback */ }
 
-      // Fallback: localStorage
-      const saved = localStorage.getItem('wallet_v2');
-      if (saved) {
-        const data = JSON.parse(saved);
-        const uid = currentUser?.uid || currentUser?.id || 'anonymous';
-        const userWallet = data[uid];
-        if (userWallet) {
-          setWallet(userWallet);
-          setLoading(false);
-          return;
-        }
+      // 读凭证 A币余额
+      let voucherBalance = 0;
+      try {
+        voucherBalance = voucherPaymentService.getUserVoucherBalance(uid);
+        console.log('[useWallet] voucherBalance=', voucherBalance);
+      } catch { /* fallback */ }
+
+      // localStorage fallback for gameCoins
+      if (gameCoins === 0) {
+        try {
+          const saved = localStorage.getItem('wallet_v3') || localStorage.getItem('wallet_v2');
+          if (saved) {
+            const data = JSON.parse(saved);
+            const userWallet = data[uid];
+            if (userWallet) {
+              gameCoins = userWallet.gameCoins || 0;
+            }
+          }
+        } catch { /* ignore */ }
       }
-      // Default
-      setWallet({ gameCoins: 0, aCoins: 0, instantVouchers: 0, algorithmVouchers: 0, lastUpdated: Date.now() });
+
+      setWallet({
+        gameCoins,
+        voucherBalance,
+        instantVouchers: 0,
+        algorithmVouchers: 0,
+        lastUpdated: Date.now(),
+      });
     } catch (err) {
       console.warn('useWallet: refresh failed', err);
-      setWallet({ gameCoins: 0, aCoins: 0, instantVouchers: 0, algorithmVouchers: 0, lastUpdated: Date.now() });
+      setWallet({ gameCoins: 0, voucherBalance: 0, instantVouchers: 0, algorithmVouchers: 0, lastUpdated: Date.now() });
     } finally {
       setLoading(false);
     }
@@ -66,11 +82,14 @@ export function useWallet() {
 
   useEffect(() => { refreshWalletData(); }, [refreshWalletData]);
 
-  // Listen for auth changes to refresh
   useEffect(() => {
     const handler = () => refreshWalletData();
     window.addEventListener('allinoneAuthChange', handler);
-    return () => window.removeEventListener('allinoneAuthChange', handler);
+    window.addEventListener('wallet-updated', handler);
+    return () => {
+      window.removeEventListener('allinoneAuthChange', handler);
+      window.removeEventListener('wallet-updated', handler);
+    };
   }, [refreshWalletData]);
 
   return { wallet, loading, refreshWalletData };

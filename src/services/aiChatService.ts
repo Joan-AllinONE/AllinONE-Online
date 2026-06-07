@@ -18,11 +18,12 @@ class AIChatService {
 
   constructor() {
     // 默认配置，可以通过设置界面修改
+    // API Key 使用 sessionStorage（页面关闭自动清除，避免持久化泄露）
     this.config = {
       provider: 'openai',
       model: 'gpt-3.5-turbo',
-      apiKey: localStorage.getItem('ai_api_key') || '',
-      baseURL: localStorage.getItem('ai_base_url') || 'https://api.openai.com/v1'
+      apiKey: sessionStorage.getItem('ai_api_key') || '',
+      baseURL: sessionStorage.getItem('ai_base_url') || 'https://api.openai.com/v1'
     };
   }
 
@@ -30,10 +31,10 @@ class AIChatService {
   updateConfig(newConfig: Partial<AIConfig>) {
     this.config = { ...this.config, ...newConfig };
     if (newConfig.apiKey) {
-      localStorage.setItem('ai_api_key', newConfig.apiKey);
+      sessionStorage.setItem('ai_api_key', newConfig.apiKey);
     }
     if (newConfig.baseURL) {
-      localStorage.setItem('ai_base_url', newConfig.baseURL);
+      sessionStorage.setItem('ai_base_url', newConfig.baseURL);
     }
   }
 

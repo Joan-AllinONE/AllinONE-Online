@@ -100,6 +100,66 @@ const collections = [
       { keys: { isActive: 1 } },
     ],
   },
+  {
+    name: 'redeem_codes',
+    description: '兑换码数据',
+    indexes: [
+      { keys: { code: 1 }, unique: true },
+      { keys: { gameId: 1, status: 1 } },
+      { keys: { itemId: 1 } },
+    ],
+  },
+  {
+    name: 'game_stores',
+    description: '外部游戏商店注册',
+    indexes: [
+      { keys: { gameId: 1 }, unique: true },
+      { keys: { isActive: 1 } },
+    ],
+  },
+  {
+    name: 'market_listings',
+    description: '玩家交易市场挂牌',
+    indexes: [
+      { keys: { voucherId: 1 } },
+      { keys: { sellerId: 1, status: 1 } },
+      { keys: { status: 1, listedAt: -1 } },
+    ],
+  },
+  {
+    name: 'voucher_transactions',
+    description: '凭证交易记录',
+    indexes: [
+      { keys: { voucherId: 1, timestamp: -1 } },
+      { keys: { fromUserId: 1 } },
+      { keys: { toUserId: 1 } },
+    ],
+  },
+  {
+    name: 'game_developers',
+    description: '游戏开发者账户',
+    indexes: [
+      { keys: { accountId: 1 }, unique: true },
+      { keys: { gameId: 1 } },
+      { keys: { publisherId: 1 } },
+    ],
+  },
+  {
+    name: 'platform_treasury',
+    description: '平台金库流水',
+    indexes: [
+      { keys: { currency: 1, timestamp: -1 } },
+      { keys: { source: 1, timestamp: -1 } },
+    ],
+  },
+  {
+    name: 'published_games',
+    description: '已发布游戏记录',
+    indexes: [
+      { keys: { id: 1 } },
+      { keys: { publisherId: 1 } },
+    ],
+  },
 ];
 
 // ==================== 主流程 ====================
@@ -166,6 +226,13 @@ async function main() {
   console.log('proposals: { "read": true, "write": "auth.uid != null" }');
   console.log('inventories: { "read": "auth.uid == doc.userId", "write": false }');
   console.log('game_connectors: { "read": true, "write": "auth.uid != null" }');
+  console.log('redeem_codes: { "read": true, "write": "auth.uid != null" }');
+  console.log('game_stores: { "read": true, "write": "auth.uid != null" }');
+  console.log('market_listings: { "read": true, "write": "auth.uid != null" }');
+  console.log('voucher_transactions: { "read": "auth.uid == doc.fromUserId || auth.uid == doc.toUserId", "write": false }');
+  console.log('game_developers: { "read": "auth.uid == doc.publisherId", "write": false }');
+  console.log('platform_treasury: { "read": false, "write": false }');
+  console.log('published_games: { "read": true, "write": "auth.uid != null" }');
 
   // ==================== 结果汇总 ====================
   console.log('\n结果汇总:');

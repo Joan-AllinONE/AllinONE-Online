@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getPublishedGame, getGameEntryContent, type PublishedGame } from '@/services/publishedGameService';
 import { skillGateway } from '@/skills';
 import { platformBindingService, GameType, voucherService } from '@/voucher-system';
+import { isCurrencyVoucher } from '@/voucher-system/types';
 import { AuthContext } from '@/contexts/authContext';
 import { redeemCodeService } from '@/services/redeemCodeService';
 import { Coins, X, AlertCircle, ShieldCheck } from 'lucide-react';
@@ -77,9 +78,16 @@ export default function GamePlay() {
 
   const loadBalance = async () => {
     try {
-      const result = await skillGateway.execute('wallet', 'getBalance');
-      if (result.success) {
-        setBalance(result.data || {});
+      const result = await skillGateway.execute('wallet', 'getBalance', {}, {
+        userId: currentUser?.uid || currentUser?.id || 'anonymous',
+        sessionId: 'web',
+      });
+      if (result.success && result.data) {
+        const raw = result.data as any;
+        const walletData = raw?.data ?? raw;
+        setBalance({
+          gameCoins: walletData.gameCoins || 0,
+        });
       }
     } catch (error) {
       console.error('加载余额失败:', error);
@@ -92,7 +100,9 @@ export default function GamePlay() {
     
     try {
       const vouchers = voucherService.getUserVouchers(currentUser.id);
-      const activeVouchers = vouchers.filter(v => v.status === 'active');
+      const activeVouchers = vouchers.filter(
+        v => v.status === 'active' && isCurrencyVoucher((v as any).sourceType)
+      );
       const totalValue = activeVouchers.reduce((sum, v) => sum + v.denomination, 0);
       setVoucherBalance({
         count: activeVouchers.length,
@@ -156,6 +166,8 @@ export default function GamePlay() {
         if (result.success && result.record) {
           showRewardToast(true, `获得 ${result.record.amount} 凭证奖励！`, result.record.amount);
           loadVoucherBalance(); // 刷新凭证余额
+          // 通知外部钱包组件刷新
+          window.dispatchEvent(new CustomEvent('wallet-updated', { detail: { userId: currentUser.id } }));
           console.log(`[GamePlay] 奖励发放成功:`, result.record);
         } else if (result.error) {
           // 只在特定情况下显示错误（如冷却中）

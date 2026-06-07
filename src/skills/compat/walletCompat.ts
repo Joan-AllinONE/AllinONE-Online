@@ -18,6 +18,23 @@ async function getSkills() {
   return { walletSkill, authSkill };
 }
 
+// 从 localStorage 获取当前用户 ID（服务层无法使用 React Context）
+function getCurrentUserId(): string {
+  try {
+    const raw = localStorage.getItem('allinone_user') || localStorage.getItem('currentUser');
+    if (raw) {
+      const user = JSON.parse(raw);
+      return user?.uid || user?.id || 'anonymous';
+    }
+  } catch { /* ignore */ }
+  return 'anonymous';
+}
+
+// 构建 SkillContext
+function getSkillContext() {
+  return { userId: getCurrentUserId(), sessionId: 'web' };
+}
+
 // 全局注册锁，防止重复注册
 let registrationPromise: Promise<void> | null = null;
 
@@ -75,11 +92,19 @@ class WalletServiceCompat {
   async getBalance(): Promise<WalletBalance> {
     await ensureSkillsRegistered();
     const skillGateway = await getSkillGateway();
-    const response = await skillGateway.execute<WalletBalance>('wallet', 'getBalance');
+    const response = await skillGateway.execute('wallet', 'getBalance', {}, getSkillContext());
     if (!response.success) {
       throw new Error(response.error?.message || '获取余额失败');
     }
-    return response.data!;
+    const raw = response.data as any;
+    const data = raw?.data ?? raw;
+    return {
+      gameCoins: data?.gameCoins || 0,
+      instantVouchers: data?.instantVouchers || 0,
+      algorithmVouchers: data?.algorithmVouchers || 0,
+      totalValue: (data?.gameCoins || 0) + (data?.instantVouchers || 0) + (data?.algorithmVouchers || 0),
+      lastUpdated: data?.lastUpdated ? new Date(data.lastUpdated) : new Date(),
+    } as WalletBalance;
   }
 
   /**
@@ -92,7 +117,7 @@ class WalletServiceCompat {
       // 将交易转换为奖励格式
       description: transaction.description,
       relatedId: transaction.relatedId,
-    });
+    }, getSkillContext());
 
     if (!response.success) {
       throw new Error(response.error?.message || '添加交易失败');
@@ -105,7 +130,7 @@ class WalletServiceCompat {
   async getTransactions(limit: number = 50): Promise<WalletTransaction[]> {
     await ensureSkillsRegistered();
     const skillGateway = await getSkillGateway();
-    const response = await skillGateway.execute<WalletTransaction[]>('wallet', 'getTransactions', { limit });
+    const response = await skillGateway.execute<WalletTransaction[]>('wallet', 'getTransactions', { limit }, getSkillContext());
     if (!response.success) {
       throw new Error(response.error?.message || '获取交易记录失败');
     }
@@ -118,7 +143,7 @@ class WalletServiceCompat {
   async getStats(): Promise<WalletStats> {
     await ensureSkillsRegistered();
     const skillGateway = await getSkillGateway();
-    const response = await skillGateway.execute<WalletStats>('wallet', 'getStats');
+    const response = await skillGateway.execute<WalletStats>('wallet', 'getStats', {}, getSkillContext());
     if (!response.success) {
       throw new Error(response.error?.message || '获取统计失败');
     }
@@ -135,7 +160,7 @@ class WalletServiceCompat {
       computingPower,
       gameCoins,
       gameId,
-    });
+    }, getSkillContext());
 
     if (!response.success) {
       throw new Error(response.error?.message || '添加游戏奖励失败');
@@ -158,7 +183,7 @@ class WalletServiceCompat {
       currency,
       description,
       relatedId,
-    });
+    }, getSkillContext());
 
     if (!response.success) {
       throw new Error(response.error?.message || '消费失败');
@@ -175,7 +200,7 @@ class WalletServiceCompat {
     const response = await skillGateway.execute('wallet', 'recharge', {
       amount,
       method,
-    });
+    }, getSkillContext());
 
     if (!response.success) {
       throw new Error(response.error?.message || '充值失败');
@@ -188,7 +213,7 @@ class WalletServiceCompat {
   async getExchangeRatesAsync(): Promise<ExchangeRate> {
     await ensureSkillsRegistered();
     const skillGateway = await getSkillGateway();
-    const response = await skillGateway.execute<ExchangeRate>('wallet', 'getExchangeRates');
+    const response = await skillGateway.execute<ExchangeRate>('wallet', 'getExchangeRates', {}, getSkillContext());
     if (!response.success) {
       throw new Error(response.error?.message || '获取汇率失败');
     }
@@ -209,7 +234,7 @@ class WalletServiceCompat {
       fromCurrency,
       toCurrency,
       amount,
-    });
+    }, getSkillContext());
 
     if (!response.success) {
       throw new Error(response.error?.message || '兑换失败');
@@ -218,85 +243,64 @@ class WalletServiceCompat {
   }
 
   /**
-   * A币发放
+   * A币发放（通过凭证系统创建凭证）
    */
   async distributeACoins(amount: number, description: string = 'A币发放奖励'): Promise<void> {
-    await ensureSkillsRegistered();
-    const skillGateway = await getSkillGateway();
-    const response = await skillGateway.execute('wallet', 'reward', {
-      aCoins: amount,
-      description,
-    });
-
-    if (!response.success) {
-      throw new Error(response.error?.message || 'A币发放失败');
+    try {
+      const { voucherService } = await import('@/voucher-system/services/VoucherService');
+      const { VoucherSourceType } = await import('@/voucher-system/types');
+      const uid = getCurrentUserId();
+      voucherService.createVoucher(
+        {
+          denomination: amount,
+          recipientId: uid,
+          recipientName: '玩家',
+          metadata: { name: description, category: 'reward', sourceType: VoucherSourceType.INSTANT },
+          note: description,
+        },
+        'SYSTEM',
+        '平台系统'
+      );
+      console.log(`[WalletCompat] 发放 A币凭证成功: ${amount}, ${description}`);
+    } catch (error) {
+      throw new Error(`A币发放失败: ${error}`);
     }
-    console.log(`[WalletCompat] 发放 A币成功: ${amount}, ${description}`);
   }
 
   /**
-   * 获取A币余额
+   * 获取A币余额（从凭证系统读取）
    */
   async getACoinBalance(): Promise<number> {
-    const balance = await this.getBalance();
-    return balance.aCoins;
+    try {
+      const { voucherPaymentService } = await import('@/services/voucherPaymentService');
+      const uid = getCurrentUserId();
+      return voucherPaymentService.getUserVoucherBalance(uid);
+    } catch {
+      return 0;
+    }
   }
 
   /**
-   * 获取A币交易记录
+   * 获取A币交易记录（凭证系统的交易记录）
    */
   async getACoinTransactions(limit: number = 50): Promise<WalletTransaction[]> {
-    const transactions = await this.getTransactions(limit);
-    return transactions.filter(tx => tx.currency === 'aCoins');
-  }
-
-  /**
-   * 获取O币余额
-   */
-  async getOCoinBalance(): Promise<number> {
-    const balance = await this.getBalance();
-    return balance.oCoins;
-  }
-
-  /**
-   * 获取O币交易记录
-   */
-  async getOCoinTransactions(limit: number = 50): Promise<WalletTransaction[]> {
-    const transactions = await this.getTransactions(limit);
-    return transactions.filter(tx => tx.currency === 'oCoins');
-  }
-
-  /**
-   * 分发O币
-   */
-  async distributeOCoins(amount: number, description: string = 'O币发放'): Promise<void> {
-    console.log(`[WalletCompat] 发放 O币: ${amount}, ${description}`);
-  }
-
-  /**
-   * 记录O币分红
-   */
-  async recordOCoinDividend(amount: number, description: string = '平台分红'): Promise<void> {
-    console.log(`[WalletCompat] 记录 O币分红: ${amount}, ${description}`);
-  }
-
-  /**
-   * 记录O币期权解禁
-   */
-  async recordOCoinVesting(amount: number, description: string = 'O币期权解禁'): Promise<void> {
-    console.log(`[WalletCompat] 记录 O币期权解禁: ${amount}, ${description}`);
-  }
-
-  /**
-   * 发放现金分红
-   */
-  async distributeCashDividend(
-    userId: string, 
-    amount: number, 
-    periodId: string, 
-    description: string = '现金分红'
-  ): Promise<void> {
-    console.log(`[WalletCompat] 发放现金分红: userId=${userId}, amount=${amount}, periodId=${periodId}`);
+    // A币交易记录现在存储在凭证系统的 transactions 中
+    try {
+      const { voucherService } = await import('@/voucher-system/services/VoucherService');
+      const uid = getCurrentUserId();
+      const voucherTxs = voucherService.getUserTransactions ? voucherService.getUserTransactions(uid) : [];
+      return voucherTxs.slice(0, limit).map((tx: any) => ({
+        id: tx.id,
+        type: tx.toUserId === uid ? 'income' : 'expense' as any,
+        category: 'trade' as any,
+        amount: tx.denomination || 0,
+        currency: 'gameCoins' as any,
+        description: tx.note || 'A币交易',
+        timestamp: new Date(tx.timestamp),
+      })) as WalletTransaction[];
+    } catch {
+      return [];
+    }
   }
 
   // ============ 游戏币相关方法 ============
@@ -307,7 +311,7 @@ class WalletServiceCompat {
   async getGameCoinsSummary(): Promise<GameCoinsSummary> {
     await ensureSkillsRegistered();
     const skillGateway = await getSkillGateway();
-    const response = await skillGateway.execute<GameCoinsSummary>('wallet', 'getGameCoinsSummary');
+    const response = await skillGateway.execute<GameCoinsSummary>('wallet', 'getGameCoinsSummary', {}, getSkillContext());
     if (!response.success) {
       throw new Error(response.error?.message || '获取游戏币汇总失败');
     }
@@ -328,7 +332,7 @@ class WalletServiceCompat {
       fromType,
       toType,
       amount,
-    });
+    }, getSkillContext());
 
     if (!response.success) {
       return {

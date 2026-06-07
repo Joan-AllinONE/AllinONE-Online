@@ -212,12 +212,18 @@ export class ProposalSkill extends BaseSkill {
   }
 
   private async calculateVoteWeight(userId: string): Promise<number> {
-    // 权重 = aCoins * 0.3 + gameCoins * 0.1（上限 1000）
+    // 权重 = A币(凭证) * 0.3 + gameCoins * 0.1（上限 1000）
     try {
       const result = await this.gateway.execute('wallet', 'getBalance', {}, { userId } as any);
       if (result.success) {
         const bal = result.data;
-        return Math.min(bal.aCoins * 0.3 + bal.gameCoins * 0.1, 1000) || 1;
+        // A币从凭证系统读取
+        let aCoinBalance = 0;
+        try {
+          const { voucherPaymentService } = await import('@/services/voucherPaymentService');
+          aCoinBalance = voucherPaymentService.getUserVoucherBalance(userId);
+        } catch { /* fallback */ }
+        return Math.min(aCoinBalance * 0.3 + (bal.gameCoins || 0) * 0.1, 1000) || 1;
       }
     } catch { /* fallback */ }
     return 1;
@@ -233,6 +239,17 @@ export class ProposalSkill extends BaseSkill {
     const all = this.getLocalProposals().filter(x => x.id !== p.id);
     all.push(p);
     localStorage.setItem('proposals', JSON.stringify(all));
+    // CloudBase 双写（已有 best-effort 在 createProposal/vote 中，此处增强）
+    import('../../services/cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+      if (!isCloudBaseReady()) return;
+      getCloudBaseApp().database().collection('proposals').where({ id: p.id }).get().then(res => {
+        if (res.data.length > 0) {
+          getCloudBaseApp().database().collection('proposals').doc(res.data[0]._id).update(p as any).catch(() => {});
+        } else {
+          getCloudBaseApp().database().collection('proposals').add(p as any).catch(() => {});
+        }
+      }).catch(() => {});
+    }).catch(() => {});
   }
 }
 

@@ -23,6 +23,7 @@ import {
 } from '../types';
 import { SkillInitializer, type SkillInitializationResult } from './SkillInitializer';
 import { savePublishedGame, saveGameFiles, type PublishedGame, type RedeemItemConfig } from '@/services/publishedGameService';
+import { gameDeveloperService } from '@/services/gameDeveloperService';
 
 // ==================== 流水线配置 ====================
 
@@ -630,6 +631,11 @@ export class PublishingPipeline {
     const cdnUrl = context.data.get('cdnUrl') || `https://cdn.allinone.game/games/${config.gameId}`;
     const initializedSkills = context.data.get('skillsRegistered') || [];
 
+    // 获取当前发布者信息
+    const publisherId = config.publisherId || 'admin';
+    const publisherName = config.publisherName || '平台管理员';
+    const revenueSharePercent = config.revenueSharePercent ?? 10;
+
     // 创建PublishedGame记录
     const publishedGame: Omit<PublishedGame, 'players' | 'status'> = {
       id: config.gameId,
@@ -647,6 +653,9 @@ export class PublishingPipeline {
       updatedAt: new Date().toISOString(),
       redeemItems: config.redeemItems || [],
       protocolMode: config.protocolMode || 'inject',
+      publisherId,
+      publisherName,
+      revenueSharePercent,
     };
 
     logger.info('保存游戏数据...', PublishStep.PUBLISH);

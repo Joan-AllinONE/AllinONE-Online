@@ -118,7 +118,7 @@ export class VoucherSkill extends BaseSkill {
       supplyPolicy: params.supplyPolicy || 'open',
       totalSupply: params.totalSupply || 1000,
       mintedCount: 0,
-      pricing: params.pricing || { price: 0, currency: 'gameCoins', acceptVoucher: false },
+      pricing: params.pricing || { price: 0, currency: 'gameCoins', acceptVoucher: true },
       gameEffect: params.gameEffect || { itemId: '', quantity: 1 },
       rarity: params.rarity || 'common',
       isActive: true,
@@ -212,11 +212,13 @@ export class VoucherSkill extends BaseSkill {
       paidAt: Date.now(),
     };
 
-    // 通过 wallet Skill 扣款
+    // 通过 wallet Skill 扣款（仅支持 gameCoins）
+    if (template.pricing.currency !== 'gameCoins') {
+      return { success: false, error: '仅支持 gameCoins 支付，A币请使用凭证支付' };
+    }
     try {
       const walletResult = await this.gateway.execute('wallet', 'spend', {
         amount: template.pricing.price,
-        currency: template.pricing.currency,
         description: `购买 ${template.name}`,
       }, context as any);
       if (!walletResult.success) {

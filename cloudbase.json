@@ -26,8 +26,9 @@
     "maxNum": 10,
     "envParams": {
       "NODE_ENV": "production",
-      "USE_MEMORY_DB": "true",
-      "PORT": "3000"
+      "USE_MEMORY_DB": "false",
+      "PORT": "3000",
+      "JWT_SECRET": "CHANGE_ME_IN_CONSOLE"
     }
   }
 }

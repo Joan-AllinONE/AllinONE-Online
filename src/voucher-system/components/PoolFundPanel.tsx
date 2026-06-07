@@ -1,14 +1,14 @@
 /**
- * 平台奖池充值面板
- * 提供显式的铸币入口，将凭证注入平台奖池（SYSTEM持有者）
- * 解决"资金来源不透明"问题 — 所有奖池资金都需经过此入口
+ * 平台奖池划拨面板
+ * 从 platform_pool（平台总账户）转移已有凭证到 SYSTEM（平台奖池），
+ * 而非铸币。确保凭证总发行量不变，仅改变持有者。
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Coins, Building2, RefreshCw, Plus, DollarSign,
   AlertCircle, CheckCircle2, Info, History,
-  Trash2, ChevronDown, ChevronUp,
+  Trash2, ChevronDown, ChevronUp, ArrowRightLeft,
 } from 'lucide-react';
 import { platformBindingService } from '../services/PlatformBindingService';
 import { voucherService } from '../services/VoucherService';
@@ -37,25 +37,43 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  // 平台库存（platform_pool）可用凭证
+  const [poolInventory, setPoolInventory] = useState<{
+    totalActive: number;
+    byDenom: Record<number, number>;
+  }>({ totalActive: 0, byDenom: {} });
 
-  // 刷新余额
+  // 刷新余额 + 平台库存
   const refreshBalance = () => {
     const b = platformBindingService.getSystemPoolBalance();
     setBalance(b);
+    // 刷新 platform_pool 库存
+    try {
+      const poolVouchers = voucherService.getUserVouchers('platform_pool');
+      const activeVouchers = poolVouchers.filter(v => (v as any).status === 'active');
+      const byDenom: Record<number, number> = {};
+      for (const v of activeVouchers) {
+        byDenom[v.denomination] = (byDenom[v.denomination] || 0) + 1;
+      }
+      setPoolInventory({ totalActive: activeVouchers.length, byDenom });
+    } catch { /* ignore */ }
   };
 
   useEffect(() => {
     refreshBalance();
   }, []);
 
-  // 处理充值
+  // 当前面额的库存可用数量
+  const availableCount = poolInventory.byDenom[denomination] || 0;
+  const isStockSufficient = availableCount >= count;
+
+  // 处理划拨
   const handleFund = async () => {
     if (fundAmount <= 0 || denomination <= 0 || count <= 0) {
       setMessage({ type: 'error', text: '请填写有效的金额、面值和数量' });
       return;
     }
 
-    // 验证总金额与面值*数量是否匹配
     const expectedTotal = denomination * count;
     if (expectedTotal !== fundAmount) {
       setMessage({
@@ -75,16 +93,15 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
         count,
         currentUserId,
         currentUsername,
-        `平台奖池主动充值: ${fundAmount}A币`
+        `平台库存划拨至奖池: ${fundAmount}A币`
       );
 
       if (result.success) {
         setMessage({
           type: 'success',
-          text: `充值成功！创建 ${result.created} 张凭证，总价值 ${result.totalAmount} A币`,
+          text: `划拨成功！从平台库存转移 ${result.created} 张凭证（面额${denomination}）至奖池，总价值 ${result.totalAmount} A币`,
         });
         refreshBalance();
-        // 通知父组件更新余额
         if (onBalanceChange) {
           const b = platformBindingService.getSystemPoolBalance();
           onBalanceChange({ totalAmount: b.totalAmount, voucherCount: b.voucherCount });
@@ -94,16 +111,15 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
         setDenomination(100);
         setCount(10);
       } else {
-        setMessage({ type: 'error', text: result.error || '充值失败' });
+        setMessage({ type: 'error', text: result.error || '划拨失败' });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: `充值异常: ${error}` });
+      setMessage({ type: 'error', text: `划拨异常: ${error}` });
     } finally {
       setIsFunding(false);
     }
   };
 
-  // 合并预览提示
   const previewTotal = denomination * count;
 
   return (
@@ -113,11 +129,11 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-              <Building2 className="w-5 h-5 text-blue-400" />
+              <ArrowRightLeft className="w-5 h-5 text-blue-400" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white">平台奖池充值</h3>
-              <p className="text-xs text-slate-400">将凭证铸币注入平台奖池，作为游戏奖励的资金来源</p>
+              <h3 className="text-lg font-bold text-white">平台奖池划拨</h3>
+              <p className="text-xs text-slate-400">从 platform_pool（平台总账户）转移已有凭证至奖池，不创建新凭证</p>
             </div>
           </div>
           <button
@@ -129,29 +145,34 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
           </button>
         </div>
 
-        {/* 余额展示 */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* 余额 + 库存展示 */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           <div className="bg-slate-900/50 rounded-xl p-4 border border-white/10">
-            <p className="text-xs text-slate-400 mb-1">奖池余额（总价值）</p>
-            <p className="text-2xl font-bold text-white">
+            <p className="text-xs text-slate-400 mb-1">奖池余额</p>
+            <p className="text-xl font-bold text-white">
               {balance.totalAmount.toLocaleString()}
               <span className="text-sm text-slate-400 ml-1">A币</span>
             </p>
           </div>
           <div className="bg-slate-900/50 rounded-xl p-4 border border-white/10">
-            <p className="text-xs text-slate-400 mb-1">凭证数量</p>
-            <p className="text-2xl font-bold text-white">
+            <p className="text-xs text-slate-400 mb-1">奖池凭证</p>
+            <p className="text-xl font-bold text-white">
               {balance.voucherCount}
               <span className="text-sm text-slate-400 ml-1">张</span>
             </p>
           </div>
-          <div className="bg-slate-900/50 rounded-xl p-4 border border-white/10">
-            <p className="text-xs text-slate-400 mb-1">平均面值</p>
-            <p className="text-2xl font-bold text-white">
-              {balance.voucherCount > 0
-                ? Math.round(balance.totalAmount / balance.voucherCount)
-                : 0}
-              <span className="text-sm text-slate-400 ml-1">A币/张</span>
+          <div className="bg-slate-900/50 rounded-xl p-4 border border-purple-500/20">
+            <p className="text-xs text-slate-400 mb-1">🔄 平台库存</p>
+            <p className="text-xl font-bold text-purple-300">
+              {poolInventory.totalActive.toLocaleString()}
+              <span className="text-sm text-slate-400 ml-1">张</span>
+            </p>
+          </div>
+          <div className="bg-slate-900/50 rounded-xl p-4 border border-purple-500/20">
+            <p className="text-xs text-slate-400 mb-1">面额 {denomination} 可用</p>
+            <p className={`text-xl font-bold ${isStockSufficient ? 'text-green-400' : 'text-red-400'}`}>
+              {availableCount}
+              <span className="text-sm text-slate-400 ml-1">/ {count} 需</span>
             </p>
           </div>
         </div>
@@ -160,20 +181,20 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
         <div className="flex items-start gap-2 p-3 bg-blue-500/5 rounded-lg border border-blue-500/20 text-xs text-blue-300">
           <Info className="w-4 h-4 shrink-0 mt-0.5" />
           <div>
-            <p className="font-medium text-blue-200 mb-1">业务流程指引</p>
+            <p className="font-medium text-blue-200 mb-1">划拨流程</p>
             <ol className="list-decimal list-inside space-y-0.5 text-slate-400">
-              <li>在下方输入金额 → 点击「充值奖池」→ 凭证注入平台奖池</li>
-              <li>切换到「游戏绑定」标签页 → 创建游戏绑定 → 选择「平台奖池」</li>
-              <li>用户在游戏中获得奖励后 → 从平台奖池自动发放 A币凭证</li>
+              <li>确认平台库存充足 → 选择面额与数量 → 点击「划拨至奖池」</li>
+              <li>凭证从 platform_pool（总账户）→ SYSTEM（奖池），凭证总量不变</li>
+              <li>清空奖池时，凭证 transfer 回 platform_pool，不销毁</li>
             </ol>
           </div>
         </div>
 
-        {/* 充值表单 */}
+        {/* 划拨表单 */}
         <div className="bg-slate-900/30 rounded-xl p-4 border border-white/10">
           <h4 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2">
             <Plus className="w-4 h-4 text-green-400" />
-            铸币充值
+            从平台库存划拨
           </h4>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
@@ -212,12 +233,18 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
             </div>
           </div>
 
-          {/* 预览信息 */}
+          {/* 库存提示 */}
           <div className="flex items-center justify-between mb-4 px-2">
             <span className="text-xs text-slate-500">
               预览：{count} 张 × {denomination} A币 = {previewTotal.toLocaleString()} A币
             </span>
-            {previewTotal !== fundAmount && (
+            {!isStockSufficient && count > 0 && (
+              <span className="text-xs text-red-400 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                库存不足（需 {count}，有 {availableCount}）
+              </span>
+            )}
+            {previewTotal !== fundAmount && fundAmount > 0 && (
               <span className="text-xs text-yellow-400 flex items-center gap-1">
                 <AlertCircle className="w-3 h-3" />
                 总金额不匹配
@@ -229,15 +256,15 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
           <div className="flex items-center gap-3">
             <button
               onClick={handleFund}
-              disabled={isFunding || fundAmount <= 0 || denomination <= 0 || count <= 0}
+              disabled={isFunding || fundAmount <= 0 || denomination <= 0 || count <= 0 || !isStockSufficient}
               className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
             >
               {isFunding ? (
-                <>充值中...</>
+                <>划拨中...</>
               ) : (
                 <>
                   <Coins className="w-4 h-4" />
-                  充值奖池
+                  划拨至奖池
                 </>
               )}
             </button>
@@ -245,10 +272,10 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
             {balance.voucherCount > 0 && (
               <button
                 onClick={() => setShowClearConfirm(true)}
-                className="flex items-center gap-2 px-3 py-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors text-sm"
+                className="flex items-center gap-2 px-3 py-2 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 rounded-lg transition-colors text-sm"
               >
                 <Trash2 className="w-4 h-4" />
-                清空奖池
+                回收至库存
               </button>
             )}
           </div>
@@ -310,7 +337,7 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
         )}
       </div>
 
-      {/* 清空确认弹窗 */}
+      {/* 回收确认弹窗 */}
       <AnimatePresence>
         {showClearConfirm && (
           <motion.div
@@ -321,10 +348,10 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
             onClick={() => setShowClearConfirm(false)}
           >
             <div className="bg-slate-800 rounded-xl p-6 border border-white/10 max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
-              <h4 className="text-lg font-bold text-white mb-2">确认清空奖池？</h4>
+              <h4 className="text-lg font-bold text-white mb-2">确认回收至库存？</h4>
               <p className="text-sm text-slate-400 mb-4">
-                将清空平台奖池中所有 {balance.voucherCount} 张凭证（总价值 {balance.totalAmount} A币）。
-                此操作不可逆！
+                将奖池中 {balance.voucherCount} 张凭证（总价值 {balance.totalAmount} A币）transfer 回 platform_pool。
+                凭证不会销毁，只是退回平台总账户。
               </p>
               <div className="flex justify-end gap-3">
                 <button
@@ -337,7 +364,7 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
                   onClick={() => {
                     const result = platformBindingService.clearSystemPool(currentUserId, currentUsername);
                     if (result.success) {
-                      setMessage({ type: 'success', text: `已清空 ${result.clearedCount} 张凭证` });
+                      setMessage({ type: 'success', text: `已回收 ${result.clearedCount} 张凭证至平台库存` });
                     }
                     setShowClearConfirm(false);
                     refreshBalance();
@@ -346,9 +373,9 @@ export const PoolFundPanel: React.FC<PoolFundPanelProps> = ({
                       onBalanceChange({ totalAmount: b.totalAmount, voucherCount: b.voucherCount });
                     }
                   }}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors"
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors"
                 >
-                  确认清空
+                  确认回收
                 </button>
               </div>
             </div>

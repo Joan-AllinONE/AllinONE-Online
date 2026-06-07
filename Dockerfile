@@ -1,32 +1,59 @@
 # AllinONE Gaming Platform - CloudBase Deployment
-# 使用 Node.js 20 作为基础镜像
-FROM node:20-slim
+# v2.0 — 多阶段构建 + 安全加固 (Sprint 1)
 
-# 设置工作目录
+# ============================================
+# Stage 1: 构建前端
+# ============================================
+FROM node:20-slim AS builder
 WORKDIR /app
 
 # 安装 pnpm
 RUN npm install -g pnpm
 
-# 复制 package.json 和 pnpm-lock.yaml
+# 复制依赖文件
 COPY package.json pnpm-lock.yaml ./
-
-# 安装依赖
 RUN pnpm install --frozen-lockfile
 
 # 复制源代码
 COPY . .
 
-# 构建前端
+# 构建前端 (输出到 dist/static)
 RUN pnpm build:client
+
+# 清理 devDependencies
+RUN pnpm prune --prod
+
+# ============================================
+# Stage 2: 生产运行
+# ============================================
+FROM node:20-slim
+WORKDIR /app
+
+# 创建非 root 用户
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nodejs
+
+# 从 builder 阶段复制产物
+COPY --from=builder /app/dist/static ./dist/static
+COPY --from=builder /app/server.js ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/cloudfunctions ./cloudfunctions
+
+# 切换到非 root 用户
+USER nodejs
 
 # 设置环境变量
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV USE_MEMORY_DB=true
+# 生产环境默认使用 PostgreSQL（可通过 CloudRun 环境变量覆盖）
+# USE_MEMORY_DB 不在此处设置——由 CloudRun envParams 控制
 
 # 暴露端口
 EXPOSE 3000
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+  CMD node -e "const http = require('http'); http.get('http://localhost:3000/api/health', r => { let d=''; r.on('data',c=>d+=c); r.on('end',()=>{ const j=JSON.parse(d); process.exit(j.status==='ok'?0:1); }); })"
 
 # 启动命令
 CMD ["node", "server.js"]

@@ -20,7 +20,6 @@ export interface UserProfile {
   avatar?: string;
   role: 'player' | 'developer' | 'admin';
   gameCoins: number;
-  aCoins: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -194,7 +193,6 @@ export class AuthSkill extends BaseSkill {
           avatar: doc.avatar,
           role: doc.role || 'player',
           gameCoins: doc.gameCoins || 0,
-          aCoins: doc.aCoins || 0,
           createdAt: doc.createdAt || Date.now(),
           updatedAt: doc.updatedAt || Date.now(),
         };
@@ -237,7 +235,7 @@ export class AuthSkill extends BaseSkill {
       uid: data.uid || data.id,
       email: data.email,
       nickname: data.nickname || 'Player',
-      role: 'player',
+      role: data.role || 'player',
       gameCoins: 0,
       aCoins: 0,
       createdAt: Date.now(),

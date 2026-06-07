@@ -65,6 +65,24 @@ const STORAGE_KEYS = {
   PURCHASES: 'allinone_redeem_purchases',
 };
 
+// ==================== CloudBase 双写工具 ====================
+
+function syncToCloudBase(collection: string, items: any[]): void {
+  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+    if (!isCloudBaseReady()) return;
+    const db = getCloudBaseApp().database();
+    for (const item of items.slice(-20)) {
+      db.collection(collection).where({ id: item.id }).get().then(res => {
+        if (res.data.length > 0) {
+          db.collection(collection).doc(res.data[0]._id).update(item).catch(() => {});
+        } else {
+          db.collection(collection).add(item).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+  }).catch(() => {});
+}
+
 // ==================== 兑换码服务类 ====================
 
 class RedeemCodeService {
@@ -110,6 +128,7 @@ class RedeemCodeService {
     const items = this.getHostedItems();
     items.push(item);
     localStorage.setItem(STORAGE_KEYS.HOSTED_ITEMS, JSON.stringify(items));
+    syncToCloudBase('redeem_codes', [item]);
 
     // 自动生成兑换码
     if (request.initialInventory > 0) {
@@ -155,6 +174,7 @@ class RedeemCodeService {
     };
 
     localStorage.setItem(STORAGE_KEYS.HOSTED_ITEMS, JSON.stringify(items));
+    syncToCloudBase('redeem_codes', [items[index]]);
     return items[index];
   }
 
@@ -222,6 +242,7 @@ class RedeemCodeService {
     const allCodes = this.getAllCodes();
     allCodes.push(...codes);
     localStorage.setItem(STORAGE_KEYS.REDEEM_CODES, JSON.stringify(allCodes));
+    syncToCloudBase('redeem_codes', codes);
 
     // 更新库存
     await this.updateHostedItem(item.id, {
@@ -231,6 +252,9 @@ class RedeemCodeService {
         available: item.inventory.available + codes.length,
       },
     });
+
+    // 自动同步到后端
+    this.syncToBackend().catch(() => {});
 
     return {
       success: true,
@@ -365,6 +389,9 @@ class RedeemCodeService {
       },
     });
 
+    // 自动同步到后端
+    this.syncToBackend().catch(() => {});
+
     return {
       success: true,
       code: request.code,
@@ -474,6 +501,10 @@ class RedeemCodeService {
     const purchases = this.getPurchases();
     purchases.push(purchase);
     localStorage.setItem(STORAGE_KEYS.PURCHASES, JSON.stringify(purchases));
+    syncToCloudBase('redeem_codes', [purchase]);
+
+    // 自动同步到后端
+    this.syncToBackend().catch(() => {});
 
     return {
       success: true,
@@ -583,6 +614,149 @@ class RedeemCodeService {
     if (index !== -1) {
       codes[index] = updatedCode;
       localStorage.setItem(STORAGE_KEYS.REDEEM_CODES, JSON.stringify(codes));
+    }
+  }
+
+  // ==================== 后端同步与 API 客户端 ====================
+
+  /** 后端 API 基础 URL */
+  private apiBaseUrl: string = '';
+
+  /** 设置后端 API 地址 */
+  setApiBaseUrl(url: string): void {
+    this.apiBaseUrl = url.replace(/\/$/, '');
+  }
+
+  /** 获取后端 API 地址 */
+  getApiBaseUrl(): string {
+    return this.apiBaseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+  }
+
+  /**
+   * 同步所有兑换码和道具到后端
+   * 在购买、铸造、生成兑换码后自动调用
+   */
+  async syncToBackend(): Promise<{ success: boolean; message: string }> {
+    try {
+      const codes = this.getAllCodes();
+      const items = this.getHostedItems();
+
+      // 转换为后端格式
+      const codeRecords = codes.map(c => ({
+        id: c.id,
+        code: c.code,
+        gameId: c.gameId,
+        itemId: c.itemId,
+        itemName: items.find(i => i.id === c.itemId)?.name || '',
+        status: c.status,
+        gameEffect: items.find(i => i.id === c.itemId)?.gameEffect || { itemId: '', quantity: 0 },
+        createdAt: c.createdAt,
+        soldAt: c.soldAt,
+        soldTo: c.soldTo,
+        usedAt: c.usedAt,
+        usedBy: c.usedBy,
+        expiredAt: c.expiredAt,
+        verifyCount: c.verifyCount,
+        lastVerifyAt: c.lastVerifyAt,
+      }));
+
+      const itemRecords = items.map(i => ({
+        id: i.id,
+        gameId: i.gameId,
+        name: i.name,
+        description: i.description,
+        gameEffect: i.gameEffect,
+        inventory: i.inventory,
+        status: i.status,
+        createdAt: i.createdAt,
+        updatedAt: i.updatedAt,
+      }));
+
+      const response = await fetch(`${this.getApiBaseUrl()}/api/redeem/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codes: codeRecords, items: itemRecords }),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = await response.json();
+
+      console.log('[RedeemService] 同步到后端:', result.data);
+      return { success: true, message: '同步成功' };
+    } catch (error) {
+      console.warn('[RedeemService] 后端同步失败（离线模式）:', error);
+      return { success: false, message: '后端不可用，运行在离线模式' };
+    }
+  }
+
+  /**
+   * 通过后端 API 验证兑换码（游戏方 SDK 使用）
+   */
+  async verifyCodeViaApi(params: { code: string; gameId: string; apiKey?: string }): Promise<VerifyCodeResponse> {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (params.apiKey) {
+        headers['Authorization'] = `Bearer ${params.apiKey}`;
+      }
+
+      const response = await fetch(`${this.getApiBaseUrl()}/api/redeem/verify`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ code: params.code, gameId: params.gameId }),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = await response.json();
+
+      if (!result.success) {
+        return { valid: false, message: result.error || 'API 调用失败' };
+      }
+
+      return result.data as VerifyCodeResponse;
+    } catch (error) {
+      console.warn('[RedeemService] API 验证失败，回退到本地:', error);
+      return this.verifyCode({ code: params.code, gameId: params.gameId, userId: 'api-call' });
+    }
+  }
+
+  /**
+   * 通过后端 API 核销兑换码（游戏方 SDK 使用）
+   */
+  async useCodeViaApi(params: { code: string; gameId: string; userId: string; apiKey?: string }): Promise<UseCodeResponse> {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (params.apiKey) {
+        headers['Authorization'] = `Bearer ${params.apiKey}`;
+      }
+
+      const response = await fetch(`${this.getApiBaseUrl()}/api/redeem/use`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ code: params.code, gameId: params.gameId, userId: params.userId }),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = await response.json();
+
+      if (!result.success) {
+        return { success: false, code: params.code, usedAt: new Date().toISOString(), message: result.error || 'API 调用失败' };
+      }
+
+      const data = result.data as UseCodeResponse;
+
+      // 同时更新本地状态
+      const localCode = this.getAllCodes().find(c => c.code.toUpperCase() === params.code.toUpperCase());
+      if (localCode) {
+        localCode.status = RedeemCodeStatus.USED;
+        localCode.usedAt = data.usedAt;
+        localCode.usedBy = params.userId;
+        this.updateCode(localCode);
+      }
+
+      return data;
+    } catch (error) {
+      console.warn('[RedeemService] API 核销失败，回退到本地:', error);
+      return this.useCode({ code: params.code, gameId: params.gameId, userId: params.userId });
     }
   }
 }

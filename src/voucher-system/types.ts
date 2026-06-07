@@ -11,6 +11,7 @@ export enum VoucherStatus {
   FROZEN = 'frozen',       // 已冻结
   EXPIRED = 'expired',     // 已过期
   DESTROYED = 'destroyed', // 已销毁
+  REDEEMED = 'redeemed',   // 已兑换/已使用
 }
 
 /**
@@ -25,6 +26,7 @@ export enum TransactionType {
   BATCH_CREATE = 'batch_create', // 批量创建
   EXCHANGE = 'exchange',   // 兑换
   RECYCLE = 'recycle',     // 回收
+  REDEEM = 'redeem',       // 使用/核销道具凭证
 }
 
 /**
@@ -64,6 +66,25 @@ export enum VoucherSourceType {
   ALGORITHM = 'algorithm',   // 计算分配型（基于贡献度算法计算后发放）
   ITEM = 'item',             // 游戏道具凭证（承载游戏内道具）
   VOTE = 'vote',             // 投票凭证（社区治理投票权）
+}
+
+/** A币类凭证合集（可计入余额、可支付的类型） */
+export const CURRENCY_SOURCE_TYPES = [
+  VoucherSourceType.INSTANT,
+  VoucherSourceType.ALGORITHM,
+  VoucherSourceType.VOTE,
+] as const;
+
+/** 判断是否为A币类凭证（可计入余额、可参与支付） */
+export function isCurrencyVoucher(sourceType?: VoucherSourceType): boolean {
+  // sourceType 为 undefined 视为旧凭证（默认 A币类型），向后兼容
+  if (sourceType === undefined) return true;
+  return (CURRENCY_SOURCE_TYPES as readonly string[]).includes(sourceType);
+}
+
+/** 判断是否为道具凭证（不可计入余额、可上架交易） */
+export function isItemVoucher(sourceType: VoucherSourceType): boolean {
+  return sourceType === VoucherSourceType.ITEM;
 }
 
 /**

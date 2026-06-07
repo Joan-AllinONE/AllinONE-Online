@@ -174,3 +174,44 @@ export function deleteLS(gameId: string): void {
   }
   localStorage.removeItem(`${key}_meta`);
 }
+
+// ==================== CloudBase 云存储导出（供 publishedGameService 使用） ====================
+
+/**
+ * 上传游戏文件到 CloudBase 云存储（异步，best-effort）
+ */
+export async function uploadToCloudStorage(
+  gameId: string,
+  files: Array<{ name: string; path: string; content: string }>
+): Promise<void> {
+  try {
+    const { uploadGameFiles } = await import('./cloudbaseStorage');
+    await uploadGameFiles(gameId, files);
+  } catch {
+    // CloudBase 不可用，静默失败
+  }
+}
+
+/**
+ * 从 CloudBase 云存储获取游戏的临时下载 URL
+ */
+export async function getCloudStorageUrl(gameId: string, filePath: string): Promise<string | null> {
+  try {
+    const { getGameFileTempUrl } = await import('./cloudbaseStorage');
+    return await getGameFileTempUrl(gameId, filePath);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 从 CloudBase 云存储删除游戏文件
+ */
+export async function deleteCloudStorage(gameId: string): Promise<void> {
+  try {
+    const { deleteCloudGameFiles } = await import('./cloudbaseStorage');
+    await deleteCloudGameFiles(gameId);
+  } catch {
+    // 静默失败
+  }
+}

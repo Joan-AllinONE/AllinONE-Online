@@ -16,7 +16,6 @@ export interface AuthUser {
   avatar?: string;
   role: string;
   gameCoins: number;
-  aCoins: number;
 }
 
 interface AuthContextType {
@@ -53,7 +52,6 @@ const toAuthUser = (profile: UserProfile | null): AuthUser | null => {
     avatar: profile.avatar,
     role: profile.role,
     gameCoins: profile.gameCoins,
-    aCoins: profile.aCoins,
   };
 };
 

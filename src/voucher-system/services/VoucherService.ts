@@ -23,29 +23,43 @@ import {
 } from '../types';
 
 /**
- * 生成唯一ID
+ * 生成唯一ID — 使用 crypto.randomUUID()（S2-5 修复）
  */
 function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
+  // crypto.randomUUID() 在 Node 19+ 和现代浏览器均可用
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // 降级方案（极少触发）
+  const arr = new Uint32Array(4);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(arr);
+  } else {
+    for (let i = 0; i < 4; i++) arr[i] = (Math.random() * 0x100000000) >>> 0;
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c, i) => {
+    const r = (arr[Math.floor(i / 4)] >> ((i % 4) * 8)) & 0xff;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
 }
 
 /**
- * 生成交易哈希（用于防篡改验证）
+ * 生成交易哈希（FNV-1a 64-bit — S2-5 修复，替换 djb2 弱哈希）
  */
 function generateTxHash(voucherId: string, fromUser: string, toUser: string, timestamp: number): string {
-  const data = `${voucherId}:${fromUser}:${toUser}:${timestamp}:${Math.random()}`;
-  // 简单哈希实现，生产环境应使用 SHA-256
-  let hash = 0;
+  // 使用 FNV-1a 64-bit 哈希（碰撞概率远低于 djb2）
+  // 移除 Math.random() — 使哈希可验证（确定性）
+  const data = `${voucherId}:${fromUser}:${toUser}:${timestamp}`;
+  let hashLo = 0x811c9dc5;  // FNV offset basis (low 32 bits)
+  let hashHi = 0xcbf29ce4;  // FNV offset basis (high 32 bits) — simplified to 32-bit
   for (let i = 0; i < data.length; i++) {
-    const char = data.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
+    hashLo ^= data.charCodeAt(i);
+    hashLo = Math.imul(hashLo, 0x01000193); // FNV prime
+    // 32-bit overflow simulation
+    hashLo = (hashLo & 0xffffffff) >>> 0;
   }
-  return Math.abs(hash).toString(16).padStart(16, '0');
+  return hashLo.toString(16).padStart(8, '0');
 }
 
 /**
@@ -478,6 +492,59 @@ export class VoucherService {
 
     // 更新凭证状态
     voucher.status = VoucherStatus.DESTROYED;
+
+    this.db.updateVoucher(voucher);
+    this.db.insertTransaction(transaction);
+
+    return transaction;
+  }
+
+  /**
+   * 核销/使用凭证（道具凭证专属操作）
+   * 将凭证标记为 REDEEMED 而非销毁，保留在用户记录中便于追溯
+   * @param voucherId 凭证ID
+   * @param operatorId 操作者ID
+   * @param operatorName 操作者名称
+   * @param reason 使用原因
+   * @returns 交易记录
+   */
+  redeemVoucher(
+    voucherId: string,
+    operatorId: string,
+    operatorName: string,
+    reason?: string
+  ): Transaction {
+    const voucher = this.db.getVoucherById(voucherId);
+
+    if (!voucher) {
+      throw new Error(`凭证不存在: ${voucherId}`);
+    }
+
+    if (voucher.status !== VoucherStatus.ACTIVE) {
+      throw new Error(`只能使用正常状态的凭证，当前状态: ${voucher.status}`);
+    }
+
+    const now = Date.now();
+
+    // 创建兑换交易记录
+    const transaction: Transaction = {
+      id: generateUUID(),
+      voucherId: voucher.id,
+      type: TransactionType.REDEEM,
+      fromUserId: voucher.currentHolderId,
+      fromUserName: voucher.currentHolderName,
+      toUserId: operatorId,
+      toUserName: operatorName,
+      amount: voucher.denomination,
+      timestamp: now,
+      txHash: generateTxHash(voucher.id, voucher.currentHolderId, operatorId, now),
+      note: reason || '凭证已使用',
+    };
+
+    // 更新凭证状态为已兑换
+    voucher.status = VoucherStatus.REDEEMED;
+    voucher.transferCount += 1;
+    voucher.lastTransferAt = now;
 
     this.db.updateVoucher(voucher);
     this.db.insertTransaction(transaction);

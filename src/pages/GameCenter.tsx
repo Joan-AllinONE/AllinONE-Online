@@ -190,19 +190,14 @@ export default function GameCenter() {
       userId = currentUser.uid;
       userName = currentUser.nickname || '玩家';
     } else {
-      // 与 Match3Game 一致的 ID 解析逻辑
-      const voucherGuestId = localStorage.getItem('voucher_guest_id');
+      // 使用 allinone_user 做会话恢复（AuthSkill 持久化的用户信息）
       const userStr = localStorage.getItem('allinone_user');
       
-      if (voucherGuestId) {
-        userId = voucherGuestId;
-        userName = '访客用户';
-        console.log('[GameCenter] 使用凭证系统 Guest ID:', userId);
-      } else if (userStr) {
+      if (userStr) {
         try {
           const user = JSON.parse(userStr);
-          userId = user.id || user.userId || user._id;
-          userName = user.username || user.name || '玩家';
+          userId = user.uid || user.id || user.userId || user._id;
+          userName = user.username || user.nickname || '玩家';
           console.log('[GameCenter] 使用 allinone_user:', { userId, userName });
         } catch {
           userId = 'user_001';

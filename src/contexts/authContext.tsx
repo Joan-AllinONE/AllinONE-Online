@@ -6,6 +6,7 @@
 import { createContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { useContext } from 'react';
 import { authSkill, UserProfile } from '@/skills/auth/AuthSkill';
+import { initCloudBase, isCloudBaseReady } from '@/services/cloudbase';
 
 export interface AuthUser {
   id: string;
@@ -62,6 +63,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const init = async () => {
+      // 等待 CloudBase 初始化完成（确保 auth SDK 可用）
+      try {
+        await initCloudBase();
+      } catch {
+        // CloudBase 不可用，继续走 localStorage 降级
+      }
+
       try {
         const result = await authSkill.getCurrentUser(undefined as never, {} as any);
         const user = toAuthUser(result.user);

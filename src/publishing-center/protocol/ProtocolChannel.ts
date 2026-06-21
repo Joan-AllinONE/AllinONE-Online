@@ -171,6 +171,67 @@ export interface ExtensionVoucherPayload {
 
 // ==================== Schema 定义 ====================
 
+/** 创作等级定义 */
+export interface CreationTiers {
+  /** 初级：只能创建预设道具 */
+  preset: {
+    /** 预设道具列表 */
+    items: Array<{
+      name: string;
+      effect: string;
+      params: Record<string, any>;
+      description: string;
+      /** 预设道具图标（可选） */
+      icon?: string;
+    }>;
+  };
+  /** 中级：可使用已注册效果原语组合 */
+  intermediate: {
+    /** 允许使用的效果列表（来自游戏 EFFECT_HANDLERS） */
+    availableEffects: string[];
+    /** 最大组合深度 */
+    maxCompositionDepth?: number;
+    /** 单次最多组合效果数 */
+    maxEffectsPerComposition?: number;
+  };
+  /** 高级：自由创作，支持 effectScript */
+  advanced: {
+    /** 是否启用 effectScript 组合 */
+    effectScriptEnabled: boolean;
+    /** 是否允许自定义效果名（不在 EFFECT_HANDLERS 中的效果） */
+    customEffectAllowed: boolean;
+    /** 🆕 是否启用 effectCode 自定义效果函数 */
+    effectCodeEnabled?: boolean;
+    /** effectScript 允许的操作符 */
+    allowedOperators?: string[];
+    /** 最大脚本嵌套深度 */
+    maxScriptDepth?: number;
+  };
+}
+
+/** AI 可依赖的能力声明（SOP - 不泄露代码） */
+export interface AIGuide {
+  /** 生成上下文提示词 */
+  prompt: string;
+  /** 可用的效果类型清单 */
+  availableEffects?: string[];
+  /** 数值约束 */
+  constraints?: {
+    damageRange?: [number, number];
+    maxEffectsPerItem?: number;
+    validElements?: string[];
+    [key: string]: any;
+  };
+  /** 效果组合规则（自然语言声明） */
+  effectRules?: string[];
+  /** 禁止事项 */
+  forbidden?: string[];
+  /** 🆕 3级创作模式配置 */
+  creationTiers?: CreationTiers;
+  /** 用户上传的 SOP 原始 Markdown（优先于自动生成） */
+  rawMarkdown?: string;
+}
+
 export interface ExtensionSchema {
   name: string;
   version: string;
@@ -187,6 +248,8 @@ export interface ExtensionSchema {
   tags?: string[];
   /** 作者 */
   author?: string;
+  /** 🆕 AI 可依赖的游戏 SOP — 不泄露代码，只声明能力边界 */
+  aiGuide?: AIGuide;
 }
 
 // ==================== JSON Schema 子集 ====================

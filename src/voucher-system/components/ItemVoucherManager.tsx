@@ -10,8 +10,9 @@ import {
   Package, Plus, Edit3, Trash2, Copy, Coins, AlertCircle,
   CheckCircle, X, Sparkles, TrendingUp, Shield,
   ChevronDown, ChevronUp, Search, Database, Gamepad2,
-  BarChart3, RefreshCw, ExternalLink, Vote,   Bug
+  BarChart3, RefreshCw, ExternalLink, Vote, Bug, Hammer
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { voucherItemService, type ItemVoucherPurchase } from '@/services/voucherItemService';
 import { getPublishedGames, type PublishedGame } from '@/services/publishedGameService';
 import { ItemVoucherTemplate, ItemSupplyPolicy } from '@/voucher-system/types';
@@ -313,6 +314,17 @@ const ItemVoucherManager: React.FC<ItemVoucherManagerProps> = ({
                 <Vote className="w-4 h-4" />
                 游戏提案
               </button>
+
+              {/* 🆕 道具工坊入口 */}
+              <Link
+                to="/workshop"
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-purple-600
+                           hover:from-violet-500 hover:to-purple-500 text-white rounded-lg font-medium
+                           transition-all shadow-lg shadow-violet-500/25 text-sm"
+              >
+                <Hammer className="w-4 h-4" />
+                道具工坊
+              </Link>
 
               {voteMode ? (
                 <button

@@ -46,16 +46,21 @@ export function getTestAccountCredentials(): Array<TestAccount & { email: string
   return ACCOUNTS.map(a => ({ ...a, email: `${a.username}@allinone.test` }));
 }
 
-/** 开发环境本地注册（存入 AuthSkill localStorage fallback） */
+/** 开发环境本地注册（内存存储，CloudBase 不可用时的降级方案） */
+const localRegisteredUsers: Array<{ uid: string; nickname: string; email: string; password: string }> = [];
+
 export function saveRegisteredUser(user: { username: string; email: string; password: string }): void {
-  const users = JSON.parse(localStorage.getItem('allinone_users') || '[]');
   // 防止重复
-  if (users.find((u: any) => u.email === user.email)) return;
-  users.push({
+  if (localRegisteredUsers.find((u: any) => u.email === user.email)) return;
+  localRegisteredUsers.push({
     uid: 'local_' + Date.now(),
     nickname: user.username,
     email: user.email,
     password: user.password,
   });
-  localStorage.setItem('allinone_users', JSON.stringify(users));
+}
+
+/** 获取本地注册的用户列表（供 AuthSkill.loginLocal 使用） */
+export function getLocalRegisteredUsers(): Array<{ uid: string; nickname: string; email: string; password: string }> {
+  return localRegisteredUsers;
 }

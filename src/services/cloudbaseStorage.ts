@@ -7,7 +7,37 @@ import { getCloudBaseApp, isCloudBaseReady } from './cloudbase';
 const GAME_FILES_PATH = 'games';
 
 /**
+ * 根据文件扩展名推断 MIME Content-Type
+ */
+function inferContentType(filename: string): string {
+  const ext = filename.toLowerCase().split('.').pop() || '';
+  const MIME_MAP: Record<string, string> = {
+    html: 'text/html',
+    htm: 'text/html',
+    css: 'text/css',
+    js: 'application/javascript',
+    json: 'application/json',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    svg: 'image/svg+xml',
+    webp: 'image/webp',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    ogg: 'audio/ogg',
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+    wasm: 'application/wasm',
+    txt: 'text/plain',
+    xml: 'application/xml',
+  };
+  return MIME_MAP[ext] || 'application/octet-stream';
+}
+
+/**
  * 上传游戏文件到云存储
+ * 使用 File 对象（而非裸 Blob）确保 SDK 正确传输文件内容和大小
  */
 export async function uploadGameFiles(
   gameId: string,
@@ -22,11 +52,38 @@ export async function uploadGameFiles(
 
   for (const file of files) {
     try {
-      const cloudPath = `${GAME_FILES_PATH}/${gameId}/${file.path || file.name}`;
-      const blob = new Blob([file.content], { type: 'application/octet-stream' });
-      await app.uploadFile({ cloudPath, fileContent: blob });
+      const fileName = file.path || file.name;
+      const cloudPath = `${GAME_FILES_PATH}/${gameId}/${fileName}`;
+      const contentType = inferContentType(fileName);
+
+      // 使用 File 对象而非 Blob — File 有 name 属性，CloudBase SDK 能正确获取文件大小和内容
+      const fileObj = new File([file.content], fileName, { type: contentType });
+
+      // 上传前验证内容非空
+      if (fileObj.size === 0) {
+        console.warn(`[CloudStorage] 跳过空文件: ${fileName} (原始内容长度: ${file.content.length})`);
+        errors.push(`${file.name}: 文件内容为空`);
+        continue;
+      }
+
+      console.log(`[CloudStorage] 上传: ${cloudPath}, size=${fileObj.size}B, type=${contentType}`);
+
+      const result = await app.uploadFile({
+        cloudPath,
+        filePath: fileObj,   // Web SDK v2 推荐用 filePath 传 File 对象
+        fileContent: fileObj, // 兼容: 部分 SDK 版本用 fileContent
+      });
+
+      // 验证上传结果
+      if (result?.fileID) {
+        console.log(`[CloudStorage] 上传成功: ${cloudPath} → fileID=${result.fileID}`);
+      } else {
+        console.warn(`[CloudStorage] 上传返回异常: ${JSON.stringify(result)}`);
+      }
+
       uploaded++;
     } catch (e: any) {
+      console.error(`[CloudStorage] 上传失败: ${file.name}`, e);
       errors.push(`${file.name}: ${e.message || e}`);
     }
   }

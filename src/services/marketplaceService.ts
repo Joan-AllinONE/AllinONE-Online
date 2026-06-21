@@ -26,37 +26,73 @@ import type {
 } from '@/types/marketplace';
 import { MARKET_COMMISSION_RATE } from '@/types/marketplace';
 import { platformTreasuryService } from '@/services/platformTreasuryService';
+import { writeQueue } from './writeQueue';
 
 // ==================== 存储键 ====================
 const LISTINGS_KEY = 'market_listings_v2';
 const LOCK_KEY = 'market_lock'; // 并发锁
 
+let _listingsCloudSyncInitiated = false;
+
 function loadListings(): MarketListing[] {
   try {
-    return JSON.parse(localStorage.getItem(LISTINGS_KEY) || '[]');
+    const data = JSON.parse(localStorage.getItem(LISTINGS_KEY) || '[]');
+    // 异步从 CloudBase 合并增量（仅首次）
+    if (!_listingsCloudSyncInitiated) {
+      _listingsCloudSyncInitiated = true;
+      syncListingsFromCloud();
+    }
+    return data;
   } catch {
     return [];
+  }
+}
+
+/** 从 CloudBase 拉取权威数据并覆盖本地缓存（云端为准） */
+async function syncListingsFromCloud(): Promise<void> {
+  try {
+    const { waitForCloudBase } = await import('./cloudbase');
+    const app = await waitForCloudBase();
+    const res = await app.database().collection('market_listings').limit(500).get();
+    if (res.data.length === 0) return;
+    const freshRaw = localStorage.getItem(LISTINGS_KEY);
+    const fresh: MarketListing[] = freshRaw ? JSON.parse(freshRaw) : [];
+    // ✅ CloudBase 数据覆盖本地同名 ID（云端为准）
+    const cloudMap = new Map(res.data.map(d => [d.id, d]));
+    const localOnly = fresh.filter(l => !cloudMap.has(l.id));
+    const merged = [...res.data as MarketListing[], ...localOnly];
+    localStorage.setItem(LISTINGS_KEY, JSON.stringify(merged));
+  } catch {
+    // CloudBase 不可用 — 允许下次重试
+    _listingsCloudSyncInitiated = false;
   }
 }
 
 function saveListings(listings: MarketListing[]): void {
   try {
     localStorage.setItem(LISTINGS_KEY, JSON.stringify(listings));
-    // CloudBase 双写
-    import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-      if (!isCloudBaseReady()) return;
-      const db = getCloudBaseApp().database();
-      for (const listing of listings.slice(-20)) {
-        db.collection('market_listings').where({ id: listing.id }).get().then(res => {
-          if (res.data.length > 0) {
-            db.collection('market_listings').doc(res.data[0]._id).update(listing as any).catch(() => {});
-          } else {
-            db.collection('market_listings').add(listing as any).catch(() => {});
-          }
-        }).catch(() => {});
-      }
-    }).catch(() => {});
+    // CloudBase 双写（异步，不阻塞调用方）
+    syncListingsToCloud(listings);
   } catch { /* ignore */ }
+}
+
+/** 将挂牌数据同步到 CloudBase — 通过写入队列保证零丢失+重试 */
+function syncListingsToCloud(listings: MarketListing[]): void {
+  const DAY = 86400000;
+  const now = Date.now();
+  // 同步活跃挂牌 + 7天内售出 + 24小时内下架的
+  const toSync = listings.filter(l =>
+    l.status === 'active' ||
+    (l.soldAt && l.soldAt > now - 7 * DAY) ||
+    (l.cancelledAt && l.cancelledAt > now - DAY)
+  );
+  for (const listing of toSync) {
+    writeQueue.enqueue({
+      collection: 'market_listings',
+      operation: 'upsert',
+      data: listing as any,
+    });
+  }
 }
 
 function generateId(): string {

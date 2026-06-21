@@ -21,11 +21,18 @@ import { voucherRuleEngine } from '../engine/RuleEngine';
 import type { DistributionRule, RecycleRule, ExchangeRate, VoucherRules } from '../types';
 import { PLATFORM_CURRENCY_TEMPLATE } from '../templates';
 import { userPoolService } from './UserPoolService';
+import { persistWithCloudSync, loadWithCloudSync, deleteFromCloud } from '../storage/cloudSync';
 
 const STORAGE_KEYS = {
   BINDINGS: 'voucher_platform_bindings',
   REWARD_RECORDS: 'voucher_reward_records',
   USER_LIMITS: 'voucher_user_reward_limits',
+};
+
+const CLOUD_COLLECTIONS = {
+  BINDINGS: 'platform_bindings',
+  REWARD_RECORDS: 'reward_records',
+  USER_LIMITS: 'user_reward_limits',
 };
 
 /**
@@ -87,29 +94,24 @@ export class PlatformBindingService {
   private loadFromStorage(): void {
     try {
       // 加载绑定配置
-      const bindingsData = localStorage.getItem(STORAGE_KEYS.BINDINGS);
-      if (bindingsData) {
-        const bindings: PlatformBindingConfig[] = JSON.parse(bindingsData);
-        bindings.forEach(b => this.bindings.set(b.id, b));
-        console.log(`[PlatformBindingService] 加载 ${bindings.length} 个绑定配置:`,
-          bindings.map(b => `[${b.gameName}]规则=${b.ruleId} 启用=${b.enabled}`));
-      } else {
-        console.log('[PlatformBindingService] 没有找到任何绑定配置');
-      }
+      const { data: bindings, cloudSync: bindingsSync } = loadWithCloudSync<PlatformBindingConfig>(
+        STORAGE_KEYS.BINDINGS, CLOUD_COLLECTIONS.BINDINGS,
+      );
+      bindings.forEach(b => this.bindings.set(b.id, b));
+      console.log(`[PlatformBindingService] 加载 ${bindings.length} 个绑定配置:`,
+        bindings.map(b => `[${b.gameName}]规则=${b.ruleId} 启用=${b.enabled}`));
 
       // 加载发放记录
-      const recordsData = localStorage.getItem(STORAGE_KEYS.REWARD_RECORDS);
-      if (recordsData) {
-        const records: RewardDistributionRecord[] = JSON.parse(recordsData);
-        records.forEach(r => this.rewardRecords.set(r.id, r));
-      }
+      const { data: records, cloudSync: recordsSync } = loadWithCloudSync<RewardDistributionRecord>(
+        STORAGE_KEYS.REWARD_RECORDS, CLOUD_COLLECTIONS.REWARD_RECORDS,
+      );
+      records.forEach(r => this.rewardRecords.set(r.id, r));
 
       // 加载用户限制
-      const limitsData = localStorage.getItem(STORAGE_KEYS.USER_LIMITS);
-      if (limitsData) {
-        const limits: UserRewardLimit[] = JSON.parse(limitsData);
-        limits.forEach(l => this.userLimits.set(`${l.userId}:${l.bindingId}`, l));
-      }
+      const { data: limits } = loadWithCloudSync<UserRewardLimit>(
+        STORAGE_KEYS.USER_LIMITS, CLOUD_COLLECTIONS.USER_LIMITS,
+      );
+      limits.forEach(l => this.userLimits.set(`${l.userId}:${l.bindingId}`, l));
 
       this.initialized = true;
       console.log('[PlatformBindingService] 数据加载完成:', {
@@ -117,6 +119,28 @@ export class PlatformBindingService {
         records: this.rewardRecords.size,
         limits: this.userLimits.size,
       });
+
+      // 异步合并 CloudBase 增量数据（仅添加云端独有项，防止已删除数据复活）
+      const bindingOriginalIds = new Set(bindings.map(b => b.id));
+      const recordOriginalIds = new Set(records.map(r => r.id));
+      bindingsSync.then(merged => {
+        let added = false;
+        for (const b of merged) {
+          if (!bindingOriginalIds.has(b.id) && !this.bindings.has(b.id)) {
+            this.bindings.set(b.id, b); added = true;
+          }
+        }
+        if (added) this.saveToStorage();
+      }).catch(() => {});
+      recordsSync.then(merged => {
+        let added = false;
+        for (const r of merged) {
+          if (!recordOriginalIds.has(r.id) && !this.rewardRecords.has(r.id)) {
+            this.rewardRecords.set(r.id, r); added = true;
+          }
+        }
+        if (added) this.saveToStorage();
+      }).catch(() => {});
     } catch (error) {
       console.error('[PlatformBindingService] 加载数据失败:', error);
     }
@@ -124,9 +148,9 @@ export class PlatformBindingService {
 
   private saveToStorage(): void {
     try {
-      localStorage.setItem(STORAGE_KEYS.BINDINGS, JSON.stringify([...this.bindings.values()]));
-      localStorage.setItem(STORAGE_KEYS.REWARD_RECORDS, JSON.stringify([...this.rewardRecords.values()]));
-      localStorage.setItem(STORAGE_KEYS.USER_LIMITS, JSON.stringify([...this.userLimits.values()]));
+      persistWithCloudSync(STORAGE_KEYS.BINDINGS, [...this.bindings.values()], CLOUD_COLLECTIONS.BINDINGS);
+      persistWithCloudSync(STORAGE_KEYS.REWARD_RECORDS, [...this.rewardRecords.values()], CLOUD_COLLECTIONS.REWARD_RECORDS);
+      persistWithCloudSync(STORAGE_KEYS.USER_LIMITS, [...this.userLimits.values()], CLOUD_COLLECTIONS.USER_LIMITS);
     } catch (error) {
       console.error('[PlatformBindingService] 保存数据失败:', error);
     }
@@ -236,6 +260,7 @@ export class PlatformBindingService {
     const result = this.bindings.delete(bindingId);
     if (result) {
       this.saveToStorage();
+      deleteFromCloud(CLOUD_COLLECTIONS.BINDINGS, bindingId).catch(() => {});
     }
     return result;
   }

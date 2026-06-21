@@ -20,6 +20,7 @@ import {
   GameRedeemCodeOverview,
   RedeemCodePurchase,
 } from '@/types/redeemCode';
+import { getToken } from './authTokenService';
 
 // ==================== 工具函数 ====================
 
@@ -54,7 +55,7 @@ function generateRandomCode(
  * 生成唯一ID
  */
 function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 }
 
 // ==================== 本地存储键 ====================
@@ -65,19 +66,48 @@ const STORAGE_KEYS = {
   PURCHASES: 'allinone_redeem_purchases',
 };
 
-// ==================== CloudBase 双写工具 ====================
+// ==================== CloudBase 同步工具（writeQueue 优先） ====================
 
+import { writeQueue } from './writeQueue';
+
+/** 通过 writeQueue 将数据同步到 CloudBase（保证零丢失 + 重试） */
 function syncToCloudBase(collection: string, items: any[]): void {
+  for (const item of items) {
+    writeQueue.enqueue({
+      collection,
+      operation: 'upsert',
+      data: item,
+    });
+  }
+}
+
+let _cloudSyncInitiated = false;
+
+/**
+ * 从 CloudBase 加载增量数据到本地缓存（首次调用时异步执行一次）
+ * CloudBase 数据覆盖本地缓存（权威数据源）
+ */
+function initCloudSyncIfNeeded(): void {
+  if (_cloudSyncInitiated) return;
+  _cloudSyncInitiated = true;
   import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
     if (!isCloudBaseReady()) return;
     const db = getCloudBaseApp().database();
-    for (const item of items.slice(-20)) {
-      db.collection(collection).where({ id: item.id }).get().then(res => {
-        if (res.data.length > 0) {
-          db.collection(collection).doc(res.data[0]._id).update(item).catch(() => {});
-        } else {
-          db.collection(collection).add(item).catch(() => {});
-        }
+    const collections = [
+      { key: STORAGE_KEYS.HOSTED_ITEMS, name: 'redeem_hosted_items' },
+      { key: STORAGE_KEYS.REDEEM_CODES, name: 'redeem_codes' },
+      { key: STORAGE_KEYS.PURCHASES, name: 'redeem_purchases' },
+    ];
+    for (const col of collections) {
+      db.collection(col.name).limit(500).get().then(res => {
+        if (res.data.length === 0) return;
+        const localRaw = localStorage.getItem(col.key);
+        const local: any[] = localRaw ? JSON.parse(localRaw) : [];
+        // ✅ CloudBase 数据覆盖本地同名 ID（云端为准）
+        const cloudMap = new Map(res.data.map((d: any) => [d.id, d]));
+        const localOnly = local.filter((x: any) => !cloudMap.has(x.id));
+        const merged = [...res.data, ...localOnly];
+        localStorage.setItem(col.key, JSON.stringify(merged));
       }).catch(() => {});
     }
   }).catch(() => {});
@@ -128,7 +158,7 @@ class RedeemCodeService {
     const items = this.getHostedItems();
     items.push(item);
     localStorage.setItem(STORAGE_KEYS.HOSTED_ITEMS, JSON.stringify(items));
-    syncToCloudBase('redeem_codes', [item]);
+    syncToCloudBase('redeem_hosted_items', [item]);
 
     // 自动生成兑换码
     if (request.initialInventory > 0) {
@@ -146,6 +176,7 @@ class RedeemCodeService {
    * 获取所有托管道具
    */
   getHostedItems(gameId?: string): HostedItem[] {
+    initCloudSyncIfNeeded();
     const data = localStorage.getItem(STORAGE_KEYS.HOSTED_ITEMS);
     const items: HostedItem[] = data ? JSON.parse(data) : [];
     return gameId ? items.filter(i => i.gameId === gameId) : items;
@@ -174,7 +205,7 @@ class RedeemCodeService {
     };
 
     localStorage.setItem(STORAGE_KEYS.HOSTED_ITEMS, JSON.stringify(items));
-    syncToCloudBase('redeem_codes', [items[index]]);
+    syncToCloudBase('redeem_hosted_items', [items[index]]);
     return items[index];
   }
 
@@ -183,13 +214,32 @@ class RedeemCodeService {
    */
   async deleteHostedItem(itemId: string): Promise<boolean> {
     const items = this.getHostedItems();
+    const itemToDelete = items.find(i => i.id === itemId);
     const filtered = items.filter(i => i.id !== itemId);
     localStorage.setItem(STORAGE_KEYS.HOSTED_ITEMS, JSON.stringify(filtered));
     
+    // ✅ 同步删除 CloudBase 中的数据（防止下次云端同步拉回已删除的数据）
+    if (itemToDelete) {
+      writeQueue.enqueue({
+        collection: 'redeem_hosted_items',
+        operation: 'delete',
+        where: { id: itemId },
+      });
+    }
+    
     // 同时删除关联的兑换码
     const codes = this.getAllCodes();
+    const relatedCodes = codes.filter(c => c.itemId === itemId);
     const filteredCodes = codes.filter(c => c.itemId !== itemId);
     localStorage.setItem(STORAGE_KEYS.REDEEM_CODES, JSON.stringify(filteredCodes));
+    // ✅ 同步删除关联兑换码
+    for (const code of relatedCodes) {
+      writeQueue.enqueue({
+        collection: 'redeem_codes',
+        operation: 'delete',
+        where: { id: code.id },
+      });
+    }
     
     return true;
   }
@@ -228,8 +278,8 @@ class RedeemCodeService {
         itemId: item.id,
         status: RedeemCodeStatus.UNUSED,
         createdAt: new Date().toISOString(),
-        expiredAt: expireDays > 0 
-          ? new Date(Date.now() + expireDays * 24 * 60 * 60 * 1000).toISOString()
+        expiredAt: (expireDays ?? 0) > 0 
+          ? new Date(Date.now() + (expireDays ?? 0) * 24 * 60 * 60 * 1000).toISOString()
           : undefined,
         verifyCount: 0,
       };
@@ -268,6 +318,7 @@ class RedeemCodeService {
    * 获取所有兑换码
    */
   getAllCodes(): RedeemCode[] {
+    initCloudSyncIfNeeded();
     const data = localStorage.getItem(STORAGE_KEYS.REDEEM_CODES);
     return data ? JSON.parse(data) : [];
   }
@@ -501,7 +552,7 @@ class RedeemCodeService {
     const purchases = this.getPurchases();
     purchases.push(purchase);
     localStorage.setItem(STORAGE_KEYS.PURCHASES, JSON.stringify(purchases));
-    syncToCloudBase('redeem_codes', [purchase]);
+    syncToCloudBase('redeem_purchases', [purchase]);
 
     // 自动同步到后端
     this.syncToBackend().catch(() => {});
@@ -517,6 +568,7 @@ class RedeemCodeService {
    * 获取购买记录
    */
   getPurchases(userId?: string, gameId?: string): RedeemCodePurchase[] {
+    initCloudSyncIfNeeded();
     const data = localStorage.getItem(STORAGE_KEYS.PURCHASES);
     let purchases: RedeemCodePurchase[] = data ? JSON.parse(data) : [];
     
@@ -672,9 +724,18 @@ class RedeemCodeService {
         updatedAt: i.updatedAt,
       }));
 
+      // 获取 JWT token 用于认证（通过集中式 token 服务）
+      let token: string | null = null;
+      try {
+        token = await getToken();
+      } catch { /* 获取 token 失败，继续无认证请求 */ }
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const response = await fetch(`${this.getApiBaseUrl()}/api/redeem/sync`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ codes: codeRecords, items: itemRecords }),
       });
 

@@ -23,6 +23,8 @@
     "src/server/metrics.ts",
     "src/server/routes/health.ts",
     "src/server/routes/redeem.ts",
-    "src/server/routes/inventory.ts"
+    "src/server/routes/inventory.ts",
+    "src/server/routes/games.ts",
+    "src/server/routes/gameDeveloper.ts"
   ]
 }

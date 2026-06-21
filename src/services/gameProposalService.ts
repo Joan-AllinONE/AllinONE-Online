@@ -24,12 +24,15 @@ import { generateSimulatedPlayers, generatePlayerMetrics, calculateVoteWeight } 
 import { voteVoucherService } from '@/voucher-system/services/VoteVoucherService';
 import { voteFraudDetector } from '@/voucher-system/services/VoteFraudDetector';
 import { VoteSettlementStatus } from '@/voucher-system/types/vote';
+import { writeQueue } from './writeQueue';
 
 // ==================== 常量 ====================
 
 const PROPOSALS_STORAGE_KEY = 'game_proposals';
 const THRESHOLDS_STORAGE_KEY = 'game_vote_thresholds';
 const PENALTY_LOGS_KEY = 'game_penalty_logs';
+
+let _cloudSyncInitiated = false;
 
 // ==================== 存储工具 ====================
 
@@ -44,7 +47,26 @@ function generateUUID(): string {
 function loadProposals(): GameProposal[] {
   try {
     const raw = localStorage.getItem(PROPOSALS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const data = raw ? JSON.parse(raw) : [];
+    // 异步从 CloudBase 刷新缓存（仅首次，云端数据覆盖本地）
+    if (!_cloudSyncInitiated) {
+      _cloudSyncInitiated = true;
+      import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+        if (!isCloudBaseReady()) return;
+        getCloudBaseApp().database().collection('proposals').limit(500).get().then(res => {
+          if (res.data.length === 0) return;
+          const freshRaw = localStorage.getItem(PROPOSALS_STORAGE_KEY);
+          const fresh: GameProposal[] = freshRaw ? JSON.parse(freshRaw) : [];
+          // ✅ CloudBase 数据覆盖本地同名 ID（云端为准）
+          const cloudMap = new Map(res.data.map(d => [d.id, d]));
+          const localOnly = fresh.filter(p => !cloudMap.has(p.id));
+          const merged = [...res.data as GameProposal[], ...localOnly];
+          localStorage.setItem(PROPOSALS_STORAGE_KEY, JSON.stringify(merged));
+          window.dispatchEvent(new CustomEvent('proposals-list-updated'));
+        }).catch(() => {});
+      }).catch(() => {});
+    }
+    return data;
   } catch {
     return [];
   }
@@ -52,46 +74,100 @@ function loadProposals(): GameProposal[] {
 
 function saveProposals(proposals: GameProposal[]): void {
   localStorage.setItem(PROPOSALS_STORAGE_KEY, JSON.stringify(proposals));
-  // CloudBase 双写
-  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-    if (!isCloudBaseReady()) return;
-    const db = getCloudBaseApp().database();
-    for (const proposal of proposals.slice(-10)) {
-      db.collection('proposals').where({ id: proposal.id }).get().then(res => {
-        if (res.data.length > 0) {
-          db.collection('proposals').doc(res.data[0]._id).update(proposal as any).catch(() => {});
-        } else {
-          db.collection('proposals').add(proposal as any).catch(() => {});
-        }
-      }).catch(() => {});
-    }
-  }).catch(() => {});
+  // CloudBase 双写（通过写入队列，全量入队不再截断）
+  for (const proposal of proposals) {
+    writeQueue.enqueue({
+      collection: 'proposals',
+      operation: 'upsert',
+      data: proposal as any,
+    });
+  }
 }
 
 function loadThresholds(): Record<string, GameVoteThreshold> {
   try {
     const raw = localStorage.getItem(THRESHOLDS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
+    const data: Record<string, GameVoteThreshold> = raw ? JSON.parse(raw) : {};
+    // 异步从 CloudBase 刷新（首次）
+    if (!_thresholdsCloudSyncInitiated) {
+      _thresholdsCloudSyncInitiated = true;
+      import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+        if (!isCloudBaseReady()) return;
+        getCloudBaseApp().database().collection('vote_thresholds').limit(500).get().then(res => {
+          if (res.data.length === 0) return;
+          // 重新读取最新 localStorage，避免覆写期间产生的新数据
+          const freshRaw = localStorage.getItem(THRESHOLDS_STORAGE_KEY);
+          const fresh: Record<string, GameVoteThreshold> = freshRaw ? JSON.parse(freshRaw) : {};
+          const cloudThresholds: Record<string, GameVoteThreshold> = {};
+          for (const doc of res.data) {
+            if (doc.gameId) cloudThresholds[doc.gameId] = doc as GameVoteThreshold;
+          }
+          // ✅ CloudBase 数据覆盖本地同名 gameId
+          const merged = { ...fresh, ...cloudThresholds };
+          localStorage.setItem(THRESHOLDS_STORAGE_KEY, JSON.stringify(merged));
+        }).catch(() => {});
+      }).catch(() => {});
+    }
+    return data;
   } catch {
     return {};
   }
 }
 
+let _thresholdsCloudSyncInitiated = false;
+
 function saveThresholds(thresholds: Record<string, GameVoteThreshold>): void {
   localStorage.setItem(THRESHOLDS_STORAGE_KEY, JSON.stringify(thresholds));
+  // ✅ CloudBase 双写（每个游戏的门槛配置独立 upsert）
+  for (const threshold of Object.values(thresholds)) {
+    writeQueue.enqueue({
+      collection: 'vote_thresholds',
+      operation: 'upsert',
+      data: threshold as any,
+    });
+  }
 }
 
 function loadPenaltyLogs(): PenaltyLog[] {
   try {
     const raw = localStorage.getItem(PENALTY_LOGS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const data: PenaltyLog[] = raw ? JSON.parse(raw) : [];
+    // 异步从 CloudBase 刷新（首次）
+    if (!_penaltyLogsCloudSyncInitiated) {
+      _penaltyLogsCloudSyncInitiated = true;
+      import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+        if (!isCloudBaseReady()) return;
+        getCloudBaseApp().database().collection('penalty_logs').limit(500).get().then(res => {
+          if (res.data.length === 0) return;
+          // 重新读取最新 localStorage，避免覆写期间产生的新数据
+          const freshRaw = localStorage.getItem(PENALTY_LOGS_KEY);
+          const fresh: PenaltyLog[] = freshRaw ? JSON.parse(freshRaw) : [];
+          // ✅ CloudBase 数据覆盖本地同名 ID
+          const cloudMap = new Map(res.data.map(d => [d.id, d]));
+          const localOnly = fresh.filter(l => !cloudMap.has(l.id));
+          const merged = [...res.data as PenaltyLog[], ...localOnly];
+          localStorage.setItem(PENALTY_LOGS_KEY, JSON.stringify(merged));
+        }).catch(() => {});
+      }).catch(() => {});
+    }
+    return data;
   } catch {
     return [];
   }
 }
 
+let _penaltyLogsCloudSyncInitiated = false;
+
 function savePenaltyLogs(logs: PenaltyLog[]): void {
   localStorage.setItem(PENALTY_LOGS_KEY, JSON.stringify(logs));
+  // ✅ CloudBase 双写
+  for (const log of logs) {
+    writeQueue.enqueue({
+      collection: 'penalty_logs',
+      operation: 'upsert',
+      data: log as any,
+    });
+  }
 }
 
 // ==================== 默认投票门槛 ====================
@@ -794,8 +870,17 @@ class GameProposalService {
       return false;
     }
 
+    const deletedProposal = proposals[index];
     proposals.splice(index, 1);
     saveProposals(proposals);
+
+    // ✅ 同步删除 CloudBase 中的提案（防止下次云端同步拉回已删除的数据）
+    writeQueue.enqueue({
+      collection: 'proposals',
+      operation: 'delete',
+      where: { id: deletedProposal.id },
+    });
+
     return true;
   }
 

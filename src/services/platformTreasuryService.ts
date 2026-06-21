@@ -20,6 +20,7 @@ import type { Voucher } from '@/voucher-system/types';
 import { loadTreasury as loadTreasuryFromMarket } from '@/types/marketplace';
 import type { PlatformTreasury } from '@/types/marketplace';
 import { PLATFORM_POOL_ID } from '@/services/voucherPaymentService';
+import { writeQueue } from '@/services/writeQueue';
 
 // ==================== 常量 ====================
 
@@ -350,11 +351,12 @@ class PlatformTreasuryService {
       all.push(full);
       if (all.length > 500) all.splice(0, all.length - 500);
       localStorage.setItem(TREASURY_TX_KEY, JSON.stringify(all));
-      // CloudBase 双写
-      import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-        if (!isCloudBaseReady()) return;
-        getCloudBaseApp().database().collection('platform_treasury').add(full as any).catch(() => {});
-      }).catch(() => {});
+      // CloudBase 双写（通过写入队列，upsert 避免重复）
+      writeQueue.enqueue({
+        collection: 'platform_treasury',
+        operation: 'upsert',
+        data: full as any,
+      });
     } catch { /* ignore */ }
   }
 }

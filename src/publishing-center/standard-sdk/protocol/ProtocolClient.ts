@@ -7,13 +7,30 @@
  * 使用方式（游戏开发方）：
  * ```typescript
  * import { ProtocolClient } from '@allinone/standard-sdk/protocol';
+ * import { ItemFactory } from './ItemFactory';
  *
  * const client = new ProtocolClient({
  *   gameId: 'my-game',
  *   supportedActions: ['start', 'pause', 'resume'],
- *   supportedSchemas: ['weapon', 'shop'],
+ *   supportedSchemas: ['weapon', 'shop', 'quest'],
  * });
  * await client.initialize();
+ *
+ * // 🆕 注册道具工厂（按 Schema 创建道具）
+ * ItemFactory.register('weapon', (data) => gameWorld.createWeapon(data));
+ * ItemFactory.register('shop', (data) => gameWorld.createShop(data));
+ * ItemFactory.register('quest', (data) => gameWorld.createQuest(data));
+ *
+ * // 🆕 监听 UGC 道具下发 — 新道具秒级生效，无需重新发布
+ * client.on('voucher', (payload) => {
+ *   if (payload.type === 'game_extension') {
+ *     const item = ItemFactory.create(payload.schemaName, payload.data);
+ *     if (item) {
+ *       playerInventory.add(item);
+ *       showToast(`获得道具: ${item.name}`);
+ *     }
+ *   }
+ * });
  * ```
  */
 
@@ -21,12 +38,9 @@ import type {
   GameToPlatformMessage,
   PlatformToGameMessage,
   ProtocolMode,
-} from '../../../protocol/ProtocolChannel';
+} from '../../protocol/ProtocolChannel';
 
-import {
-  PROTOCOL_VERSION,
-  createReadyMessage,
-} from '../../../protocol/ProtocolChannel';
+import { createReadyMessage } from '../../protocol/ProtocolChannel';
 
 // ==================== 配置 ====================
 
@@ -103,9 +117,18 @@ export class ProtocolClient {
 
   /**
    * 取消监听
+   * @param event 事件名称
+   * @param handler 可选，指定要移除的处理器。不传则移除该事件的所有处理器
    */
-  off(event: string): void {
-    this.messageHandlers.delete(event);
+  off(event: string, handler?: (data: any) => void): void {
+    if (handler) {
+      const current = this.messageHandlers.get(event);
+      if (current === handler) {
+        this.messageHandlers.delete(event);
+      }
+    } else {
+      this.messageHandlers.delete(event);
+    }
   }
 
   // ==================== 发送消息 ====================
@@ -132,7 +155,7 @@ export class ProtocolClient {
       success,
       data,
       error,
-      requestId: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      requestId: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       timestamp: Date.now(),
     });
   }
@@ -141,7 +164,7 @@ export class ProtocolClient {
    * 查询 Schema
    */
   querySchema(schemaName: string, callback: (schema: any) => void): void {
-    const requestId = `qs_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const requestId = `qs_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
     this.on(`schema:${requestId}`, (schema) => {
       callback(schema);
@@ -248,6 +271,33 @@ export class ProtocolClient {
     if (this.config.debug) {
       console.log('[ProtocolClient]', ...args);
     }
+  }
+
+  /**
+   * 🆕 便捷方法：监听 UGC 道具凭证下发
+   *
+   * 封装了 EXTENSION_VOUCHER → ItemFactory.create 的标准流程。
+   * 游戏开发者只需传入 ItemFactory 实例，即可自动处理道具创建。
+   *
+   * @param itemFactory ItemFactory 实例（或兼容接口）
+   *
+   * 使用示例：
+   * ```typescript
+   * client.onVoucherItem(ItemFactory);
+   * ```
+   */
+  onVoucherItem(itemFactory: { create: (schemaName: string, data: any) => any }): void {
+    this.on('voucher', (payload: any) => {
+      if (payload.type === 'game_extension') {
+        const { schemaName, data } = payload;
+        const item = itemFactory.create(schemaName, data);
+        if (item) {
+          this.emit('ugc:item_created', { schemaName, data, item });
+        } else {
+          this.log(`⚠️ 不支持 Schema: "${schemaName}"，已注册: [${itemFactory.create}]`);
+        }
+      }
+    });
   }
 
   /**

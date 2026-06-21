@@ -1,30 +1,40 @@
 /**
  * 双写渐进迁移工具
  *
- * 写入时：同时写 localStorage 和 CloudBase，CloudBase 失败不阻塞
+ * 写入时：同时写 localStorage 和 CloudBase（通过写入队列，保证重试 + 零丢失）
  * 读取时：CloudBase 优先，失败回退 localStorage
  */
 import { getCloudBaseApp, isCloudBaseReady } from './cloudbase';
+import { writeQueue } from './writeQueue';
 
 export interface CloudWriteResult {
   success: boolean;
   error?: string;
 }
 
-/** CloudBase 写入 */
+/**
+ * CloudBase 写入 — 通过写入队列入队，保证数据不丢失
+ * 入队后立即返回 success=true（队列会自动重试）
+ */
 export async function cloudWrite(
   collection: string,
   data: Record<string, any>,
   docId?: string
 ): Promise<CloudWriteResult> {
-  if (!isCloudBaseReady()) return { success: false, error: 'CloudBase not ready' };
   try {
-    const app = getCloudBaseApp();
-    const db = app.database();
     if (docId) {
-      await db.collection(collection).doc(docId).update({ ...data, _updatedAt: Date.now() });
+      writeQueue.enqueue({
+        collection,
+        operation: 'update',
+        docId,
+        data,
+      });
     } else {
-      await db.collection(collection).add({ ...data, _createdAt: Date.now(), _updatedAt: Date.now() });
+      writeQueue.enqueue({
+        collection,
+        operation: 'add',
+        data,
+      });
     }
     return { success: true };
   } catch (e: any) {
@@ -32,24 +42,48 @@ export async function cloudWrite(
   }
 }
 
-/** CloudBase 按条件更新 */
+/**
+ * CloudBase 按条件更新 — 通过写入队列入队
+ */
 export async function cloudUpdateWhere(
   collection: string,
   where: Record<string, any>,
   data: Record<string, any>
 ): Promise<CloudWriteResult> {
-  if (!isCloudBaseReady()) return { success: false, error: 'CloudBase not ready' };
   try {
-    const app = getCloudBaseApp();
-    const db = app.database();
-    await db.collection(collection).where(where).update({ ...data, _updatedAt: Date.now() });
+    writeQueue.enqueue({
+      collection,
+      operation: 'update',
+      where,
+      data,
+    });
     return { success: true };
   } catch (e: any) {
     return { success: false, error: e.message || String(e) };
   }
 }
 
-/** CloudBase 查询 */
+/**
+ * CloudBase upsert — 通过写入队列入队
+ * 用于有 id 字段的记录，先查后写
+ */
+export async function cloudUpsert(
+  collection: string,
+  data: Record<string, any> & { id: string }
+): Promise<CloudWriteResult> {
+  try {
+    writeQueue.enqueue({
+      collection,
+      operation: 'upsert',
+      data,
+    });
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e.message || String(e) };
+  }
+}
+
+/** CloudBase 查询（读取路径，不经过队列） */
 export async function cloudRead<T = any>(
   collection: string,
   where: Record<string, any>,
@@ -70,19 +104,19 @@ export async function cloudRead<T = any>(
   }
 }
 
-/** CloudBase 删除（先查后删，安全规则兼容） */
+/**
+ * CloudBase 删除（先查后删） — 通过写入队列入队
+ */
 export async function cloudDelete(
   collection: string,
   where: Record<string, any>
 ): Promise<CloudWriteResult> {
-  if (!isCloudBaseReady()) return { success: false, error: 'CloudBase not ready' };
   try {
-    const app = getCloudBaseApp();
-    const db = app.database();
-    const res = await db.collection(collection).where(where).get();
-    for (const doc of res.data) {
-      await db.collection(collection).doc(doc._id).remove();
-    }
+    writeQueue.enqueue({
+      collection,
+      operation: 'delete',
+      where,
+    });
     return { success: true };
   } catch (e: any) {
     return { success: false, error: e.message || String(e) };
@@ -136,7 +170,7 @@ export function createDualStore<T extends Record<string, any>>(
       }
     },
 
-    /** 保存（双写） */
+    /** 保存（双写）— CloudBase 通过队列入队 */
     async save(item: T): Promise<void> {
       // 写 localStorage
       try {
@@ -146,19 +180,19 @@ export function createDualStore<T extends Record<string, any>>(
         else all.push(item);
         localStorage.setItem(lsKey, JSON.stringify(all));
       } catch { /* ignore */ }
-      // 写 CloudBase（best effort）
-      cloudWrite(collection, item);
+      // 写 CloudBase（通过队列 upsert，避免重复文档）
+      await cloudUpsert(collection, item as Record<string, any> & { id: string });
     },
 
-    /** 批量保存 */
+    /** 批量保存 — CloudBase 通过队列入队 */
     async saveAll(items: T[]): Promise<void> {
       localStorage.setItem(lsKey, JSON.stringify(items));
       for (const item of items) {
-        cloudWrite(collection, item);
+        await cloudUpsert(collection, item as Record<string, any> & { id: string });
       }
     },
 
-    /** 删除 */
+    /** 删除 — CloudBase 通过队列入队 */
     async remove(id: string): Promise<void> {
       try {
         const all: T[] = JSON.parse(localStorage.getItem(lsKey) || '[]');
@@ -167,7 +201,7 @@ export function createDualStore<T extends Record<string, any>>(
           JSON.stringify(all.filter((x: any) => x[idField] !== id))
         );
       } catch { /* ignore */ }
-      cloudDelete(collection, { [idField]: id });
+      await cloudDelete(collection, { [idField]: id });
     },
 
     /** CloudBase 原始写入 */

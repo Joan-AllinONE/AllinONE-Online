@@ -51,20 +51,6 @@ export function useWallet() {
         console.log('[useWallet] voucherBalance=', voucherBalance);
       } catch { /* fallback */ }
 
-      // localStorage fallback for gameCoins
-      if (gameCoins === 0) {
-        try {
-          const saved = localStorage.getItem('wallet_v3') || localStorage.getItem('wallet_v2');
-          if (saved) {
-            const data = JSON.parse(saved);
-            const userWallet = data[uid];
-            if (userWallet) {
-              gameCoins = userWallet.gameCoins || 0;
-            }
-          }
-        } catch { /* ignore */ }
-      }
-
       setWallet({
         gameCoins,
         voucherBalance,

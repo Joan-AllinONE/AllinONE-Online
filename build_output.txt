@@ -1,0 +1,42 @@
+[36mvite v6.3.5 [32mbuilding for production...[36m[39m
+transforming...
+Browserslist: browsers data (caniuse-lite) is 14 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+[32m✓[39m 2563 modules transformed.
+rendering chunks...
+[plugin vite:reporter] 
+(!) D:/AllinONE Gaming Platform/src/services/cloudbase.ts is dynamically imported by D:/AllinONE Gaming Platform/src/publishing-center/ai/GameCodeAnalyzer.ts, D:/AllinONE Gaming Platform/src/services/gameProposalService.ts, D:/AllinONE Gaming Platform/src/services/gameProposalService.ts, D:/AllinONE Gaming Platform/src/services/marketplaceService.ts, D:/AllinONE Gaming Platform/src/services/marketplaceService.ts, D:/AllinONE Gaming Platform/src/services/platformGameStoreService.ts, D:/AllinONE Gaming Platform/src/services/platformTreasuryService.ts, D:/AllinONE Gaming Platform/src/services/publishedGameService.ts, D:/AllinONE Gaming Platform/src/services/publishedGameService.ts, D:/AllinONE Gaming Platform/src/services/publishedGameService.ts, D:/AllinONE Gaming Platform/src/services/redeemCodeService.ts, D:/AllinONE Gaming Platform/src/services/redeemCodeService.ts, D:/AllinONE Gaming Platform/src/services/ugcBridgeService.ts, D:/AllinONE Gaming Platform/src/services/voucherItemService.ts, D:/AllinONE Gaming Platform/src/services/voucherItemService.ts, D:/AllinONE Gaming Platform/src/skills/inventory/InventorySkill.ts, D:/AllinONE Gaming Platform/src/skills/proposal/ProposalSkill.ts, D:/AllinONE Gaming Platform/src/skills/store/StoreSkill.ts, D:/AllinONE Gaming Platform/src/utils/seedTestData.ts, D:/AllinONE Gaming Platform/src/voucher-system/storage/VoucherDatabase.ts, D:/AllinONE Gaming Platform/src/voucher-system/storage/VoucherDatabase.ts, D:/AllinONE Gaming Platform/src/voucher-system/storage/VoucherDatabase.ts but also statically imported by D:/AllinONE Gaming Platform/src/contexts/authContext.tsx, D:/AllinONE Gaming Platform/src/main.tsx, D:/AllinONE Gaming Platform/src/publishing-center/ai/GameCodeAnalyzer.ts, D:/AllinONE Gaming Platform/src/services/cloudbaseStorage.ts, D:/AllinONE Gaming Platform/src/skills/auth/AuthSkill.ts, D:/AllinONE Gaming Platform/src/skills/game-connector/GameConnectorSkill.ts, D:/AllinONE Gaming Platform/src/skills/proposal/ProposalSkill.ts, D:/AllinONE Gaming Platform/src/skills/voucher/VoucherSkill.ts, D:/AllinONE Gaming Platform/src/skills/wallet/WalletSkill.ts, D:/AllinONE Gaming Platform/src/voucher-system/storage/cloudSync.ts, dynamic import will not move module into another chunk.
+
+[plugin vite:reporter] 
+(!) D:/AllinONE Gaming Platform/src/services/voucherPaymentService.ts is dynamically imported by D:/AllinONE Gaming Platform/src/components/PlatformGameStore.tsx, D:/AllinONE Gaming Platform/src/skills/proposal/ProposalSkill.ts but also statically imported by D:/AllinONE Gaming Platform/src/hooks/useWallet.ts, D:/AllinONE Gaming Platform/src/pages/GameStore.tsx, D:/AllinONE Gaming Platform/src/pages/VoucherSystemPage.tsx, D:/AllinONE Gaming Platform/src/services/marketplaceService.ts, D:/AllinONE Gaming Platform/src/services/platformTreasuryService.ts, dynamic import will not move module into another chunk.
+
+[plugin vite:reporter] 
+(!) D:/AllinONE Gaming Platform/src/types/marketplace.ts is dynamically imported by D:/AllinONE Gaming Platform/src/services/platformTreasuryService.ts but also statically imported by D:/AllinONE Gaming Platform/src/components/Marketplace.tsx, D:/AllinONE Gaming Platform/src/services/marketplaceService.ts, D:/AllinONE Gaming Platform/src/services/platformTreasuryService.ts, dynamic import will not move module into another chunk.
+
+[plugin vite:reporter] 
+(!) D:/AllinONE Gaming Platform/src/skills/index.ts is dynamically imported by D:/AllinONE Gaming Platform/src/hooks/useWallet.ts, D:/AllinONE Gaming Platform/src/pages/PersonalCenter.tsx, D:/AllinONE Gaming Platform/src/pages/PersonalCenter.tsx, D:/AllinONE Gaming Platform/src/pages/PersonalCenter.tsx, D:/AllinONE Gaming Platform/src/pages/PersonalCenter.tsx, D:/AllinONE Gaming Platform/src/services/marketplaceService.ts, D:/AllinONE Gaming Platform/src/services/marketplaceService.ts, D:/AllinONE Gaming Platform/src/services/marketplaceService.ts but also statically imported by D:/AllinONE Gaming Platform/src/components/PlatformGameStore.tsx, D:/AllinONE Gaming Platform/src/main.tsx, D:/AllinONE Gaming Platform/src/pages/GamePlay.tsx, D:/AllinONE Gaming Platform/src/pages/GameStore.tsx, D:/AllinONE Gaming Platform/src/publishing-center/core/SkillInitializer.ts, D:/AllinONE Gaming Platform/src/services/voucherItemService.ts, dynamic import will not move module into another chunk.
+
+[plugin vite:reporter] 
+(!) D:/AllinONE Gaming Platform/src/publishing-center/protocol/ExtensionVoucher.ts is dynamically imported by D:/AllinONE Gaming Platform/src/pages/GamePlay.tsx but also statically imported by D:/AllinONE Gaming Platform/src/publishing-center/protocol/ProtocolAIBridge.ts, D:/AllinONE Gaming Platform/src/publishing-center/protocol/index.ts, D:/AllinONE Gaming Platform/src/services/voucherItemService.ts, dynamic import will not move module into another chunk.
+
+[plugin vite:reporter] 
+(!) D:/AllinONE Gaming Platform/src/services/voucherItemService.ts is dynamically imported by D:/AllinONE Gaming Platform/src/pages/GamePlay.tsx but also statically imported by D:/AllinONE Gaming Platform/src/components/PlatformGameStore.tsx, D:/AllinONE Gaming Platform/src/components/PlatformGameStoreManager.tsx, D:/AllinONE Gaming Platform/src/components/voucher-system/GameProposalCreateModal.tsx, D:/AllinONE Gaming Platform/src/components/voucher-system/GameProposalDetailModal.tsx, D:/AllinONE Gaming Platform/src/pages/GameStore.tsx, D:/AllinONE Gaming Platform/src/pages/ItemWorkshop.tsx, D:/AllinONE Gaming Platform/src/publishing-center/ui/PublishingCenter.tsx, D:/AllinONE Gaming Platform/src/services/platformGameStoreService.ts, D:/AllinONE Gaming Platform/src/services/ugcBridgeService.ts, D:/AllinONE Gaming Platform/src/voucher-system/components/ItemVoucherManager.tsx, dynamic import will not move module into another chunk.
+
+computing gzip size...
+[2mdist/[22m[32mindex.html                            [39m[1m[2m    0.57 kB[22m[1m[22m[2m │ gzip:   0.40 kB[22m
+[2mdist/[22m[32massets/fa-regular-400-DQuI-phE.woff2  [39m[1m[2m   19.00 kB[22m[1m[22m
+[2mdist/[22m[32massets/fa-brands-400-BdzBFuGj.woff2   [39m[1m[2m  101.18 kB[22m[1m[22m
+[2mdist/[22m[32massets/fa-solid-900-BLm1ImsD.woff2    [39m[1m[2m  113.26 kB[22m[1m[22m
+[2mdist/[22m[35massets/index-DKSlImUU.css             [39m[1m[2m  174.33 kB[22m[1m[22m[2m │ gzip:  40.01 kB[22m
+[2mdist/[22m[36massets/cloudbaseStorage-DOlxz2rK.js   [39m[1m[2m    0.48 kB[22m[1m[22m[2m │ gzip:   0.35 kB[22m
+[2mdist/[22m[36massets/ProposalSkill-BP5eMR_a.js      [39m[1m[2m    5.50 kB[22m[1m[22m[2m │ gzip:   1.94 kB[22m
+[2mdist/[22m[36massets/VoucherSkill-BpEar8SQ.js       [39m[1m[2m    7.14 kB[22m[1m[22m[2m │ gzip:   2.30 kB[22m
+[2mdist/[22m[36massets/encrypt-BuQIYxqJ.js            [39m[1m[2m   35.64 kB[22m[1m[22m[2m │ gzip:  12.48 kB[22m
+[2mdist/[22m[36massets/index-CtAPm-co.js              [39m[1m[33m2,377.11 kB[39m[22m[2m │ gzip: 639.49 kB[22m
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[32m✓ built in 43.78s[39m

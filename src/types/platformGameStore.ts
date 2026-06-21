@@ -29,6 +29,10 @@ export interface ExternalGameStore {
   };
   /** 是否启用 */
   isActive: boolean;
+  /** 注册商家用户ID（用于数据隔离，商家只能管理自己的游戏） */
+  ownerId?: string;
+  /** 注册商家昵称 */
+  ownerName?: string;
   /** 注册时间 */
   createdAt: number;
   /** 最后更新时间 */

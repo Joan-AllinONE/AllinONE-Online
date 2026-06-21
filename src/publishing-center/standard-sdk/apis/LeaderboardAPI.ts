@@ -3,6 +3,7 @@
  */
 
 import type { AllinONEGame } from '../index';
+import { getCachedToken } from './tokenManager';
 
 export interface LeaderboardEntry {
   rank: number;

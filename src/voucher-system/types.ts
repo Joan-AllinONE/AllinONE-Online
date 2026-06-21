@@ -122,12 +122,22 @@ export interface ItemVoucherTemplate {
     voucherPrice?: number;           // 凭证价格
   };
 
-  // 游戏内效果
+  // 游戏内效果（双模式：传统 itemId / 动态 schemaName + itemData）
   gameEffect: {
-    itemId: string;                  // 游戏内道具ID
-    quantity: number;                // 兑换数量
-    effectType?: string;             // 效果类型 (e.g., 'difficulty_reducer', 'custom')
-    metadata?: Record<string, any>;  // 额外元数据（包含效果参数）
+    /** @deprecated 游戏内已有道具ID（传统模式），新游推荐使用 schemaName + itemData */
+    itemId?: string;
+    /** Schema 名称（动态模式，如 'weapon', 'quest', 'shop'）*/
+    schemaName?: string;
+    /** 玩家/AI 生成的结构化道具数据（动态模式）*/
+    itemData?: Record<string, any>;
+    /** 引用的 Schema 版本 */
+    schemaVersion?: string;
+    /** 兑换数量 */
+    quantity: number;
+    /** 效果类型 (e.g., 'difficulty_reducer', 'custom') */
+    effectType?: string;
+    /** 额外元数据（包含效果参数） */
+    metadata?: Record<string, any>;
   };
 
   // 元数据
@@ -136,6 +146,9 @@ export interface ItemVoucherTemplate {
   imageUrl?: string;                 // 道具图片
   consumable?: boolean;              // 是否消耗品（使用后销毁凭证）
   stackable?: boolean;               // 是否可堆叠
+
+  /** 道具来源标记 */
+  source?: 'developer' | 'player_ugc' | 'ai_generated';
 
   // 时间
   hostedItemId?: string;             // 映射到旧兑换码系统的 HostedItem ID

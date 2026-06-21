@@ -281,10 +281,10 @@ function DevelopersTab() {
   const [loading, setLoading] = useState(true);
   const [percentInputs, setPercentInputs] = useState<Record<string, number>>({});
 
-  const loadDevs = useCallback(() => {
+  const loadDevs = useCallback(async () => {
     setLoading(true);
     try {
-      const data = gameDeveloperService.getDeveloperOverview();
+      const data = await gameDeveloperService.getDeveloperOverview();
       setOverview(data);
       const inputs: Record<string, number> = {};
       for (const d of data) {
@@ -300,19 +300,19 @@ function DevelopersTab() {
 
   useEffect(() => { loadDevs(); }, [loadDevs]);
 
-  const handleSettleAll = () => {
-    const result = gameDeveloperService.executeDailySettlement();
+  const handleSettleAll = async () => {
+    const result = await gameDeveloperService.executeDailySettlement();
     alert(result.message);
     loadDevs();
   };
 
-  const handleUpdatePercent = (gameId: string) => {
+  const handleUpdatePercent = async (gameId: string) => {
     const newPercent = percentInputs[gameId];
     if (newPercent < 0 || newPercent > 100) {
       alert('分成比例需在 0-100 之间');
       return;
     }
-    gameDeveloperService.updateAccount(gameId, { revenueSharePercent: newPercent });
+    await gameDeveloperService.updateAccount(gameId, { revenueSharePercent: newPercent });
     loadDevs();
   };
 

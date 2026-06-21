@@ -35,10 +35,12 @@ import {
   type PlayerMetrics,
 } from '@/types/gameProposal';
 import { generateSimulatedPlayers, calculateVoteWeight, generatePlayerMetrics } from '@/data/simulatedPlayers';
+import { persistWithCloudSync, loadWithCloudSync } from '../storage/cloudSync';
 
 // ==================== 常量 ====================
 
 const VOTE_CYCLES_KEY = 'allinone_vote_cycles';
+const VOTE_CYCLES_COLLECTION = 'vote_cycles';
 const MAX_BATCH_SIZE = 500; // 单次批量创建上限
 
 // ==================== 存储工具 ====================
@@ -51,17 +53,41 @@ function generateUUID(): string {
   });
 }
 
+let voteCyclesCache: VoteCycle[] | null = null;
+let cloudSyncInitiated = false;
+
 function loadVoteCycles(): VoteCycle[] {
-  try {
-    const raw = localStorage.getItem(VOTE_CYCLES_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
+  if (voteCyclesCache) return voteCyclesCache;
+  const { data, cloudSync } = loadWithCloudSync<VoteCycle>(VOTE_CYCLES_KEY, VOTE_CYCLES_COLLECTION);
+  voteCyclesCache = data;
+  // 捕获初始本地 ID 集合，防止已删除的投票周期从云端"复活"
+  const originalIds = new Set(data.map(c => c.id));
+  if (!cloudSyncInitiated) {
+    cloudSyncInitiated = true;
+    cloudSync.then(merged => {
+      // 增量合并：只添加缓存中不存在的项，避免覆写期间新创建的数据
+      const current = voteCyclesCache!;
+      const currentIds = new Set(current.map(c => c.id));
+      let added = false;
+      for (const m of merged) {
+        // 仅添加：云端独有（不在原始本地集合，防僵尸）+ 不在当前缓存（防重复）
+        if (!originalIds.has(m.id) && !currentIds.has(m.id)) {
+          current.push(m);
+          added = true;
+        }
+      }
+      if (added) {
+        voteCyclesCache = [...current];
+        persistWithCloudSync(VOTE_CYCLES_KEY, voteCyclesCache, VOTE_CYCLES_COLLECTION);
+      }
+    }).catch(() => {});
   }
+  return voteCyclesCache;
 }
 
 function saveVoteCycles(cycles: VoteCycle[]): void {
-  localStorage.setItem(VOTE_CYCLES_KEY, JSON.stringify(cycles));
+  voteCyclesCache = cycles;
+  persistWithCloudSync(VOTE_CYCLES_KEY, cycles, VOTE_CYCLES_COLLECTION);
 }
 
 // ==================== 辅助函数 ====================

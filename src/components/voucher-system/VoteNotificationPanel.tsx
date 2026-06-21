@@ -18,9 +18,16 @@ import { gameProposalService } from '../../services/gameProposalService';
 import type { Voucher } from '../../voucher-system/types';
 import type { GameProposal } from '../../types/gameProposal';
 
-// Align with the "凭证资产" section: use the same userId source
+// 获取用户 ID：优先从 allinone_user（AuthSkill 持久化的用户信息），回退到默认值
 function getVoucherUserId(): string {
-  return localStorage.getItem('voucher_guest_id') || 'current-user';
+  try {
+    const userStr = localStorage.getItem('allinone_user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      return user.uid || user.id || 'current-user';
+    }
+  } catch { /* ignore */ }
+  return 'current-user';
 }
 
 // ==================== 辅助 ====================

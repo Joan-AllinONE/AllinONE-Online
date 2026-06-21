@@ -10,6 +10,7 @@ import {
   JSONSchema,
 } from '../types';
 import { SkillErrors } from '../errors';
+import { writeQueue } from '../../services/writeQueue';
 
 // ==================== 类型定义 ====================
 
@@ -706,21 +707,15 @@ export class StoreSkill extends BaseSkill {
         updatedAt: new Date().toISOString(),
       };
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data));
-      // CloudBase 双写
-      import('../../services/cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-        if (!isCloudBaseReady()) return;
-        const db = getCloudBaseApp().database();
-        const products = Array.from(this.products.values());
-        for (const product of products.slice(-10)) {
-          db.collection('purchases').where({ id: product.id }).get().then(res => {
-            if (res.data.length > 0) {
-              db.collection('purchases').doc(res.data[0]._id).update(product as any).catch(() => {});
-            } else {
-              db.collection('purchases').add(product as any).catch(() => {});
-            }
-          }).catch(() => {});
-        }
-      }).catch(() => {});
+      // CloudBase 双写（通过写入队列，全量入队不再截断）
+      const products = Array.from(this.products.values());
+      for (const product of products) {
+        writeQueue.enqueue({
+          collection: 'purchases',
+          operation: 'upsert',
+          data: product as any,
+        });
+      }
     } catch (error) {
       console.error('[StoreSkill] 保存数据失败:', error);
     }

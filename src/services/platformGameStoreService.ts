@@ -16,34 +16,48 @@ import {
 import { voucherItemService, type PurchaseItemVoucherRequest } from '@/services/voucherItemService';
 import { skillGateway } from '@/skills';
 import type { ItemVoucherTemplate } from '@/voucher-system/types';
+import { writeQueue } from './writeQueue';
 
 // ==================== 存储工具 ====================
 
 function loadStores(): ExternalGameStore[] {
   try {
     const raw = localStorage.getItem(PLATFORM_GAME_STORES_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const data = raw ? JSON.parse(raw) : [];
+    if (!_storesCloudSyncInitiated) {
+      _storesCloudSyncInitiated = true;
+      import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+        if (!isCloudBaseReady()) return;
+        getCloudBaseApp().database().collection('game_stores').limit(500).get().then(res => {
+          if (res.data.length === 0) return;
+          const freshRaw = localStorage.getItem(PLATFORM_GAME_STORES_KEY);
+          const fresh: ExternalGameStore[] = freshRaw ? JSON.parse(freshRaw) : [];
+          // ✅ CloudBase 数据覆盖本地同名 ID（云端为准）
+          const cloudMap = new Map(res.data.map(d => [d.id, d]));
+          const localOnly = fresh.filter(s => !cloudMap.has(s.id));
+          const merged = [...res.data as ExternalGameStore[], ...localOnly];
+          localStorage.setItem(PLATFORM_GAME_STORES_KEY, JSON.stringify(merged));
+        }).catch(() => {});
+      }).catch(() => {});
+    }
+    return data;
   } catch {
     return [];
   }
 }
 
+let _storesCloudSyncInitiated = false;
+
 function saveStores(stores: ExternalGameStore[]): void {
   localStorage.setItem(PLATFORM_GAME_STORES_KEY, JSON.stringify(stores));
-  // CloudBase 双写
-  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-    if (!isCloudBaseReady()) return;
-    const db = getCloudBaseApp().database();
-    for (const store of stores.slice(-10)) {
-      db.collection('game_stores').where({ id: store.id }).get().then(res => {
-        if (res.data.length > 0) {
-          db.collection('game_stores').doc(res.data[0]._id).update(store as any).catch(() => {});
-        } else {
-          db.collection('game_stores').add(store as any).catch(() => {});
-        }
-      }).catch(() => {});
-    }
-  }).catch(() => {});
+  // CloudBase 双写（通过写入队列，全量入队不再截断）
+  for (const store of stores) {
+    writeQueue.enqueue({
+      collection: 'game_stores',
+      operation: 'upsert',
+      data: store as any,
+    });
+  }
 }
 
 // ==================== 服务类 ====================
@@ -67,10 +81,14 @@ class PlatformGameStoreService {
     return store;
   }
 
-  /** 获取所有外部游戏 */
-  getGames(activeOnly = true): ExternalGameStore[] {
+  /** 获取所有外部游戏（支持按 ownerId 过滤） */
+  getGames(activeOnly = true, ownerId?: string): ExternalGameStore[] {
     const stores = loadStores();
-    return activeOnly ? stores.filter(s => s.isActive) : stores;
+    let result = activeOnly ? stores.filter(s => s.isActive) : stores;
+    if (ownerId) {
+      result = result.filter(s => s.ownerId === ownerId);
+    }
+    return result;
   }
 
   /** 获取单个外部游戏 */

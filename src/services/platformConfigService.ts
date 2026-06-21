@@ -1,4 +1,5 @@
 import { PlatformParameter } from '@/types/platformManagement';
+import { writeQueue } from '@/services/writeQueue';
 
 /**
  * 平台参数配置服务
@@ -48,6 +49,28 @@ class PlatformConfigService {
     if (!stored) {
       this.saveConfig(this.DEFAULT_CONFIG);
     }
+    // 异步从 CloudBase 拉取最新配置
+    this.syncFromCloud();
+  }
+
+  private syncFromCloud(): void {
+    import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+      if (!isCloudBaseReady()) return;
+      // 从 saveConfig 写入的同一集合读取
+      getCloudBaseApp().database().collection('platform_treasury').where({ id: 'platform_config' }).limit(1).get().then(res => {
+        if (res.data.length > 0) {
+          const cloudDoc = res.data[0] as any;
+          // saveConfig 存储结构为 { id, config, _createdAt, _updatedAt }
+          const cloudConfig = cloudDoc.config || cloudDoc;
+          delete cloudConfig._id;
+          delete cloudConfig._createdAt;
+          delete cloudConfig._updatedAt;
+          delete cloudConfig.id;
+          localStorage.setItem(this.STORAGE_KEY, JSON.stringify(cloudConfig));
+          console.log('[PlatformConfig] 已从 CloudBase 同步配置');
+        }
+      }).catch(() => {});
+    }).catch(() => {});
   }
 
   /**
@@ -193,18 +216,12 @@ class PlatformConfigService {
    */
   private saveConfig(config: Record<string, any>): void {
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(config));
-    // CloudBase 双写
-    import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-      if (!isCloudBaseReady()) return;
-      const db = getCloudBaseApp().database();
-      db.collection('platform_treasury').where({ id: 'platform_config' }).get().then(res => {
-        if (res.data.length > 0) {
-          db.collection('platform_treasury').doc(res.data[0]._id).update({ config, _updatedAt: Date.now() }).catch(() => {});
-        } else {
-          db.collection('platform_treasury').add({ id: 'platform_config', config, _createdAt: Date.now(), _updatedAt: Date.now() }).catch(() => {});
-        }
-      }).catch(() => {});
-    }).catch(() => {});
+    // CloudBase 双写（通过写入队列，upsert by id='platform_config'）
+    writeQueue.enqueue({
+      collection: 'platform_treasury',
+      operation: 'upsert',
+      data: { id: 'platform_config', config, _updatedAt: Date.now() },
+    });
   }
 
   /**

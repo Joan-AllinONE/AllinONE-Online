@@ -15,40 +15,8 @@ export default function Login() {
 
   const testCredentials = getTestAccountCredentials();
 
-  // ==================== 从 localStorage 读取钱包余额 ====================
-  const getWalletFromStorage = (userId: string) => {
-    try {
-      const data = JSON.parse(localStorage.getItem('wallet_v3') || localStorage.getItem('wallet_v2') || '{}');
-      const wallet = data[userId];
-      if (wallet) {
-        console.log(`[Login] 从 wallet 读取到 ${userId} 余额: G=${wallet.gameCoins}`);
-        return { gameCoins: wallet.gameCoins || 0 };
-      }
-    } catch { /* ignore */ }
-    console.log(`[Login] wallet 中无 ${userId} 数据，使用默认值`);
-    return { gameCoins: 1000 };
-  };
-
-  // ==================== 同步 wallet_v3 ====================
-  const syncWalletV3 = (userId: string, gameCoins: number) => {
-    try {
-      const walletData = JSON.parse(localStorage.getItem('wallet_v3') || '{}');
-      if (!walletData[userId] || walletData[userId].gameCoins === undefined) {
-        walletData[userId] = {
-          gameCoins,
-          instantVouchers: walletData[userId]?.instantVouchers ?? 0,
-          algorithmVouchers: walletData[userId]?.algorithmVouchers ?? 0,
-          lastUpdated: Date.now(),
-        };
-        localStorage.setItem('wallet_v3', JSON.stringify(walletData));
-        console.log(`[Login] wallet_v3 已同步 ${userId}: G=${gameCoins}`);
-      }
-    } catch { /* ignore */ }
-  };
-
-  // ==================== 保存用户到两个 localStorage 键 ====================
-  const persistTestUser = (account: any, wallet: { gameCoins: number }) => {
-    // 构建 AuthUser 对象（role 从测试账号元数据读取）
+  // ==================== 保存测试账号用户到 React 状态 ====================
+  const persistTestUser = (account: any) => {
     const authUser = {
       id: account.id,
       uid: account.id,
@@ -56,11 +24,10 @@ export default function Login() {
       email: `${account.username}@allinone.test`,
       nickname: account.nickname,
       role: account.role || 'player',
-      gameCoins: wallet.gameCoins,
+      gameCoins: 0,
     };
 
-    // 写入两个 key：AuthProvider 读 allinone_user，旧代码读 currentUser
-    localStorage.setItem('currentUser', JSON.stringify(account));
+    // 写入 allinone_user（AuthProvider / AuthSkill 读取此 key 做会话恢复）
     localStorage.setItem('allinone_user', JSON.stringify(authUser));
 
     // 通知事件
@@ -92,9 +59,7 @@ export default function Login() {
         const account = validateUser(usernameFromEmail, password);
         if (account) {
           console.log(`[Login] 本地测试账号匹配: id=${account.id}, username=${account.username}`);
-          const wallet = getWalletFromStorage(account.id);
-          syncWalletV3(account.id, wallet.gameCoins);
-          persistTestUser(account, wallet);
+          persistTestUser(account);
           toast.success(`欢迎回来，${account.nickname}！`);
           navigate('/');
         } else {
@@ -113,9 +78,7 @@ export default function Login() {
     const account = validateUser(testUsername, testPassword);
     if (!account) { toast.error('测试账号不可用'); return; }
     console.log(`[Login] 测试账号快捷登录: id=${account.id}, username=${account.username}`);
-    const wallet = getWalletFromStorage(account.id);
-    syncWalletV3(account.id, wallet.gameCoins);
-    persistTestUser(account, wallet);
+    persistTestUser(account);
     toast.success(`欢迎回来，${account.nickname}！`);
     setShowTestAccounts(false);
     navigate('/');

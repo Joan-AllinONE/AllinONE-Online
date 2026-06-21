@@ -12,15 +12,17 @@ import path from 'path';
 import pg from 'pg';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
-import { memoryDB } from './dist/server/memoryDatabase.js';
-import { redeemCodeStore } from './dist/server/redeemCodeStore.js';
-import { authMiddleware } from './dist/server/auth/jwt.js';
-import { logger, requestLogger } from './dist/server/logger.js';
-import { requestIdMiddleware } from './dist/server/requestId.js';
-import { metricsMiddleware, metricsHandler } from './dist/server/metrics.js';
-import { createHealthRouter } from './dist/server/routes/health.js';
-import { createRedeemRouter } from './dist/server/routes/redeem.js';
-import { createInventoryRouter } from './dist/server/routes/inventory.js';
+import { memoryDB } from './dist/server/server/memoryDatabase.js';
+import { redeemCodeStore } from './dist/server/server/redeemCodeStore.js';
+import { authMiddleware } from './dist/server/server/auth/jwt.js';
+import { logger, requestLogger } from './dist/server/server/logger.js';
+import { requestIdMiddleware } from './dist/server/server/requestId.js';
+import { metricsMiddleware, metricsHandler } from './dist/server/server/metrics.js';
+import { createHealthRouter } from './dist/server/server/routes/health.js';
+import { createRedeemRouter } from './dist/server/server/routes/redeem.js';
+import { createInventoryRouter } from './dist/server/server/routes/inventory.js';
+import { createGamesPublicRouter, createGamesAuthRouter } from './dist/server/server/routes/games.js';
+import { createGameDeveloperRouter } from './dist/server/server/routes/gameDeveloper.js';
 
 const { Pool } = pg;
 dotenv.config();
@@ -38,7 +40,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 const USE_MEMORY_DB = process.env.USE_MEMORY_DB === 'true' || process.env.CLOUDSTUDIO === 'true';
 
 // 数据库连接（仅非内存模式使用）
-let pool: any = null;
+let pool = null;
 if (!USE_MEMORY_DB) {
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -53,7 +55,7 @@ if (!USE_MEMORY_DB) {
     statement_timeout: 10000,
   });
 
-  pool.on('error', (err: Error) => {
+  pool.on('error', (err) => {
     logger.error({ err }, 'Unexpected pool error');
   });
 }
@@ -131,7 +133,27 @@ app.use('/api/redeem/use', strictLimiter);
 // ============================================
 // 中间件：Body 解析
 // ============================================
+// 游戏文件上传和兑换同步路由需要更大的 body 限制
+app.use('/api/v1/games', express.json({ limit: '150mb' }));
+app.use('/api/redeem', express.json({ limit: '1mb' }));
+app.use('/api/v1/redeem', express.json({ limit: '1mb' }));
+// 其他 API 路由使用默认限制
 app.use(express.json());
+
+// ============================================
+// S4-1 + S4-2: API 路由 — 模块化 + 版本化
+// ============================================
+
+const healthRouter = createHealthRouter(USE_MEMORY_DB, pool);
+const redeemRouter = createRedeemRouter(redeemCodeStore, isProduction);
+const inventoryRouter = createInventoryRouter(USE_MEMORY_DB, memoryDB, pool, isProduction);
+const gamesPublicRouter = createGamesPublicRouter(USE_MEMORY_DB, memoryDB, pool, isProduction);
+const gamesAuthRouter = createGamesAuthRouter(USE_MEMORY_DB, memoryDB, pool, isProduction);
+const gameDeveloperRouter = createGameDeveloperRouter(USE_MEMORY_DB, memoryDB, pool, isProduction);
+
+// 🌐 公开路由：游戏文件提供（无需 JWT，必须在 authMiddleware 之前挂载）
+// iframe 内的 <script>/<link> 资源请求不带 Authorization header
+app.use('/api/v1/games', gamesPublicRouter);
 
 // ============================================
 // 中间件：JWT 认证 (S1-1)
@@ -151,18 +173,12 @@ app.use((_req, res, next) => {
   next();
 });
 
-// ============================================
-// S4-1 + S4-2: API 路由 — 模块化 + 版本化
-// ============================================
-
-const healthRouter = createHealthRouter(USE_MEMORY_DB, pool);
-const redeemRouter = createRedeemRouter(redeemCodeStore, isProduction);
-const inventoryRouter = createInventoryRouter(USE_MEMORY_DB, memoryDB, pool, isProduction);
-
 // 主版本路径 /api/v1/*
 app.use('/api/v1/health', healthRouter);
 app.use('/api/v1/redeem', redeemRouter);
 app.use('/api/v1/inventory', inventoryRouter);
+app.use('/api/v1/games', gamesAuthRouter);
+app.use('/api/v1/game-developers', gameDeveloperRouter);
 
 // 旧路径兼容（90 天过渡期，返回弃用警告头）
 app.use('/api/health', (_req, res, next) => {
@@ -183,7 +199,7 @@ app.use('/api/inventory', (_req, res, next) => {
 
 // ============================================
 // ============================================
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err, _req, res, _next) => {
   logger.error({ err }, 'Unhandled server error');
   res.status(500).json({
     success: false,
@@ -222,7 +238,7 @@ const server = app.listen(PORT, () => {
 
   // PostgreSQL 连接验证
   if (!USE_MEMORY_DB && pool) {
-    pool.query('SELECT NOW()', (err: Error) => {
+    pool.query('SELECT NOW()', (err) => {
       if (err) {
         logger.error({ err }, '数据库连接失败');
         process.exit(1);
@@ -263,7 +279,7 @@ process.on('unhandledRejection', (reason) => {
 // 优雅关闭 (S1-7)
 const GRACEFUL_TIMEOUT = 10000; // 10s
 
-const gracefulShutdown = async (signal: string) => {
+const gracefulShutdown = async (signal) => {
   logger.info({ signal }, '收到信号，正在优雅关闭');
   if (shuttingDown) return;
   shuttingDown = true;
@@ -281,7 +297,7 @@ const gracefulShutdown = async (signal: string) => {
   try {
     if (pool) await pool.end();
     logger.info('数据库连接池已关闭');
-  } catch (err: any) {
+  } catch (err) {
     logger.error({ err }, '关闭连接池失败');
   }
 

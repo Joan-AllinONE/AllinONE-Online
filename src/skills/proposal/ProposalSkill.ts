@@ -8,6 +8,7 @@
 import { BaseSkill } from '../BaseSkill';
 import type { SkillContext } from '../types';
 import { getCloudBaseApp } from '../../services/cloudbase';
+import { writeQueue } from '../../services/writeQueue';
 
 // ==================== 类型 ====================
 
@@ -239,17 +240,12 @@ export class ProposalSkill extends BaseSkill {
     const all = this.getLocalProposals().filter(x => x.id !== p.id);
     all.push(p);
     localStorage.setItem('proposals', JSON.stringify(all));
-    // CloudBase 双写（已有 best-effort 在 createProposal/vote 中，此处增强）
-    import('../../services/cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-      if (!isCloudBaseReady()) return;
-      getCloudBaseApp().database().collection('proposals').where({ id: p.id }).get().then(res => {
-        if (res.data.length > 0) {
-          getCloudBaseApp().database().collection('proposals').doc(res.data[0]._id).update(p as any).catch(() => {});
-        } else {
-          getCloudBaseApp().database().collection('proposals').add(p as any).catch(() => {});
-        }
-      }).catch(() => {});
-    }).catch(() => {});
+    // CloudBase 双写（通过写入队列）
+    writeQueue.enqueue({
+      collection: 'proposals',
+      operation: 'upsert',
+      data: p as any,
+    });
   }
 }
 

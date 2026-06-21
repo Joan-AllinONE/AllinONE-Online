@@ -18,6 +18,7 @@
 // ==================== Phase 1 核心 ====================
 
 export * from './ProtocolChannel';
+export type { AIGuide } from './ProtocolChannel';
 export { SchemaRegistry, getDefaultRegistry, resetDefaultRegistry, schemaRegistry } from './SchemaRegistry';
 export {
   ProtocolEngine,

@@ -160,6 +160,14 @@ const collections = [
       { keys: { publisherId: 1 } },
     ],
   },
+  {
+    name: 'game_files',
+    description: '游戏文件存储（服务端托管）',
+    indexes: [
+      { keys: { gameId: 1, filePath: 1 } },
+      { keys: { gameId: 1 } },
+    ],
+  },
 ];
 
 // ==================== 主流程 ====================
@@ -233,6 +241,7 @@ async function main() {
   console.log('game_developers: { "read": "auth.uid == doc.publisherId", "write": false }');
   console.log('platform_treasury: { "read": false, "write": false }');
   console.log('published_games: { "read": true, "write": "auth.uid != null" }');
+  console.log('game_files: { "read": true, "write": "auth.uid != null" }');
 
   // ==================== 结果汇总 ====================
   console.log('\n结果汇总:');

@@ -13,8 +13,10 @@ import type {
 } from '../types/pool';
 import { voucherService } from './VoucherService';
 import { VoucherStatus, type Voucher } from '../types';
+import { persistWithCloudSync, loadWithCloudSync, upsertToCloud, deleteFromCloud } from '../storage/cloudSync';
 
 const STORAGE_KEY = 'voucher_user_reward_pools';
+const CLOUD_COLLECTION = 'user_pools';
 
 /**
  * 生成唯一ID
@@ -50,12 +52,22 @@ export class UserPoolService {
 
   private loadFromStorage(): void {
     try {
-      const data = localStorage.getItem(STORAGE_KEY);
-      if (data) {
-        const pools: UserRewardPool[] = JSON.parse(data);
-        pools.forEach(p => this.pools.set(p.id, p));
-        console.log('[UserPoolService] 加载奖池:', this.pools.size);
-      }
+      const { data, cloudSync } = loadWithCloudSync<UserRewardPool>(STORAGE_KEY, CLOUD_COLLECTION);
+      data.forEach(p => this.pools.set(p.id, p));
+      console.log('[UserPoolService] 加载奖池:', this.pools.size);
+      // 捕获初始本地 ID 集合，防止已删除的奖池从云端"复活"
+      const originalIds = new Set(data.map(p => p.id));
+      cloudSync.then(merged => {
+        let added = false;
+        for (const p of merged) {
+          // 仅添加：云端独有（不在原始本地集合，防僵尸）+ 不在当前 Map（防重复）
+          if (!originalIds.has(p.id) && !this.pools.has(p.id)) {
+            this.pools.set(p.id, p);
+            added = true;
+          }
+        }
+        if (added) this.saveToStorage();
+      }).catch(() => {});
     } catch (error) {
       console.error('[UserPoolService] 加载数据失败:', error);
     }
@@ -63,7 +75,8 @@ export class UserPoolService {
 
   private saveToStorage(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify([...this.pools.values()]));
+      const items = [...this.pools.values()];
+      persistWithCloudSync(STORAGE_KEY, items, CLOUD_COLLECTION);
     } catch (error) {
       console.error('[UserPoolService] 保存数据失败:', error);
     }
@@ -482,6 +495,7 @@ export class UserPoolService {
 
     this.pools.delete(poolId);
     this.saveToStorage();
+    deleteFromCloud(CLOUD_COLLECTION, poolId).catch(() => {});
     console.log(`[UserPoolService] 删除奖池: ${pool.name}`);
     return true;
   }

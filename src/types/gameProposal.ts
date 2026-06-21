@@ -155,7 +155,7 @@ export interface GameProposalPayload {
     itemType: string;
     rarity: string;
     pricing: { price: number; currency: string };
-    gameEffect: { itemId: string; quantity: number };
+    gameEffect: { itemId: string; quantity: number; schemaName?: string; itemData?: Record<string, any>; schemaVersion?: string };
     supplyPolicy: 'limited' | 'open';
     totalSupply?: number;
     mintCount?: number;

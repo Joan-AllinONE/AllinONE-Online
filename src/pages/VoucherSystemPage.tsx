@@ -44,16 +44,19 @@ const VoucherSystemPage: React.FC = () => {
     }
   }, [location.search]);
 
-  // 获取当前用户信息 - 使用稳定的guest ID
-  const getStableGuestId = () => {
-    const stored = localStorage.getItem('voucher_guest_id');
-    if (stored) return stored;
-    const newId = 'guest-' + Date.now();
-    localStorage.setItem('voucher_guest_id', newId);
-    return newId;
+  // 获取当前用户信息 - 从 auth context 或 allinone_user 获取
+  const getStableUserId = () => {
+    try {
+      const userStr = localStorage.getItem('allinone_user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        return user.uid || user.id || 'guest-' + Date.now();
+      }
+    } catch { /* ignore */ }
+    return 'guest-' + Date.now();
   };
 
-  const currentUserId = currentUser?.id || getStableGuestId();
+  const currentUserId = currentUser?.id || getStableUserId();
   const currentUsername = currentUser?.username || '访客用户';
 
   // 初始化凭证规则引擎和双轨凭证系统

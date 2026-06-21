@@ -19,6 +19,7 @@ import {
   BookOpen, HelpCircle, ChevronDown, Info
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import JSZip from 'jszip';
 import { 
   GameAnalysisResult, 
@@ -45,6 +46,73 @@ import { ItemSupplyPolicy } from '@/voucher-system';
 import { redeemCodeService } from '@/services/redeemCodeService';
 import { voucherItemService } from '@/services/voucherItemService';
 import { effectTypeRegistry, type EffectTypeDefinition, type EffectParameter } from '../effects/EffectTypeRegistry';
+import type { GameItemSop } from '@/services/publishedGameService';
+
+// ==================== SOP 模板数据 ====================
+
+const ZUMA_SOP_TEMPLATE: Partial<GameItemSop> = {
+  schemaName: 'zuma-powerup',
+  description: '祖玛游戏道具 — 支持3级创作模式的增益道具系统',
+  aiPrompt: '祖玛(Zuma)游戏道具创作系统。这是一条由彩色弹珠组成的链沿着蝇蜒路径向终点洞穴移动。玩家控制中央的青蛙射手，发射弹珠插入链中，3个或更多同色弹珠相邻时会消除。如果弹珠链到达终点则游戏结束。道具有助于减缓弹珠链、消除弹珠或获得额外分数。',
+  availableEffects: ['add_score', 'clear_color', 'slow_chain', 'remove_tail', 'reverse_chain', 'score_multiplier', 'freeze_all'],
+  effectRules: [
+    'add_score: 立即增加分数，bonus 为 5-50 的整数',
+    'clear_color: 清除所有指定颜色弹珠，每清除一个加5分',
+    'slow_chain: 弹珠链大幅减速 10 秒后恢复',
+    'remove_tail: 移除尾部 N 个弹珠，N 为 1-10',
+    'reverse_chain: 整条弹珠链反转方向',
+    'score_multiplier: 当前分数乘以倍率 (2-5)',
+    'freeze_all: 弹珠链完全冻结 5 秒后恢复',
+  ],
+  constraints: { maxScoreAdd: 50, maxTailRemove: 10, maxMultiplier: 5, totalMarbles: 100, initMarbles: 20 },
+  forbidden: [
+    'add_score 不要超过 50 分', 'remove_tail 不要超过 10 个', 'score_multiplier 不要超过 5 倍',
+    '不要创建能一次性清除超过 20 个弹珠的道具', '不要创建能直接让游戏结束的道具',
+  ],
+  effectCodeEnabled: true,
+  effectCodeSignature: 'function(params)',
+  effectCodeReturns: '{ message: string }',
+  effectCodeSandbox: { game: 'Zuma 实例', gameState: '游戏状态 (score/marbleCount/moveSpeed)', marbles: '弹珠链表数组', Math: 'JS Math', JSON: 'JS JSON' },
+  presetItems: [
+    { name: '加分宝石', effect: 'add_score', params: { bonus: 20 }, description: '立即获得20分', icon: '✨' },
+    { name: '清色炸弹', effect: 'clear_color', params: { color: '#0C3406' }, description: '清除所有深绿色弹珠', icon: '💚' },
+    { name: '减速陷阱', effect: 'slow_chain', params: {}, description: '弹珠链大幅减速10秒', icon: '🐌' },
+    { name: '剪刀', effect: 'remove_tail', params: { count: 5 }, description: '移除尾部5个弹珠', icon: '✂️' },
+    { name: '反转宝石', effect: 'reverse_chain', params: {}, description: '弹珠链反转方向', icon: '🔄' },
+    { name: '冰冻宝石', effect: 'freeze_all', params: {}, description: '弹珠链冻结5秒', icon: '❄️' },
+  ],
+  examples: [
+    { name: '加分宝石', effect: 'add_score', params: { bonus: 20 }, description: '立即获得20分', icon: '✨' },
+    { name: '清除绿珠', effect: 'clear_green', params: {}, description: 'effectCode 自定义效果', icon: '🟢',
+      effectCode: "function(params){var c=0;for(var i=marbles.length-1;i>=0;i--){if(marbles[i].marble.Color==='#0C3406'){game.removeMarbleFromDataList(marbles[i].marble,i);c++;}}game.score+=c*5;return{message:'清除了'+c+'个绿珠'}}" },
+  ],
+};
+
+const GENERAL_SOP_TEMPLATE: Partial<GameItemSop> = {
+  schemaName: 'my-game-item',
+  description: '我的游戏道具 — 请根据游戏类型自定义',
+  aiPrompt: '[游戏名] 道具创作系统。这是一款 [游戏类型] 游戏，玩家需要 [核心玩法描述]。道具可以帮助玩家 [道具的通用作用]。',
+  availableEffects: ['add_score', 'add_time', 'add_life', 'power_up'],
+  effectRules: [
+    'add_score: 增加分数，数值范围根据游戏平衡设定',
+    'add_time: 增加游戏时间（如有计时机制）',
+    'add_life: 增加生命/机会（如有）',
+    'power_up: 临时增强玩家能力，需设定持续时间',
+  ],
+  constraints: { maxScoreAdd: 100, maxTimeAdd: 30, maxLifeAdd: 3 },
+  forbidden: [
+    '不要创建能直接让游戏胜利的道具',
+    '不要创建能无限刷分数的道具',
+    '单个道具效果不应超过全局数值的 50%',
+  ],
+  effectCodeEnabled: false,
+  effectCodeSignature: 'function(params)',
+  effectCodeReturns: '{ message: string }',
+  presetItems: [
+    { name: '加分宝石', effect: 'add_score', params: { bonus: 50 }, description: '增加50分', icon: '✨' },
+    { name: '加时道具', effect: 'add_time', params: { seconds: 15 }, description: '增加15秒', icon: '⏱️' },
+  ],
+};
 
 // ==================== 步骤定义 ====================
 
@@ -100,6 +168,8 @@ interface PublishingCenterProps {
     entryPoint?: string;
     fileCount?: number;
     size?: number;
+    itemSop?: GameItemSop;
+    sopDocument?: string;
   }) => void;
   onPublishError?: (error: string) => void;
   preloadedFiles?: File[] | null;
@@ -223,8 +293,25 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
   // 兑换码配置状态
   const [redeemItems, setRedeemItems] = useState<CreateHostedItemRequest[]>([]);
   const [showRedeemForm, setShowRedeemForm] = useState(false);
-  const [activeConfigTab, setActiveConfigTab] = useState<'skills' | 'redeem'>('skills');
+  const [activeConfigTab, setActiveConfigTab] = useState<'skills' | 'redeem' | 'sop'>('skills');
   const [protocolMode, setProtocolMode] = useState<'inject' | 'integrated'>('inject');
+
+  // 🆕 SOP 配置状态
+  const [sopForm, setSopForm] = useState<Partial<GameItemSop>>({
+    schemaName: '',
+    aiPrompt: '',
+    availableEffects: [],
+    effectRules: [],
+    constraints: {},
+    forbidden: [],
+    effectCodeEnabled: false,
+    presetItems: [],
+  });
+  const [showSopGuide, setShowSopGuide] = useState(false);
+  const [sopPreview, setSopPreview] = useState('');
+  const [sopJsonText, setSopJsonText] = useState('');
+  // 独立状态：用户上传的 .md 原始文档（与 JSON 编辑器互不干扰）
+  const [sopUploadedMd, setSopUploadedMd] = useState('');
   const [selectedEffectType, setSelectedEffectType] = useState<string>('difficulty_reducer');
   // Fix 1 & 2: Mode B 警告对话框状态
   const [showModeBWarning, setShowModeBWarning] = useState(false);
@@ -235,6 +322,7 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
   const [guideTab, setGuideTab] = useState<'overview' | 'modes' | 'items' | 'case' | 'faq'>('overview');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sopFileInputRef = useRef<HTMLInputElement>(null);
 
   // 使用预加载的文件
   useEffect(() => {
@@ -425,12 +513,46 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
     };
     
     setRedeemItems([...redeemItems, newRedeemItem]);
+
+    // Q3: 自动将新道具同步到 SOP 的 presetItems 和 availableEffects，确保道具工坊能读到
+    const effectType = newRedeemItem.gameEffect.effectType || selectedEffectType;
+    setSopForm({
+      ...sopForm,
+      presetItems: [
+        ...(sopForm.presetItems || []),
+        {
+          name: newRedeemItem.name,
+          effect: effectType,
+          params: { rarity: (newRedeemItem.gameEffect.metadata?.rarity as string) || 'common' },
+          description: newRedeemItem.description || '',
+        },
+      ],
+      availableEffects: [
+        ...(sopForm.availableEffects || []),
+        ...(effectType && !(sopForm.availableEffects || []).includes(effectType) ? [effectType] : []),
+      ],
+    });
+
     setShowRedeemForm(false);
   };
 
   // 删除兑换码道具
   const handleRemoveRedeemItem = (index: number) => {
+    const removedItem = redeemItems[index];
     setRedeemItems(redeemItems.filter((_, i) => i !== index));
+
+    // Q3: 同步移除 SOP 中对应的 presetItem 和不再被引用的 availableEffect
+    if (removedItem) {
+      const removedEffectType = removedItem.gameEffect.effectType || '';
+      const remainingPresetItems = (sopForm.presetItems || []).filter(p => p.name !== removedItem.name);
+      // 检查是否还有其他 presetItem 使用该 effectType，若无则从 availableEffects 中移除
+      const stillUsed = remainingPresetItems.some(p => (p.effect || (p as any).effectType) === removedEffectType);
+      setSopForm({
+        ...sopForm,
+        presetItems: remainingPresetItems,
+        availableEffects: (sopForm.availableEffects || []).filter(e => e !== removedEffectType || stillUsed),
+      });
+    }
   };
 
   // Fix 2: 使用 Mode B 模板创建新游戏
@@ -554,30 +676,46 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
               gameId,
             });
 
-            // 同步创建道具凭证模板（新系统），让"道具凭证"页面也能看到
+            // 同步创建道具凭证模板 + 自动铸造凭证（新系统），让"道具凭证"页面也能看到
             try {
-              voucherItemService.createItemTemplate({
+              const itemRarity = (item.gameEffect.metadata?.rarity as string) || 'common';
+              const effectType = item.gameEffect.effectType || (item.gameEffect.metadata?.effectType as string) || 'custom';
+              const isLimited = item.initialInventory > 0;
+
+              // 1) 创建道具模板
+              const template = voucherItemService.createItemTemplate({
                 gameId,
                 name: item.name,
                 description: item.description || '',
                 itemType: item.type === ItemType.PERMANENT ? 'permanent' : 'consumable',
-                rarity: (item.gameEffect.metadata?.rarity as string) || 'common',
+                rarity: itemRarity,
                 pricing: {
                   price: item.pricing.price,
                   currency: item.pricing.currency || 'ACOIN',
                 },
-                effect: {
-                  type: item.gameEffect.effectType || (item.gameEffect.metadata?.effectType as string) || 'custom',
+                gameEffect: {
+                  effectType,
                   itemId: item.gameEffect.itemId || '',
                   quantity: item.gameEffect.quantity || 1,
                   metadata: item.gameEffect.metadata || {},
                 },
-                supplyPolicy: (item.gameEffect.metadata?.supplyPolicy as ItemSupplyPolicy) || ItemSupplyPolicy.OPEN,
+                supplyPolicy: isLimited ? ItemSupplyPolicy.LIMITED : ItemSupplyPolicy.OPEN as ItemSupplyPolicy,
+                totalSupply: isLimited ? item.initialInventory : undefined,
                 imageUrl: '',
                 isActive: true,
-              });
+                createdBy: currentUser?.id || 'system',
+              } as any);
+
+              // 2) 创建模板后立即铸造凭证到平台池，数量与初始库存一致
+              if (isLimited && template?.id) {
+                voucherItemService.mintItemVouchers({
+                  gameId,
+                  templateId: template.id,
+                  count: item.initialInventory,
+                });
+              }
             } catch (e) {
-              console.warn('[PublishingCenter] 同步道具凭证模板失败（不影响发布）:', e);
+              console.warn('[PublishingCenter] 同步道具凭证模板/铸造失败（不影响发布）:', e);
             }
           }
         }
@@ -595,6 +733,11 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
           entryPoint: analysisResult?.fileStructure?.entryPoints?.[0],
           fileCount: extractedFiles.length,
           size: extractedFiles.reduce((sum, f) => sum + (f.size || 0), 0),
+          itemSop: sopForm.schemaName ? {
+            ...sopForm,
+            schemaName: sopForm.schemaName,
+          } as GameItemSop : undefined,
+          sopDocument: sopUploadedMd || undefined,
         });
       } else {
         throw new Error(result.error);
@@ -605,7 +748,7 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
     } finally {
       setIsPublishing(false);
     }
-  }, [analysisResult, selectedSkills, uploadedFiles, pipeline, onPublishComplete, onPublishError, redeemItems]);
+  }, [analysisResult, selectedSkills, uploadedFiles, pipeline, onPublishComplete, onPublishError, redeemItems, sopForm, sopUploadedMd, protocolMode, currentUser, recommendations, extractedFiles]);
 
   // 渲染步骤指示器
   const renderStepIndicator = () => (
@@ -934,6 +1077,20 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
                 </span>
               )}
             </button>
+            <button
+              onClick={() => setActiveConfigTab('sop')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all ${
+                activeConfigTab === 'sop'
+                  ? 'bg-emerald-500 text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <BookOpen className="w-4 h-4" />
+              道具 SOP
+              {sopForm.schemaName && (
+                <span className="px-1.5 py-0.5 bg-white/20 rounded-full text-xs">✓</span>
+              )}
+            </button>
           </div>
           
           {/* Skills 配置标签页 */}
@@ -1106,6 +1263,217 @@ AllinONE.onItemRedeemed(function(data) {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* 🆕 SOP 配置标签页 */}
+          {activeConfigTab === 'sop' && (
+            <div className="space-y-6">
+              {/* 集成指南折叠区 */}
+              <div className="rounded-xl border border-slate-700/50 overflow-hidden">
+                <button
+                  onClick={() => setShowSopGuide(!showSopGuide)}
+                  className="w-full flex items-center justify-between px-5 py-3 bg-slate-700/30 hover:bg-slate-700/50 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <HelpCircle className="w-4 h-4 text-emerald-400" />
+                    <span className="text-sm font-medium text-white">AllinONE 道具接入指南</span>
+                  </div>
+                  {showSopGuide
+                    ? <ChevronDown className="w-4 h-4 text-gray-400 rotate-180" />
+                    : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                </button>
+                {showSopGuide && (
+                  <div className="px-5 py-4 bg-slate-800/80 text-sm text-gray-300 space-y-5 border-t border-slate-700/50">
+
+                    {/* 板块 A：游戏 HTML 集成 */}
+                    <div>
+                      <p className="font-medium text-emerald-400 mb-2">A. 游戏 HTML 集成代码</p>
+                      <p className="text-xs text-gray-400 mb-2">在游戏的 <code className="px-1 py-0.5 bg-slate-700 rounded">&lt;/body&gt;</code> 前添加以下集成代码，使游戏能接收和使用 AllinONE 道具：</p>
+                      <div className="space-y-1 text-xs">
+                        <p>• <strong className="text-white">UGC 道具栏</strong> — 固定底部，显示玩家已获得的道具</p>
+                        <p>• <strong className="text-white">EXTENSION_VOUCHER 监听</strong> — 接收平台下发的道具数据</p>
+                        <p>• <strong className="text-white">EFFECT_HANDLERS</strong> — 根据游戏逻辑实现 3-7 种内置效果</p>
+                        <p>• <strong className="text-white">registerDynamicEffect</strong> — effectCode 沙箱引擎（安全编译自定义函数）</p>
+                      </div>
+                      <button onClick={() => {
+                        const code = `<!-- AllinONE 集成代码 — 粘贴到 </body> 前 -->\n<!-- 完整模板见 docs/allinone-publishing-guide.md -->\n\n<!-- 1. CSS: UGC道具栏 + Toast通知 -->\n<!-- 2. HTML: <div id="ugc-bar"> + <div id="toast-container"> -->\n<!-- 3. JS: showToast + EFFECT_HANDLERS + registerDynamicEffect + EXTENSION_VOUCHER 监听 -->`;
+                        navigator.clipboard.writeText(code);
+                        toast.success('集成代码提示已复制，详见完整文档');
+                      }} className="mt-2 px-3 py-1.5 text-xs bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 rounded-md hover:bg-emerald-500/25 transition-colors">
+                        📋 复制集成代码提示
+                      </button>
+                    </div>
+
+                    <div className="border-t border-slate-700/50 pt-4">
+                      {/* 板块 B：AI 一键改编 */}
+                      <p className="font-medium text-emerald-400 mb-2">B. AI 一键改编提示词</p>
+                      <p className="text-xs text-gray-400 mb-2">复制以下提示词发给 ChatGPT/Claude，附上你的游戏代码，AI 会自动完成全部集成：</p>
+                      <div className="max-h-32 overflow-y-auto p-2.5 bg-[#0F0F23]/60 rounded-lg border border-slate-700/30 mb-2">
+                        <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono leading-relaxed">{`请帮我将这个 HTML 游戏改造为 AllinONE 兼容版本：
+1. 添加 UGC 道具栏 + Toast + EXTENSION_VOUCHER 监听
+2. 实现 EFFECT_HANDLERS（3-7种效果）+ effectCode 沙箱引擎
+3. 生成 GameItemSop JSON（含 schemaName/aiPrompt/availableEffects/constraints/forbidden）
+4. 推荐 Skills 和兑换道具配置
+
+游戏代码：\n（粘贴你的 HTML）`}</pre>
+                      </div>
+                      <button onClick={() => {
+                        navigator.clipboard.writeText(`请帮我将这个 HTML 游戏改造为 AllinONE 兼容版本：\n1. 添加 UGC 道具栏 + Toast + EXTENSION_VOUCHER 监听\n2. 实现 EFFECT_HANDLERS（3-7种效果）+ effectCode 沙箱引擎\n3. 生成 GameItemSop JSON（含 schemaName/aiPrompt/availableEffects/constraints/forbidden）\n4. 推荐 Skills 和兑换道具配置\n\n游戏代码：\n（粘贴你的 HTML）`);
+                        toast.success('AI 改编提示词已复制到剪贴板');
+                      }} className="px-3 py-1.5 text-xs bg-blue-500/15 text-blue-300 border border-blue-500/30 rounded-md hover:bg-blue-500/25 transition-colors">
+                        🤖 复制 AI 提示词
+                      </button>
+                    </div>
+
+                    <div className="border-t border-slate-700/50 pt-4">
+                      {/* 板块 C：Skills + 兑换道具建议 */}
+                      <p className="font-medium text-emerald-400 mb-2">C. Skills & 兑换道具建议</p>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="p-2 bg-slate-700/30 rounded">
+                          <span className="text-white font-medium">休闲/消消乐</span>
+                          <p className="text-gray-500">auth + wallet + leaderboard</p>
+                        </div>
+                        <div className="p-2 bg-slate-700/30 rounded">
+                          <span className="text-white font-medium">动作/射击</span>
+                          <p className="text-gray-500">auth + wallet + achievements</p>
+                        </div>
+                        <div className="p-2 bg-slate-700/30 rounded">
+                          <span className="text-white font-medium">策略/RPG</span>
+                          <p className="text-gray-500">auth + wallet + inventory + store</p>
+                        </div>
+                        <div className="p-2 bg-slate-700/30 rounded">
+                          <span className="text-white font-medium">卡牌/塔防</span>
+                          <p className="text-gray-500">auth + wallet + store + inventory</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-gray-500 pt-2 border-t border-slate-700/50">
+                      💡 完整发布指南（含 HTML 模板、ZUMA 案例、检查清单）：
+                      <a href="/docs/allinone-publishing-guide.md" target="_blank" className="text-emerald-400 hover:underline ml-1">docs/allinone-publishing-guide.md</a>
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* 模板按钮 */}
+              <div className="flex items-center justify-end flex-wrap gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">载入模板：</span>
+                  <button onClick={() => { setSopForm(ZUMA_SOP_TEMPLATE); setSopJsonText(JSON.stringify(ZUMA_SOP_TEMPLATE, null, 2)); toast.success('已载入 ZUMA 祖玛案例'); }}
+                    className="px-2.5 py-1 text-xs bg-amber-500/15 text-amber-300 border border-amber-500/30 rounded-md hover:bg-amber-500/25 transition-colors">🎯 ZUMA 案例</button>
+                  <button onClick={() => { setSopForm(GENERAL_SOP_TEMPLATE); setSopJsonText(JSON.stringify(GENERAL_SOP_TEMPLATE, null, 2)); toast.success('已载入通用模板，请根据游戏类型自定义'); }}
+                    className="px-2.5 py-1 text-xs bg-blue-500/15 text-blue-300 border border-blue-500/30 rounded-md hover:bg-blue-500/25 transition-colors">📎 通用模板</button>
+                </div>
+              </div>
+
+              {/* JSON 自由编辑模式 */}
+              <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-gray-400">直接编辑 SOP JSON（GameItemSop 格式）</label>
+                    <button onClick={() => {
+                      try {
+                        const parsed = JSON.parse(sopJsonText);
+                        setSopForm(parsed);
+                        toast.success('已应用到表单');
+                      } catch { toast.error('JSON 格式错误，请检查'); }
+                    }} className="px-3 py-1 text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-md hover:bg-emerald-500/30 transition-colors">✅ 应用到表单</button>
+                  </div>
+                  <textarea
+                    value={sopJsonText}
+                    onChange={e => setSopJsonText(e.target.value)}
+                    placeholder='{"schemaName": "my-game-item", "aiPrompt": "..."}'
+                    rows={18}
+                    className="w-full px-3 py-2 bg-[#0F0F23]/80 border border-slate-700 rounded-lg text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-emerald-500 font-mono leading-relaxed resize-y"
+                    spellCheck={false}
+                  />
+                <p className="text-xs text-gray-500">
+                    支持所有 <code className="px-1 py-0.5 bg-slate-700 rounded text-emerald-400">GameItemSop</code> 字段：schemaName, description, aiPrompt, availableEffects, effectRules, constraints, forbidden, effectCodeEnabled, effectCodeSignature, effectCodeSandbox, effectCodeReturns, presetItems, examples, paramFields
+                  </p>
+                </div>
+
+              {/* 上传 .md 文档（独立于 JSON 编辑器） */}
+              <div className="rounded-xl border border-amber-500/30 overflow-hidden">
+                <div className="px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-amber-300">📄 上传 SOP 文档（.md 原始文本，独立于 JSON 编辑器）</span>
+                    {sopUploadedMd && (
+                      <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">已上传</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">上传后将作为道具工坊的 SOP 参考文档，不影响下方 JSON 编辑器内容</p>
+                </div>
+                <div className="px-4 py-3 flex items-center gap-3">
+                  <input
+                    ref={sopFileInputRef}
+                    type="file"
+                    accept=".md,text/markdown"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (!file.name.endsWith('.md')) { toast.error('仅支持 .md 格式的 SOP 文档'); e.target.value = ''; return; }
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        try {
+                          const md = ev.target?.result as string;
+                          // 写入独立状态，不动 sopForm 和 sopJsonText
+                          setSopUploadedMd(md);
+                          setSopPreview(md); // 预览区同步显示上传内容
+                          toast.success('SOP 文档已导入（与 JSON 编辑器互不影响）');
+                        } catch (err) { toast.error('读取 SOP 文档失败: ' + (err instanceof Error ? err.message : '未知错误')); }
+                      };
+                      reader.readAsText(file);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button variant="outline" onClick={() => sopFileInputRef.current?.click()} className="text-xs">
+                    <Upload className="w-4 h-4" /> {sopUploadedMd ? '重新上传 SOP (.md)' : '上传 SOP (.md)'}
+                  </Button>
+                  {sopUploadedMd && (
+                    <Button variant="ghost" onClick={() => { setSopUploadedMd(''); setSopPreview(''); toast.success('已清除上传的文档'); }} className="text-xs text-red-400 hover:text-red-300">
+                      清除
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* JSON 编辑器预览 + 复制（仅操作 sopForm） */}
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => {
+                  if (!sopForm.schemaName || !sopForm.aiPrompt) { setSopPreview('⚠️ 请先在 JSON 编辑器中填写 Schema 名称和 AI 提示词'); return; }
+                  const L: string[] = [];
+                  L.push(`# ${sopForm.schemaName} — 道具创作 SOP`);
+                  L.push(`\n## 描述\n${sopForm.description || sopForm.schemaName}`);
+                  L.push(`\n## 游戏规则\n${sopForm.aiPrompt}`);
+                  if ((sopForm.availableEffects||[]).length) { L.push(`\n## 可用效果`); sopForm.availableEffects!.forEach(e => L.push(`- ${e}`)); }
+                  if ((sopForm.effectRules||[]).length) { L.push(`\n## 效果规则`); sopForm.effectRules!.forEach(r => L.push(`- ${r}`)); }
+                  if (Object.keys(sopForm.constraints||{}).length) { L.push(`\n## 约束条件`); Object.entries(sopForm.constraints!).forEach(([k,v]) => L.push(`- ${k}: ${v}`)); }
+                  if ((sopForm.forbidden||[]).length) { L.push(`\n## 禁止事项`); sopForm.forbidden!.forEach(f => L.push(`- ${f}`)); }
+                  if (sopForm.effectCodeEnabled) {
+                    L.push(`\n## effectCode 自定义效果`);
+                    L.push(`函数签名：\`${sopForm.effectCodeSignature || 'function(params)'}\``);
+                    if (sopForm.effectCodeSandbox) { L.push(`\n沙箱变量：`); Object.entries(sopForm.effectCodeSandbox).forEach(([k,v]) => L.push(`- \`${k}\`: ${v}`)); }
+                    if (sopForm.effectCodeReturns) L.push(`\n返回值：\`${sopForm.effectCodeReturns}\``);
+                  }
+                  setSopPreview(L.join('\n'));
+                }}>
+                  <Info className="w-4 h-4" /> 预览 JSON 生成的 SOP
+                </Button>
+                {sopPreview && <Button variant="ghost" onClick={() => { navigator.clipboard.writeText(sopPreview); toast.success('SOP 已复制到剪贴板'); }} className="text-xs">📎 复制</Button>}
+              </div>
+              {sopPreview && (
+                <div className="max-h-48 overflow-y-auto p-3 bg-[#0F0F23]/60 rounded-lg border border-slate-700/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${sopUploadedMd && sopPreview === sopUploadedMd ? 'bg-amber-500/20 text-amber-300' : 'bg-blue-500/20 text-blue-300'}`}>
+                      {sopUploadedMd && sopPreview === sopUploadedMd ? '📄 已上传文档' : '⚙️ JSON 生成'}
+                    </span>
+                  </div>
+                  <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono leading-relaxed">{sopPreview}</pre>
+                </div>
+              )}
+              <p className="text-xs text-gray-500 text-center">💡 此步骤可选 — 跳过则道具工坊使用通用规则</p>
             </div>
           )}
           
@@ -1954,7 +2322,7 @@ const CONFIG_KEY = '__ALLINONE_CONFIG__';`}</pre>
                 </div>
               </div>
 
-              {/* ===== 效果类型选择（注册表驱动） ===== */}
+              {/* ===== 效果类型选择（注册表 + SOP 驱动） ===== */}
               <div className="border-t border-slate-700 pt-4">
                 <h4 className="font-medium text-white mb-3 flex items-center gap-2">
                   <Zap className="w-4 h-4 text-yellow-400" />
@@ -1976,11 +2344,26 @@ const CONFIG_KEY = '__ALLINONE_CONFIG__';`}</pre>
                         ))}
                       </optgroup>
                     ))}
+                    {/* SOP 中配置的游戏专属效果 */}
+                    {sopForm.availableEffects && sopForm.availableEffects.length > 0 && (
+                      <optgroup label="SOP 游戏效果">
+                        {sopForm.availableEffects
+                          .filter(e => !effectTypeRegistry.getAll().some(et => et.id === e))
+                          .map(e => (
+                          <option key={e} value={e}>{e}</option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                   <p className="text-xs text-gray-500 mt-1">
                     效果引擎（Effect Engine）已预注入游戏 HTML，支持 <strong>帧级拦截</strong> 和 <strong>变量扫描</strong>，
                     无需游戏方任何配合即可自动执行效果。
                   </p>
+                  {sopForm.availableEffects && sopForm.availableEffects.length > 0 && (
+                    <p className="text-xs text-emerald-400 mt-1">
+                      💡 SOP 中配置的 {sopForm.availableEffects.length} 个游戏专属效果已自动加入选项，选择后将同步到道具工坊。
+                    </p>
+                  )}
                 </div>
               </div>
 

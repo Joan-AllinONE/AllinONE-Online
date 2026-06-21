@@ -105,23 +105,6 @@ export const VoucherManager: React.FC<VoucherManagerProps> = ({
     try {
       setIsLoading(true);
       
-      // 调试：检查 localStorage 中的凭证数据
-      const storedVouchers = localStorage.getItem('allinone_vouchers');
-      const storedUserId = localStorage.getItem('voucher_last_user_id');
-      console.log('[VoucherManager] 调试信息:', {
-        currentUserId,
-        storedUserId,
-        vouchersInStorage: storedVouchers ? JSON.parse(storedVouchers).length : 0,
-      });
-      
-      // 如果用户ID变化，记录警告
-      if (storedUserId && storedUserId !== currentUserId) {
-        console.warn(`[VoucherManager] 用户ID变化: ${storedUserId} -> ${currentUserId}`);
-      }
-      
-      // 保存当前用户ID到 localStorage（用于调试）
-      localStorage.setItem('voucher_last_user_id', currentUserId);
-      
       // 加载我的凭证
       const myList = voucherService.getUserVouchers(currentUserId);
       console.log('[VoucherManager] 我的凭证:', myList.length);
@@ -179,10 +162,9 @@ export const VoucherManager: React.FC<VoucherManagerProps> = ({
   useEffect(() => {
     loadData();
     
-    // 添加 localStorage 变化监听（用于调试）
+    // 跨标签页同步：localStorage 变化时重新加载
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'allinone_vouchers') {
-        console.log('[VoucherManager] localStorage 变化:', e.newValue ? JSON.parse(e.newValue).length : 0);
         loadData();
       }
     };

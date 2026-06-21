@@ -5,7 +5,7 @@
  * - /game-store          → 平台游戏商店（外部游戏的道具） → <PlatformGameStore />
  * - /game-store/:gameId  → 已发布游戏的专属商店（原有逻辑）
  */
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useCallback, useContext } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getPublishedGame, type PublishedGame } from '@/services/publishedGameService';
@@ -176,6 +176,7 @@ export default function GameStore() {
   const [myItemVouchers, setMyItemVouchers] = useState<Voucher[]>([]);
   const [myPurchases, setMyPurchases] = useState<ItemVoucherPurchase[]>([]);
   const [activeTab, setActiveTab] = useState<'products' | 'itemShop' | 'myItems'>('products');
+  const [pendingRedeemVoucherId, setPendingRedeemVoucherId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!gameId) return;
@@ -267,6 +268,89 @@ export default function GameStore() {
       loadVoucherBalance();
     }
   }, [currentUser?.id]);
+
+  // 监听游戏内兑换码兑换事件，自动标记凭证为已使用
+  // 支持同页面（CustomEvent）和跨标签页（storage event）两种场景
+  const syncRedeemedVouchers = useCallback(() => {
+    if (!currentUser?.id || !gameId) return;
+
+    const latestPurchases = voucherItemService.getUserPurchases(currentUser.id, gameId);
+    const pendingWithCode = latestPurchases.filter(p => p.redeemCode && p.status === 'pending');
+    if (pendingWithCode.length === 0) return;
+
+    // 检查这些兑换码是否已被使用
+    const allCodes = redeemCodeService.getAllCodes();
+    let hasChanges = false;
+
+    for (const purchase of pendingWithCode) {
+      const codeEntry = allCodes.find(
+        c => c.code.toUpperCase() === purchase.redeemCode!.toUpperCase()
+      );
+      if (codeEntry && codeEntry.status === 'used') {
+        // 兑换码已在游戏中使用，标记凭证为已兑换
+        try {
+          voucherService.redeemVoucher(
+            purchase.voucherId,
+            currentUser.id,
+            currentUser.username || '玩家',
+            `游戏内兑换码已使用: ${purchase.redeemCode}`
+          );
+          hasChanges = true;
+          console.log(`[GameStore] ✅ 凭证 ${purchase.voucherId} 已自动标记为已使用（兑换码: ${purchase.redeemCode}）`);
+        } catch (err) {
+          console.warn('[GameStore] 标记凭证已使用失败（可能已处理）:', err);
+        }
+      }
+    }
+
+    if (hasChanges) {
+      const userItemVouchers = voucherItemService.getUserItemVouchers(currentUser.id, gameId);
+      setMyItemVouchers(userItemVouchers);
+      const purchases = voucherItemService.getUserPurchases(currentUser.id, gameId);
+      setMyPurchases(purchases);
+    }
+  }, [currentUser?.id, currentUser?.username, gameId]);
+
+  useEffect(() => {
+    // 同页面场景：游戏内嵌在同一页面时监听 CustomEvent
+    const handleItemRedeemed = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.code) return;
+      console.log(`[GameStore] 检测到游戏内兑换事件，兑换码: ${detail.code}`);
+      // 延迟一帧确保 redeemCodeService 已更新本地状态
+      setTimeout(syncRedeemedVouchers, 50);
+    };
+
+    // 跨标签页场景：游戏在另一个标签页使用兑换码后，localStorage 变更
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'allinone_redeem_codes' && e.newValue) {
+        console.log('[GameStore] 检测到兑换码数据变更（跨标签页），同步凭证状态...');
+        syncRedeemedVouchers();
+      }
+    };
+
+    window.addEventListener('allinone-item-redeemed', handleItemRedeemed);
+    window.addEventListener('storage', handleStorageChange);
+
+    // 用户切换到“我的道具”标签时也主动检查一次
+    const handleVisibilityChange = () => {
+      if (!document.hidden) syncRedeemedVouchers();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('allinone-item-redeemed', handleItemRedeemed);
+      window.removeEventListener('storage', handleStorageChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [syncRedeemedVouchers]);
+
+  // 切换到“我的道具”标签时主动检查并同步凭证状态
+  useEffect(() => {
+    if (activeTab === 'myItems') {
+      syncRedeemedVouchers();
+    }
+  }, [activeTab, syncRedeemedVouchers]);
 
   // 构建 SkillContext（所有 skillGateway.execute 调用共用）
   const getSkillContext = () => ({
@@ -364,7 +448,7 @@ export default function GameStore() {
         }
 
         // 🆕 记录收入到游戏开发者账户
-        gameDeveloperService.recordPurchaseRevenue({
+        await gameDeveloperService.recordPurchaseRevenue({
           gameId: gameId!,
           gameName,
           amount: price,
@@ -414,7 +498,7 @@ export default function GameStore() {
         }
 
         // 🆕 记录收入到游戏开发者账户
-        gameDeveloperService.recordPurchaseRevenue({
+        await gameDeveloperService.recordPurchaseRevenue({
           gameId: gameId!,
           gameName: game?.name || '未知游戏',
           amount: product.price,
@@ -547,7 +631,20 @@ export default function GameStore() {
       });
 
       if (!result.success) {
-        throw new Error(result.message);
+        // 游戏通道不可用时，提供跳转游戏页面的选项
+        if (result.message?.includes('游戏通道不可用') || result.message?.includes('游戏未运行')) {
+          setPurchaseState({
+            isPurchasing: false,
+            productId: voucher.id,
+            success: false,
+            error: `游戏未在运行中。请先打开游戏，或点击下方按钮跳转到游戏页面自动下发道具。`,
+          });
+          // 存储待下发的 voucherId 供跳转按钮使用
+          setPendingRedeemVoucherId(voucher.id);
+        } else {
+          throw new Error(result.message);
+        }
+        return;
       }
 
       // 刷新数据
@@ -1385,6 +1482,19 @@ export default function GameStore() {
                                           </>
                                         )}
                                       </button>
+                                      {/* 兑换失败时显示跳转游戏按钮 */}
+                                      {purchaseState.error && purchaseState.productId === voucher.id && pendingRedeemVoucherId === voucher.id && (
+                                        <div className="mt-3 space-y-2">
+                                          <p className="text-xs text-amber-400 text-center">{purchaseState.error}</p>
+                                          <Link
+                                            to={`/game/${gameId}?itemVoucher=${voucher.id}`}
+                                            className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-lg text-sm font-medium transition-all shadow-lg shadow-purple-500/25"
+                                          >
+                                            <Gamepad2 className="w-4 h-4" />
+                                            打开游戏并自动下发道具
+                                          </Link>
+                                        </div>
+                                      )}
                                       <p className="text-xs text-slate-500 text-center mt-2">
                                         兑换后凭证将标记为已使用，保留在记录中可追溯
                                       </p>

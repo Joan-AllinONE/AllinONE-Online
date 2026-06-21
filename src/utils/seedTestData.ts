@@ -41,7 +41,8 @@ export function seedAll(): void {
 
 /** 强制模式：即使已有数据也重新填充 */
 export function seedAllForce(): void {
-  seedWalletForce();
+  sessionStorage.removeItem(WALLET_SEED_KEY);
+  seedWalletToCloudBase();
   seedPlatformGameStoresForce();
 
   if (typeof window !== 'undefined') {
@@ -52,46 +53,81 @@ export function seedAllForce(): void {
 }
 
 // ============================================================
-// 钱包余额 (wallet_v2)
+// 钱包余额 — 写入 CloudBase 数据库（users collection）
 // ============================================================
+
+const WALLET_SEED_KEY = '__wallet_seeded_v4';
 
 function needsWalletSeed(): boolean {
   try {
-    const data = JSON.parse(localStorage.getItem('wallet_v3') || '{}');
-    return !data['test-001'] || data['test-001'].gameCoins === undefined;
+    return sessionStorage.getItem(WALLET_SEED_KEY) !== 'true';
   } catch {
     return true;
   }
 }
 
-function seedWallet(): boolean {
-  if (!needsWalletSeed()) { console.log('[Seed] 钱包: 已有数据，跳过'); return false; }
-  seedWalletForce();
-  return true;
-}
-
-function seedWalletForce(): void {
-  const now = Date.now();
-  const walletData: Record<string, any> = {};
-
-  try {
-    const existing = localStorage.getItem('wallet_v3');
-    if (existing) Object.assign(walletData, JSON.parse(existing));
-  } catch { /* ignore */ }
-
+async function seedWalletToCloudBase(): Promise<void> {
   const walletConfig: Record<string, any> = {
-    'test-001': { gameCoins: 5000, instantVouchers: 5, algorithmVouchers: 2, lastUpdated: now },
-    'test-002': { gameCoins: 2000, instantVouchers: 2, algorithmVouchers: 0, lastUpdated: now },
-    'test-003': { gameCoins: 50000, instantVouchers: 20, algorithmVouchers: 10, lastUpdated: now },
-    'test-004': { gameCoins: 999999, instantVouchers: 100, algorithmVouchers: 50, lastUpdated: now },
+    'test-001': { gameCoins: 5000, instantVouchers: 5, algorithmVouchers: 2 },
+    'test-002': { gameCoins: 2000, instantVouchers: 2, algorithmVouchers: 0 },
+    'test-003': { gameCoins: 50000, instantVouchers: 20, algorithmVouchers: 10 },
+    'test-004': { gameCoins: 999999, instantVouchers: 100, algorithmVouchers: 50 },
   };
 
-  for (const [uid, wallet] of Object.entries(walletConfig)) {
-    walletData[uid] = { ...(walletData[uid] || {}), ...wallet };
-  }
+  // 始终写入 localStorage 作为本地回退（CloudBase 不可用时 WalletSkill 从这里读取）
+  try {
+    const localWallets: Record<string, any> = {};
+    for (const [uid, wallet] of Object.entries(walletConfig)) {
+      localWallets[uid] = { ...wallet, lastUpdated: Date.now() };
+    }
+    localStorage.setItem('allinone_wallets', JSON.stringify(localWallets));
+    console.log('[Seed] 钱包: 4 个账号已写入 localStorage 回退');
+  } catch { /* localStorage 不可用 */ }
 
-  localStorage.setItem('wallet_v3', JSON.stringify(walletData));
-  console.log('[Seed] 钱包: 4 个账号已填充');
+  try {
+    const { getCloudBaseApp } = await import('../services/cloudbase');
+    const app = getCloudBaseApp();
+    const db = app.database();
+
+    for (const [uid, wallet] of Object.entries(walletConfig)) {
+      try {
+        // 检查是否已存在
+        const existing = await db.collection('users').where({ _openid: uid }).limit(1).get();
+        if (existing.data.length > 0) {
+          // 更新
+          await db.collection('users').doc(existing.data[0]._id).update({
+            gameCoins: wallet.gameCoins,
+            instantVouchers: wallet.instantVouchers,
+            algorithmVouchers: wallet.algorithmVouchers,
+            updatedAt: Date.now(),
+          });
+        } else {
+          // 创建
+          await db.collection('users').add({
+            _openid: uid,
+            gameCoins: wallet.gameCoins,
+            instantVouchers: wallet.instantVouchers,
+            algorithmVouchers: wallet.algorithmVouchers,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+        }
+      } catch { /* best effort per user */ }
+    }
+    sessionStorage.setItem(WALLET_SEED_KEY, 'true');
+    console.log('[Seed] 钱包: 4 个账号已写入 CloudBase');
+  } catch {
+    // CloudBase 不可用，但 localStorage 已写入，仍标记为已填充
+    sessionStorage.setItem(WALLET_SEED_KEY, 'true');
+    console.log('[Seed] 钱包: CloudBase 不可用，已使用 localStorage 回退');
+  }
+}
+
+function seedWallet(): boolean {
+  if (!needsWalletSeed()) { console.log('[Seed] 钱包: 已填充，跳过'); return false; }
+  // 异步写入 CloudBase，不阻塞
+  seedWalletToCloudBase();
+  return true;
 }
 
 
@@ -405,28 +441,18 @@ if (typeof window !== 'undefined') {
   // 自动检测并填充（使用 setImmediate/setTimeout 确保在 React 挂载前执行）
   const autoSeed = () => {
     try {
-      const wallet = localStorage.getItem('wallet_v3');
+      const walletSeeded = sessionStorage.getItem(WALLET_SEED_KEY) === 'true';
       const games = localStorage.getItem('allinone_published_games');
       const platformStores = localStorage.getItem('platform_game_stores');
-      const hasWalletData = wallet && wallet !== '{}';
       const hasGameData = games && games !== '[]' && games !== 'null';
       const hasPlatformStoreData = platformStores && platformStores !== '[]' && platformStores !== 'null';
 
-      console.log(`[Seed] 启动检测: wallet=${hasWalletData ? '有数据' : '无数据'}, games=${hasGameData ? '有数据' : '无数据'}, platformStores=${hasPlatformStoreData ? '有数据' : '无数据'}`);
+      console.log(`[Seed] 启动检测: wallet=${walletSeeded ? '已填充' : '未填充'}, games=${hasGameData ? '有数据' : '无数据'}, platformStores=${hasPlatformStoreData ? '有数据' : '无数据'}`);
 
-      if (!hasWalletData || !hasGameData) {
+      if (!walletSeeded || !hasGameData) {
         console.log('🔄 [Seed] 检测到数据缺失，正在自动填充测试数据...');
         seedAll();
       } else {
-        // 检查关键账号数据是否完整
-        try {
-          const walletData = JSON.parse(wallet!);
-          if (!walletData['test-001'] || walletData['test-001'].gameCoins === undefined) {
-            console.log('🔄 [Seed] 检测到 test-001 钱包数据不完整，补填...');
-            seedAll();
-          }
-        } catch { /* ignore */ }
-
         // 检查平台游戏商店数据是否存在（新功能增量填充）
         if (!hasPlatformStoreData) {
           console.log('🔄 [Seed] 检测到平台商店数据缺失，正在补填...');

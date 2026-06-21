@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ZUMA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+*{margin:0;padding:0;border:0;font-size:100%;font:inherit;vertical-align:baseline;font-family:inherit;box-sizing:border-box}
+*[hidden]{display:none}
+body{line-height:1}
+menu,ol,ul{list-style:none}
+blockquote,q{quotes:none}
+blockquote:before,blockquote:after,q:before,q:after{content:"";content:none}
+table{border-collapse:collapse;border-spacing:0}
+html,body{display:flex;align-items:center;justify-content:center;width:100%;height:100%;background-image:radial-gradient(circle at center,#002129,#000);overflow:hidden;font-family:"Josefin Sans",sans-serif}
+.container{position:relative;background-image:url("https://lin-ting-yu.github.io/Zuma/image/bg.svg")}
+.container::before{content:"";display:block;width:1287.709px;height:1004.262px;background-image:url("https://lin-ting-yu.github.io/Zuma/image/bg-leaf.svg");position:absolute;top:-55px;left:-80px}
+.container .leaf{position:absolute;z-index:10}
+.container .leaf-01{width:290.296px;height:197.981px;background-image:url("./../image/leaf-01.svg");transform-origin:top left;top:-10px;left:-50px;animation:leaf 8s -2s infinite}
+.container .leaf-02{width:130.828px;height:131.056px;background-image:url("./../image/leaf-02.svg");transform-origin:top right;top:-60px;right:325px;animation:leaf 10s -3s infinite}
+.container .leaf-03{width:214.618px;height:225.252px;background-image:url("./../image/leaf-03.svg");transform-origin:top right;top:60px;right:-60px;animation:leaf 5s -2s infinite}
+.container .leaf-04{width:303.2px;height:356.908px;background-image:url("https://lin-ting-yu.github.io/Zuma/image/leaf-04.svg");transform-origin:bottom left;bottom:-60px;left:0;animation:leaf 7s -1s infinite}
+.container .leaf-05{width:253.153px;height:292.861px;background-image:url("https://lin-ting-yu.github.io/Zuma/image/leaf-05.svg");transform-origin:bottom right;bottom:-110px;right:660px;animation:leaf 9s -3s infinite}
+.container .leaf-06{width:269.787px;height:346.454px;background-image:url("https://lin-ting-yu.github.io/Zuma/image/leaf-06.svg");transform-origin:bottom right;bottom:-75px;right:-40px;animation:leaf 15s -5s infinite}
+.container svg{opacity:0;pointer-events:none}
+.container .player{width:175px;height:175px;position:absolute;top:0;left:0;z-index:11}
+.container .player::before{content:"";display:block;width:2px;height:600px;margin-left:-1px;position:absolute;left:50%;bottom:30px;background-image:linear-gradient(rgba(255,255,255,0),rgba(255,255,255,0.5));z-index:1}
+.container .player::after{content:"";display:block;width:100%;height:100%;position:relative;background-size:contain;background-image:url("https://lin-ting-yu.github.io/Zuma/image/frog.svg");z-index:2}
+.container .player .marble-1,.container .player .marble-2{position:absolute;z-index:3}
+.container .player .marble-1{width:60px;height:60px;border-radius:100px;top:-10px;left:50%;transform:translateX(-50%)}
+.container .player .marble-2{width:20px;height:20px;border-radius:100px;left:50%;border:solid 5px #83be7c}
+.container .player .marble-2:nth-child(2){top:85px;transform:translateX(calc(-50% - 30px))}
+.container .player .marble-2:nth-child(3){width:25px;height:25px;top:105px;transform:translateX(-50%)}
+.container .player .marble-2:nth-child(4){top:85px;transform:translateX(calc(-50% + 30px))}
+.container .start-hole{width:100px;height:100px;border-radius:100px;background-color:#000;position:absolute;transform:translate(-50%,-50%)}
+.container .final-hole{width:100px;height:100px;border-radius:100px;background-color:rgba(0,0,0,0.5);position:absolute;transform:translate(-50%,-50%)}
+.marble{background-color:rgba(0,0,0,0.5);border-radius:100px;position:absolute;top:0;left:0;z-index:2}
+.shadow{width:100%;height:100%;position:absolute;top:0;left:0;background-image:radial-gradient(circle at center,rgba(0,33,41,0),rgba(0,0,0,0.8));z-index:20;pointer-events:none}
+.shadow::before{content:"";display:block;width:100%;height:100%;background-image:url("https://lin-ting-yu.github.io/Zuma/image/noise.png");position:absolute;opacity:0.1}
+.github{width:50px;height:50px;border-radius:100px;position:absolute;top:40px;right:40px;background-color:rgba(255,255,255,0.5);z-index:10}
+.github a{display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:#002129;font-size:30px;font-weight:bold;text-decoration:none}
+.score{position:absolute;bottom:40px;right:40px;color:#fff;text-align:right}
+.score .title{font-size:16px}
+.score .num{font-size:90px}
+.popup-container{display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:#002129;position:absolute;top:0;left:0;z-index:19;pointer-events:none}
+.popup-container .popup{min-width:300px;padding:50px 40px 30px;border-radius:30px;opacity:0;background-color:rgba(255,255,255,0.8);position:absolute;transform:translateY(20px);transition:0.2s;pointer-events:none;z-index:1}
+.popup-container .popup::after{content:"";display:block;width:calc(100% - 20px);height:calc(100% - 20px);border:solid 5px #002129;border-radius:30px;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none}
+.popup-container .popup .title{font-size:30px;text-align:center;font-weight:700;margin-bottom:20px;letter-spacing:1px}
+.popup-container .popup .info{font-size:16px;color:#002129;text-align:center}
+.popup-container .popup .info ul{list-style-type:disc;padding-left:1em;text-align-last:left}
+.popup-container .popup .info ul li{margin-top:10px}
+.popup-container .popup .info .num{font-size:24px;font-weight:bold}
+.popup-container .popup .button-container{display:flex;flex-direction:column;justify-content:center;align-items:center;align-content:center;margin-top:30px}
+.popup-container .popup .button-container .button{font-weight:500;color:#fff;font-size:16px;text-align:center;letter-spacing:1px;background-color:#002129;border-radius:100px;padding:15px 30px 10px;cursor:pointer}
+.popup-container .popup .button-container .button.button-2{padding:0;margin-top:15px;font-size:14px;font-weight:bold;color:#002129;background-color:transparent}
+.popup-container .popup.active{opacity:1;transform:translateY(0px);pointer-events:auto}
+.popup-container .popup.active~.mask{opacity:1}
+.popup-container .mask{width:100%;height:100%;background-color:rgba(0,0,0,0.5);position:absolute;top:0;left:0;opacity:0;transition:0.5s;pointer-events:none}
+@keyframes leaf{0%{transform:rotate(0deg)}50%{transform:rotate(10deg)}100%{transform:rotate(0deg)}}
+/* ===== UGC Power-ups Bar ===== */
+.ugc-bar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:10px;z-index:5;padding:12px 20px;background:rgba(0,33,41,0.85);border-radius:16px;border:2px solid rgba(255,255,255,0.2);align-items:center}
+.ugc-bar .ugc-label{color:rgba(255,255,255,0.6);font-size:11px;text-transform:uppercase;letter-spacing:2px;white-space:nowrap}
+.ugc-bar .ugc-item{display:flex;flex-direction:column;align-items:center;padding:8px 14px;border-radius:10px;background:rgba(255,255,255,0.1);cursor:pointer;transition:all .2s;color:#fff;min-width:60px;user-select:none}
+.ugc-bar .ugc-item:hover{background:rgba(255,255,255,0.25);transform:translateY(-2px)}
+.ugc-bar .ugc-item:active{transform:scale(.95)}
+.ugc-bar .ugc-item .item-icon{font-size:22px;margin-bottom:2px}
+.ugc-bar .ugc-item .item-name{font-size:10px;opacity:.8;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
+.ugc-bar .ugc-empty{color:rgba(255,255,255,0.4);font-size:12px;font-style:italic}
+/* ===== Toast Notifications ===== */
+.toast{position:fixed;top:30px;left:50%;transform:translateX(-50%) translateY(-120px);background:rgba(0,33,41,0.95);color:#fff;padding:12px 28px;border-radius:12px;font-size:14px;z-index:100;transition:transform .4s ease,opacity .4s ease;pointer-events:none;white-space:nowrap;border:1px solid rgba(255,255,255,0.2);opacity:0}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+  </style>
+</head>
+<body>
+  <div class="shadow"></div>
+  <div id="ugc-bar" class="ugc-bar">
+    <span class="ugc-label">PROPS</span>
+    <span class="ugc-empty">No items yet</span>
+  </div>
+  <div id="toast-container"></div>
+  <div class="github">
+    <a href="https://github.com/lin-ting-yu/Zuma" target="blank">&lt;&gt;</a>
+  </div>
+  <div id="score" class="score">
+    <div class="title">SCORE</div>
+    <div class="num">0</div>
+  </div>
+  <div class="popup-container">
+    <div id="start" class="popup active">
+      <div class="title">HELLO !</div>
+      <div class="info">
+        <ul>
+          <li>LEFT CLICK TO SHOOT MARBLE</li>
+          <li>PRESS "SPACE" TO SWITCH THE MARBLE COLOR</li>
+          <li>PRESS "ESC" TO STOP</li>
+        </ul>
+      </div>
+      <div class="button-container"><div class="button">START</div></div>
+    </div>
+    <div id="stop" class="popup">
+      <div class="title">HELLO !</div>
+      <div class="info">YOOOOU JUSSSSSST NEED A BRRRRRRREAK !</div>
+      <div class="button-container">
+        <div id="start-btn" class="button">START</div>
+        <div id="reset-btn" class="button button-2">RESTART</div>
+      </div>
+    </div>
+    <div id="final" class="popup">
+      <div class="title">HELLO !</div>
+      <div class="info">YOU GOT <span class="num"></span> SCORES !</div>
+      <div class="button-container"><div class="button">RESTART</div></div>
+    </div>
+    <div class="mask"></div>
+  </div>
+
+  <!-- ===== Zuma 游戏引擎 (内联 - 来自原始 script.js) ===== -->
+  <script>
+"use strict";
+const OneFrameTime = 17;
+const createDiv = (classList, children = []) => {
+    const div = document.createElement("div");
+    div.classList.add(...classList);
+    children.forEach((ele) => {
+        div.appendChild(ele);
+    });
+    return div;
+};
+const createElementNS = (name, attr) => {
+    const xmlns = "http://www.w3.org/2000/svg";
+    const elementNS = document.createElementNS(xmlns, name);
+    Object.keys(attr).forEach((key) => {
+        elementNS.setAttributeNS(null, key, attr[key]);
+    });
+    return elementNS;
+};
+class Marble {
+    constructor({ color = `#ff2244` }) {
+        this.ID = `${(~~(Math.random() * 1000000000))
+            .toString(16)
+            .toLocaleUpperCase()}`;
+        this.DOM = createDiv(["marble"]);
+        this.Color = color;
+        this.DOM.style.backgroundColor = this.Color;
+        this.DOM.style.width = `${Marble.Size}px`;
+        this.DOM.style.height = `${Marble.Size}px`;
+    }
+    setPosition(x, y) {
+        this.x = x;
+        this.y = y;
+        if (this.DOM) {
+            this.DOM.style.transform = `translate(calc(${this.x}px - 50%), calc(${this.y}px - 50%))`;
+        }
+        return this;
+    }
+    appendTo(parent) {
+        this.parent = parent;
+        parent.appendChild(this.DOM);
+        return this;
+    }
+    remove() {
+        if (!this.parent) {
+            return this;
+        }
+        this.parent.removeChild(this.DOM);
+        this.parent = null;
+        return this;
+    }
+    overlap(marble) {
+        let r = Marble.Size - Math.sqrt((this.x - marble.x) ** 2 + (this.y - marble.y) ** 2);
+        return r;
+    }
+}
+Marble.Size = 60;
+class Player {
+    constructor({ x = 0, y = 0 }) {
+        this.Marble = createDiv(["marble-1"]);
+        this.NextMarbleList = [
+            createDiv(["marble-2"]),
+            createDiv(["marble-2"]),
+            createDiv(["marble-2"])
+        ];
+        this.DOM = createDiv(["player"], [this.Marble, ...this.NextMarbleList]);
+        this.X = x;
+        this.Y = y;
+        this.DOM.style.transform = `translate(calc(${this.X}px - 50%), calc(${this.Y}px - 50%)) rotate(0deg)`;
+    }
+    lookAt(x, y) {
+        if (!this.parent) {
+            return this;
+        }
+        this.lookX = x;
+        this.lookY = y;
+        const rect = this.DOM.getBoundingClientRect();
+        const innerX = rect.left + (rect.right - rect.left) / 2;
+        const innerY = rect.top + (rect.bottom - rect.top) / 2;
+        this.rotate =
+            (Math.atan2(this.lookY - innerY, this.lookX - innerX) * 180) / Math.PI + 90;
+        this.DOM.style.transform = `translate(calc(${this.X}px - 50%), calc(${this.Y}px - 50%)) rotate(${this.rotate}deg)`;
+        return this;
+    }
+    appendTo(parent) {
+        this.parent = parent;
+        this.parent.appendChild(this.DOM);
+        return this;
+    }
+    setMarbleColor(color) {
+        this.Marble.style.backgroundColor = color;
+        return this;
+    }
+    setNextMarbleColor(color) {
+        this.NextMarbleList.forEach((dom) => {
+            dom.style.backgroundColor = color;
+        });
+        return this;
+    }
+    getVector() {
+        const innerRotate = this.rotate - 90;
+        return {
+            x: Math.cos((innerRotate * Math.PI) / 180) * 30,
+            y: Math.sin((innerRotate * Math.PI) / 180) * 30
+        };
+    }
+}
+class Zuma {
+    constructor(data) {
+        this.AllMarbleLength = 100;
+        this.InitMarbleLength = 20;
+        this.Container = createDiv(["container"], [
+            createDiv(["leaf", "leaf-01"]),
+            createDiv(["leaf", "leaf-02"]),
+            createDiv(["leaf", "leaf-03"]),
+            createDiv(["leaf", "leaf-04"]),
+            createDiv(["leaf", "leaf-05"]),
+            createDiv(["leaf", "leaf-06"])
+        ]);
+        this.Path = createElementNS("path", {});
+        this.moveSpeed = 4;
+        this.autoAddMarbleCount = 0;
+        this.marbleDataList = [];
+        this.marbleBoomList = [];
+        this.marbleColorCount = {};
+        this.moveTimes = 0;
+        this.isStart = false;
+        this._isInit = false;
+        this._isFinal = false;
+        this.windowEventList = [];
+        this.checkDeleteAfterTouchData = {};
+        this.playerMarble = {
+            now: null,
+            next: null
+        };
+        this._score = 0;
+        this.width = data.width;
+        this.height = data.height;
+        const svg = createElementNS("svg", {
+            x: "0px",
+            y: "0px",
+            width: `${data.width}px`,
+            height: `${data.height}px`,
+            viewBox: `0 0 ${data.width} ${data.height}`
+        });
+        svg.appendChild(this.Path);
+        this.Path.setAttributeNS(null, "d", data.path);
+        this.PathLength = this.Path.getTotalLength();
+        const startHolePos = this.Path.getPointAtLength(0);
+        const finalHolePos = this.Path.getPointAtLength(this.PathLength);
+        const startHole = createDiv(["start-hole"]);
+        const finalHole = createDiv(["final-hole"]);
+        startHole.style.left = `${startHolePos.x}px`;
+        startHole.style.top = `${startHolePos.y}px`;
+        finalHole.style.left = `${finalHolePos.x}px`;
+        finalHole.style.top = `${finalHolePos.y}px`;
+        this.Container.appendChild(startHole);
+        this.Container.appendChild(finalHole);
+        this.Container.style.width = `${data.width}px`;
+        this.Container.style.height = `${data.height}px`;
+        this.Container.style.transform = `scale(${data.scale || 1})`;
+        this.Player = new Player(data.playerPos);
+        this.Player.appendTo(this.Container);
+        this.colorList = [...Zuma.DefaultColorList];
+        this.colorList.forEach((color) => {
+            this.marbleColorCount[color] = 0;
+        });
+        this.updateScore = data.updateScore;
+        this.updateFinal = data.updateFinal;
+    }
+    get isInit() {
+        return this._isInit;
+    }
+    set isFinal(isFinal) {
+        this._isFinal = isFinal;
+        this.updateFinal && this.updateFinal(this._isFinal);
+    }
+    get isFinal() {
+        return this._isFinal;
+    }
+    set score(score) {
+        this._score = score;
+        this.updateScore && this.updateScore(this._score);
+    }
+    get score() {
+        return this._score;
+    }
+    start() {
+        this.isStart = true;
+        this.time = new Date().getTime();
+        if (!this.windowEventList.length) {
+            this.bindEvent();
+        }
+        this.animation();
+        return this;
+    }
+    stop() {
+        this.isStart = false;
+        return this;
+    }
+    reset() {
+        this.isStart = false;
+        this._isInit = false;
+        this.isFinal = false;
+        this.autoAddMarbleCount = 0;
+        this.score = 0;
+        this.moveSpeed = 4;
+        this.colorList = [...Zuma.DefaultColorList];
+        this.marbleDataList.forEach((d) => d.marble.remove());
+        this.marbleBoomList.forEach((d) => d.marble.remove());
+        this.marbleDataList.length = 0;
+        this.marbleBoomList.length = 0;
+        this.checkDeleteAfterTouchData = {};
+        this.playerMarble.now = null;
+        this.playerMarble.next = null;
+        this.Player.setMarbleColor("").setNextMarbleColor("");
+        Object.keys(this.marbleColorCount).forEach((color) => {
+            this.marbleColorCount[color] = 0;
+        });
+        return this;
+    }
+    destroy() {
+        this.reset();
+        if (this.parent) {
+            this.parent.removeChild(this.Container);
+        }
+        this.windowEventList.forEach((d) => {
+            window.removeEventListener(d.name, d.fn);
+        });
+        this.windowEventList = [];
+    }
+    appendTo(parent) {
+        this.parent = parent;
+        this.parent.appendChild(this.Container);
+        return this;
+    }
+    attack() {
+        if (!this.Player || !this.playerMarble.now || !this.playerMarble.next) {
+            return this;
+        }
+        const vector = this.Player.getVector();
+        this.marbleBoomList.push({
+            marble: this.playerMarble.now,
+            speed: vector
+        });
+        this.playerMarble.now.appendTo(this.Container);
+        this.playerMarble.now.setPosition(this.Player.X, this.Player.Y);
+        this.playerMarble.now = this.playerMarble.next;
+        this.playerMarble.next = this.createMarble();
+        this.Player.setMarbleColor(this.playerMarble.now.Color).setNextMarbleColor(this.playerMarble.next.Color);
+        return this;
+    }
+    init() {
+        const innerTime = new Date().getTime();
+        if (this.marbleDataList.length >= this.InitMarbleLength && this.isStart) {
+            this._isInit = true;
+            this.moveSpeed = 20;
+            this.moveTimes = this.moveSpeed;
+            this.playerMarble.now = this.createMarble();
+            this.playerMarble.next = this.createMarble();
+            this.Player.setMarbleColor(this.playerMarble.now.Color).setNextMarbleColor(this.playerMarble.next.Color);
+            return this;
+        }
+        if (innerTime - this.time < OneFrameTime * 4) {
+            return this;
+        }
+        this.time = innerTime;
+        this.unshiftMarble();
+        return this;
+    }
+    moveMoveMarbleData() {
+        const firstMarble = this.marbleDataList[0];
+        if (!firstMarble) {
+            return;
+        }
+        if (firstMarble.percent >= 0.99) {
+            this.score -= 1;
+            this.removeMarbleFromDataList(firstMarble.marble);
+        }
+        const moveNum = Marble.Size / this.moveSpeed;
+        firstMarble.percent += moveNum / this.PathLength;
+        const pos = this.Path.getPointAtLength(firstMarble.percent * this.PathLength);
+        firstMarble.marble.setPosition(pos.x, pos.y);
+        let prevMarble = firstMarble;
+        const deleteList = [];
+        for (let i = 1; i < this.marbleDataList.length; i++) {
+            const marbleData = this.marbleDataList[i];
+            if (marbleData.percent >= 0.99) {
+                this.score -= 1;
+                this.removeMarbleFromDataList(marbleData.marble, i);
+                continue;
+            }
+            const overlap = prevMarble.marble.overlap(marbleData.marble);
+            if (overlap > 0 || prevMarble.percent > marbleData.percent) {
+                if (this.checkDeleteAfterTouchData[marbleData.marble.ID]) {
+                    delete this.checkDeleteAfterTouchData[marbleData.marble.ID];
+                    if (marbleData.marble.Color === prevMarble.marble.Color) {
+                        const list = this.getNeerSameMarble(marbleData.marble);
+                        if (list.length >= 3) {
+                            deleteList.push(...list);
+                        }
+                    }
+                }
+                if (prevMarble.percent > marbleData.percent) {
+                    marbleData.percent = prevMarble.percent + Marble.Size / this.PathLength;
+                }
+                else {
+                    marbleData.percent += overlap / this.PathLength;
+                }
+            }
+            else if (overlap < -5 && marbleData.percent > prevMarble.percent) {
+                if (overlap < -Marble.Size) {
+                    this.checkDeleteAfterTouchData[marbleData.marble.ID] = true;
+                }
+                const moveNum = (Marble.Size / this.moveSpeed) * 4;
+                marbleData.percent -= moveNum / this.PathLength;
+            }
+            const pos = this.Path.getPointAtLength(marbleData.percent * this.PathLength);
+            marbleData.marble.setPosition(pos.x, pos.y);
+            prevMarble = marbleData;
+        }
+        deleteList.forEach((marble) => {
+            this.score += 3;
+            this.removeMarbleFromDataList(marble);
+        });
+    }
+    moveMoveMarbleBoom() {
+        if (!this.marbleBoomList.length) {
+            return;
+        }
+        const marbleDataList = this.marbleDataList;
+        const deleteData = [];
+        this.marbleBoomList.forEach((data) => {
+            data.marble.setPosition(data.marble.x + data.speed.x, data.marble.y + data.speed.y);
+            for (let i = 0; i < marbleDataList.length; i++) {
+                const marbleData = marbleDataList[i];
+                const overlap = data.marble.overlap(marbleData.marble);
+                if (overlap > 5) {
+                    if (data.marble.Color === marbleData.marble.Color) {
+                        const sameList = this.getNeerSameMarble(marbleData.marble);
+                        if (sameList.length >= 2) {
+                            this.score += sameList.length;
+                            sameList.forEach((marble) => {
+                                this.removeMarbleFromDataList(marble);
+                            });
+                            deleteData.push(Object.assign(Object.assign({}, data), { isMove: false }));
+                            return;
+                        }
+                    }
+                    this.addMarbleToNeer(data.marble, marbleData);
+                    deleteData.push(Object.assign(Object.assign({}, data), { isMove: true }));
+                    return;
+                }
+            }
+            if (Math.abs(data.marble.x) > this.width ||
+                Math.abs(data.marble.y) > this.height) {
+                deleteData.push(Object.assign(Object.assign({}, data), { isMove: false }));
+            }
+        });
+        deleteData.forEach((date) => {
+            const index = this.marbleBoomList.findIndex((d) => d.marble.ID === date.marble.ID);
+            this.marbleBoomList.splice(index, 1);
+            if (!date.isMove) {
+                date.marble.remove();
+                this.marbleColorCount[date.marble.Color]--;
+            }
+        });
+    }
+    removeMarbleFromDataList(marble, index = this.marbleDataList.findIndex((d) => d.marble.ID === marble.ID)) {
+        delete this.checkDeleteAfterTouchData[marble.ID];
+        this.marbleDataList[index].marble.remove();
+        this.marbleDataList.splice(index, 1);
+        this.marbleColorCount[marble.Color]--;
+        return this;
+    }
+    addMarbleToNeer(marble, target) {
+        const index = this.marbleDataList.findIndex((d) => d.marble.ID === target.marble.ID);
+        const prevPos = this.Path.getPointAtLength((target.percent - Marble.Size / this.PathLength) * this.PathLength);
+        const nextPos = this.Path.getPointAtLength((target.percent + Marble.Size / this.PathLength) * this.PathLength);
+        const prevGap = (prevPos.x - marble.x) ** 2 + (prevPos.y - marble.y) ** 2;
+        const nextGap = (nextPos.x - marble.x) ** 2 + (nextPos.y - marble.y) ** 2;
+        if (prevGap < nextGap) {
+            this.marbleDataList.splice(index - 1, 0, {
+                marble,
+                percent: target.percent - Marble.Size / this.PathLength / 2
+            });
+        }
+        else {
+            this.marbleDataList.splice(index, 0, {
+                marble,
+                percent: target.percent + Marble.Size / this.PathLength / 2
+            });
+        }
+        return this;
+    }
+    createMarble() {
+        const marble = new Marble({ color: this.getColor() });
+        this.marbleColorCount[marble.Color]++;
+        return marble;
+    }
+    unshiftMarble() {
+        const marble = this.createMarble();
+        marble.appendTo(this.Container);
+        this.marbleDataList.unshift({
+            marble,
+            percent: 0
+        });
+        this.autoAddMarbleCount++;
+        return this;
+    }
+    getColor() {
+        const index = ~~(Math.random() * this.colorList.length);
+        const color = this.colorList[index];
+        if (this.marbleColorCount[color] ||
+            this.colorList.length === 1 ||
+            !this.isInit) {
+            return color;
+        }
+        this.colorList.splice(index, 1);
+        return this.getColor();
+    }
+    getNeerSameMarble(marble) {
+        let checkMarble;
+        const index = this.marbleDataList.findIndex((ele) => ele.marble.ID === marble.ID);
+        const neerList = [marble];
+        checkMarble = marble;
+        for (let i = index + 1; i < this.marbleDataList.length; i++) {
+            const nowMarble = this.marbleDataList[i].marble;
+            if (nowMarble.Color === checkMarble.Color &&
+                nowMarble.overlap(checkMarble) > Marble.Size / -10) {
+                checkMarble = nowMarble;
+                neerList.push(nowMarble);
+            }
+            else {
+                break;
+            }
+        }
+        checkMarble = marble;
+        for (let i = index - 1; i >= 0; i--) {
+            const nowMarble = this.marbleDataList[i].marble;
+            if (nowMarble.Color === checkMarble.Color &&
+                nowMarble.overlap(checkMarble) > Marble.Size / -10) {
+                checkMarble = nowMarble;
+                neerList.push(nowMarble);
+            }
+            else {
+                break;
+            }
+        }
+        return neerList;
+    }
+    animation() {
+        if (!this.isStart) {
+            return;
+        }
+        requestAnimationFrame(() => this.animation());
+        if (!this.isInit) {
+            this.init().moveMoveMarbleData();
+            return;
+        }
+        const innerTime = new Date().getTime();
+        if (innerTime - this.time < OneFrameTime) {
+            return;
+        }
+        this.time = innerTime;
+        if (this.moveTimes === this.moveSpeed &&
+            this.autoAddMarbleCount < this.AllMarbleLength) {
+            this.unshiftMarble();
+            this.moveTimes = 0;
+        }
+        this.moveMoveMarbleBoom();
+        this.moveMoveMarbleData();
+        this.moveTimes++;
+        if (this.marbleDataList.length === 0) {
+            this.isFinal = true;
+        }
+    }
+    bindEvent() {
+        const mousemove = (e) => {
+            if (!this.Player) {
+                return;
+            }
+            this.Player.lookAt(e.pageX, e.pageY);
+        };
+        const click = (e) => {
+            if (!this.isStart || this.isFinal || !this.isInit) {
+                return;
+            }
+            this.attack();
+            if (e.button === 1) {
+            }
+        };
+        const keydown = (e) => {
+            if (!this.isStart || this.isFinal || !this.isInit) {
+                return;
+            }
+            if (e.code === "Space") {
+                e.preventDefault();
+                if (this.Player && this.playerMarble.now && this.playerMarble.next) {
+                    [this.playerMarble.now, this.playerMarble.next] = [
+                        this.playerMarble.next,
+                        this.playerMarble.now
+                    ];
+                    this.Player.setMarbleColor(this.playerMarble.now.Color).setNextMarbleColor(this.playerMarble.next.Color);
+                }
+            }
+        };
+        window.addEventListener("mousemove", mousemove);
+        window.addEventListener("click", click);
+        window.addEventListener("keydown", keydown);
+        this.windowEventList.push({ name: "mousemove", fn: mousemove }, { name: "click", fn: click }, { name: "keydown", fn: keydown });
+    }
+}
+Zuma.DefaultColorList = [
+    "#0C3406",
+    "#077187",
+    "#74A57F",
+    "#ABD8CE",
+    "#E4C5AF"
+];
+
+// ----- 游戏初始化 (脚本在 <body> 底部执行，DOM 已就绪) -----
+(function() {
+    const scoreDOM = document.body.querySelector("#score .num");
+    const startPopup = document.body.querySelector("#start");
+    const stopPopup = document.body.querySelector("#stop");
+    const finalPopup = document.body.querySelector("#final");
+    const finalNum = finalPopup.querySelector(".num");
+    const zumaGame = new Zuma({
+        width: 1200,
+        height: 800,
+        scale: 0.7,
+        path: `M235.5-36.5c0,0-129,157.858-143,381.918c-6.6,105.632,47,236.043,159,295.679s338.566,101.881,547,64.404
+    c199-35.781,312.016-164.676,313-266c1-103-34-221.816-200-278.044c-142.542-48.282-346.846-37.455-471,31.044
+    c-116,64-154.263,213.533-81,304.619c92,114.381,410,116.381,476,2.891c62.975-108.289-40-203.51-158-206.51`,
+        playerPos: { x: 550, y: 400 },
+        updateScore: (score) => {
+            scoreDOM.innerHTML = `${score}`;
+        },
+        updateFinal: (isFinal) => {
+            if (isFinal) {
+                finalPopup.classList.add("active");
+                finalNum.innerHTML = `${zumaGame.score}`;
+            }
+        }
+    });
+    zumaGame.appendTo(document.body);
+    startPopup.querySelector(".button").addEventListener("click", () => {
+        startPopup.classList.remove("active");
+        zumaGame.start();
+    });
+    stopPopup.querySelector("#start-btn").addEventListener("click", () => {
+        stopPopup.classList.remove("active");
+        setTimeout(() => {
+            zumaGame.start();
+        }, 100);
+    });
+    stopPopup.querySelector("#reset-btn").addEventListener("click", () => {
+        stopPopup.classList.remove("active");
+        zumaGame.reset().start();
+    });
+    finalPopup.querySelector(".button").addEventListener("click", () => {
+        finalPopup.classList.remove("active");
+        zumaGame.reset().start();
+    });
+    window.addEventListener("keydown", (e) => {
+        if (e.code === "Escape" && zumaGame.isInit) {
+            zumaGame.stop();
+            stopPopup.classList.add("active");
+        }
+    });
+    window.addEventListener("blur", function (e) {
+        if (zumaGame.isInit && !zumaGame.isFinal) {
+            zumaGame.stop();
+            stopPopup.classList.add("active");
+        }
+    });
+    // ===== 暴露游戏实例给平台（用于 Mode A Effect Engine 注入）=====
+    window.zumaGame = zumaGame;
+
+    // ═══════════════════════════════════════════════════════════════
+    // AllinONE 平台集成：effectCode 沙箱引擎 + UGC 道具系统
+    // ═══════════════════════════════════════════════════════════════
+
+    // ---------- Toast 提示系统 ----------
+    function showToast(msg, type) {
+      var toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = msg;
+      if (type === 'success') toast.style.borderColor = '#4caf50';
+      else if (type === 'error') toast.style.borderColor = '#f44336';
+      else if (type === 'info') toast.style.borderColor = '#2196f3';
+      document.getElementById('toast-container').appendChild(toast);
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() { toast.classList.add('show'); });
+      });
+      setTimeout(function() {
+        toast.classList.remove('show');
+        setTimeout(function() { toast.remove(); }, 400);
+      }, 3000);
+    }
+
+    // ---------- ZUMA 内置效果表 ----------
+    var EFFECT_HANDLERS = {
+      add_score: function(params) {
+        var bonus = params.bonus || 10;
+        zumaGame.score += bonus;
+        return { message: '✨ 获得 +' + bonus + ' 分！' };
+      },
+      clear_color: function(params) {
+        var color = params.color;
+        if (!color) {
+          var list = zumaGame.marbleDataList;
+          if (list.length > 0) color = list[0].marble.Color;
+        }
+        if (!color) return { message: '没有可消除的弹珠', error: true };
+        var removed = 0;
+        for (var i = zumaGame.marbleDataList.length - 1; i >= 0; i--) {
+          if (zumaGame.marbleDataList[i].marble.Color === color) {
+            zumaGame.removeMarbleFromDataList(zumaGame.marbleDataList[i].marble, i);
+            removed++;
+          }
+        }
+        zumaGame.score += removed * 5;
+        return { message: '💥 清除了 ' + removed + ' 个同色弹珠！+' + (removed*5) + ' 分' };
+      },
+      slow_chain: function(params) {
+        var origSpeed = zumaGame.moveSpeed;
+        zumaGame.moveSpeed = Math.max(origSpeed * 3, 30);
+        return { message: '🐌 弹珠链大幅减速！', _restore: function() { zumaGame.moveSpeed = origSpeed; } };
+      },
+      remove_tail: function(params) {
+        var count = params.count || 5;
+        var removed = 0;
+        for (var i = zumaGame.marbleDataList.length - 1; i >= 0 && removed < count; i--) {
+          zumaGame.removeMarbleFromDataList(zumaGame.marbleDataList[i].marble, i);
+          removed++;
+        }
+        zumaGame.score += removed * 3;
+        return { message: '✂️ 移除了尾部 ' + removed + ' 个弹珠！' };
+      },
+      reverse_chain: function(params) {
+        var list = zumaGame.marbleDataList;
+        for (var i = 0; i < list.length; i++) {
+          list[i].percent = 1.0 - list[i].percent;
+        }
+        list.sort(function(a, b) { return a.percent - b.percent; });
+        return { message: '🔄 弹珠链反转！' };
+      },
+      score_multiplier: function(params) {
+        var mult = params.multiplier || 2;
+        var bonus = Math.floor(zumaGame.score * (mult - 1));
+        zumaGame.score += bonus;
+        return { message: '✨ 分数 x' + mult + '！+' + bonus + ' 分' };
+      },
+      freeze_all: function(params) {
+        zumaGame.moveSpeed = 99999;
+        return { message: '❄️ 弹珠链完全冻结！(5秒)', _freeze: true };
+      },
+    };
+
+    // 缓存冻结/减速的恢复定时器
+    var _restoreTimer = null;
+
+    // ---------- effectCode 沙箱引擎（通用模板） ----------
+    var _dynamicHandlerCache = {};
+
+    function registerDynamicEffect(effectName, effectCodeStr) {
+      if (EFFECT_HANDLERS[effectName]) return true;
+      if (_dynamicHandlerCache[effectName]) {
+        EFFECT_HANDLERS[effectName] = _dynamicHandlerCache[effectName];
+        return true;
+      }
+      if (!effectCodeStr || typeof effectCodeStr !== 'string') return false;
+      if (effectCodeStr.length > 4000) {
+        console.warn('[Zuma] effectCode 超过长度限制:', effectName);
+        return false;
+      }
+
+      var blocked = [
+        'eval(', 'new function', 'import(', 'require(', '__proto__',
+        'prototype', 'constructor', 'window.', 'document.',
+        'parent.', 'top.', 'globalthis', 'self.',
+        'fetch(', 'xmlhttprequest', 'websocket', 'worker(',
+        'localstorage', 'sessionstorage', 'cookie',
+        'alert(', 'confirm(', 'prompt('
+      ];
+      var lowerCode = effectCodeStr.toLowerCase();
+      for (var i = 0; i < blocked.length; i++) {
+        if (lowerCode.indexOf(blocked[i]) !== -1) {
+          console.warn('[Zuma] effectCode 安全检查失败:', blocked[i]);
+          return false;
+        }
+      }
+
+      // 沙箱变量：ZUMA 游戏专用
+      var gameState = {
+        game: zumaGame,
+        marbles: zumaGame.marbleDataList,
+        score: function() { return zumaGame.score; },
+        marbleCount: function() { return zumaGame.marbleDataList.length; },
+        moveSpeed: function() { return zumaGame.moveSpeed; },
+        pathLength: zumaGame.PathLength,
+      };
+
+      try {
+        var sandboxFn = new Function(
+          'game', 'gameState', 'marbles',
+          'Math', 'JSON', 'console',
+          'return (' + effectCodeStr + ');'
+        );
+        var rawHandler = sandboxFn(
+          zumaGame, gameState, zumaGame.marbleDataList,
+          Math, JSON, console
+        );
+
+        if (typeof rawHandler !== 'function') {
+          console.warn('[Zuma] effectCode 未返回函数:', effectName);
+          return false;
+        }
+
+        var wrappedHandler = function(params) {
+          try {
+            return rawHandler(params) || { message: '效果已执行' };
+          } catch (e) {
+            console.error('[Zuma] 自定义效果执行出错:', effectName, e);
+            return { error: true, message: '效果出错: ' + (e.message || e) };
+          }
+        };
+
+        _dynamicHandlerCache[effectName] = wrappedHandler;
+        EFFECT_HANDLERS[effectName] = wrappedHandler;
+        console.log('[Zuma] 动态效果已注册:', effectName);
+        return true;
+      } catch (e) {
+        console.error('[Zuma] effectCode 编译失败:', effectName, e);
+        return false;
+      }
+    }
+
+    // ---------- UGC 道具库存 ----------
+    var customPowerUps = [];
+
+    function renderCustomPowerUps() {
+      var bar = document.getElementById('ugc-bar');
+      bar.innerHTML = '';
+      var label = document.createElement('span');
+      label.className = 'ugc-label';
+      label.textContent = 'PROPS';
+      bar.appendChild(label);
+
+      if (customPowerUps.length === 0) {
+        var empty = document.createElement('span');
+        empty.className = 'ugc-empty';
+        empty.textContent = 'No items yet';
+        bar.appendChild(empty);
+        return;
+      }
+
+      customPowerUps.forEach(function(item, idx) {
+        var div = document.createElement('div');
+        div.className = 'ugc-item';
+        div.title = (item.description || item.name) + ' — 点击使用';
+        var icon = document.createElement('div');
+        icon.className = 'item-icon';
+        icon.textContent = item.icon || '⚡';
+        var name = document.createElement('div');
+        name.className = 'item-name';
+        name.textContent = item.name;
+        div.appendChild(icon);
+        div.appendChild(name);
+        div.addEventListener('click', function() { useCustomPowerUp(idx); });
+        bar.appendChild(div);
+      });
+    }
+
+    function useCustomPowerUp(index) {
+      var item = customPowerUps[index];
+      if (!item) return;
+      if (!zumaGame.isStart || zumaGame.isFinal || !zumaGame.isInit) {
+        showToast('⚠️ 请在游戏中使用道具', 'info');
+        return;
+      }
+
+      // 自动注册 effectCode
+      if (item.effectCode && !EFFECT_HANDLERS[item.effect]) {
+        var registered = registerDynamicEffect(item.effect, item.effectCode);
+        if (!registered) {
+          showToast('❌ 效果注册失败: ' + item.effect, 'error');
+          return;
+        }
+      }
+
+      var handler = EFFECT_HANDLERS[item.effect];
+      if (handler) {
+        var result = handler(item.params);
+        if (result && result.message) {
+          showToast(result.message, result.error ? 'error' : 'success');
+        }
+        // 处理冻结/减速的自动恢复
+        if (result && (result._freeze || result._restore)) {
+          if (_restoreTimer) clearTimeout(_restoreTimer);
+          _restoreTimer = setTimeout(function() {
+            if (result._restore) result._restore();
+            if (result._freeze) zumaGame.moveSpeed = 20; // 恢复默认速度
+            showToast('⏰ 效果已消失', 'info');
+          }, (result._freeze ? 5000 : 10000));
+        }
+      } else {
+        showToast('❌ 未找到效果: ' + item.effect, 'error');
+      }
+
+      customPowerUps.splice(index, 1);
+      renderCustomPowerUps();
+    }
+
+    // ---------- 接收平台 EXTENSION_VOUCHER ----------
+    window.addEventListener('message', function(e) {
+      if (e.data && e.data.type === 'EXTENSION_VOUCHER') {
+        var v = e.data.voucher;
+        if (!v || !v.data) {
+          console.warn('[Zuma] EXTENSION_VOUCHER 数据无效');
+          return;
+        }
+        var data = v.data;
+        if (data.effect) {
+          var customItem = {
+            id: v.id || ('ugc_' + Date.now()),
+            name: data.name || (data.effect + '道具'),
+            effect: data.effect,
+            params: data.params || {},
+            description: data.description || '',
+            effectCode: data.effectCode || null,
+            icon: data.icon || '⚡',
+          };
+          customPowerUps.push(customItem);
+          renderCustomPowerUps();
+          showToast('🎁 获得道具: ' + customItem.name, 'success');
+          console.log('[Zuma] UGC 道具到账:', customItem);
+        }
+      }
+
+      // 兼容：兑换码结果
+      if (e.data && e.data.type === 'REDEEM_RESULT' && e.data.data && e.data.data.success) {
+        console.log('[Zuma] 兑换码成功:', e.data.data);
+      }
+    });
+
+    // 初始渲染
+    renderCustomPowerUps();
+    console.log('[Zuma] AllinONE UGC 道具系统就绪 ✅');
+})();
+  </script>
+
+</body>
+</html>

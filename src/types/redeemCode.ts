@@ -70,6 +70,10 @@ export interface HostedItem {
     duration?: number;          // 持续时间（秒，0表示永久）
     effectType?: string;        // 效果类型 (e.g., 'difficulty_reducer', 'score_boost', 'custom')
     metadata?: Record<string, any>;  // 额外元数据（包含效果参数）
+    /** Schema 名称（UGC 道具专用，如 'match3-powerup'） */
+    schemaName?: string;
+    /** Schema 结构化数据（UGC 道具专用，含 effect/params 等） */
+    itemData?: Record<string, any>;
   };
   
   // 状态和时间

@@ -13,6 +13,7 @@ import type {
   PaginatedResult,
 } from '../types';
 import { VoucherStatus, TransactionType } from '../types';
+import { writeQueue } from '../../services/writeQueue';
 
 // 存储键名（模拟表名）
 const STORAGE_KEYS = {
@@ -551,46 +552,32 @@ export class VoucherDatabase {
     return SYSTEM_CAPACITY - this.voucherCache.size;
   }
 
-  // ==================== CloudBase 双写 ====================
+  // ==================== CloudBase 双写（通过写入队列） ====================
 
   private syncVouchersToCloud(): void {
     if (typeof window === 'undefined') return;
-    try {
-      import('../../services/cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-        if (!isCloudBaseReady()) return;
-        const db = getCloudBaseApp().database();
-        const vouchers = Array.from(this.voucherCache.values());
-        for (const v of vouchers.slice(-20)) {
-          db.collection('vouchers').where({ id: v.id }).get().then(res => {
-            if (res.data.length > 0) {
-              db.collection('vouchers').doc(res.data[0]._id).update(v as any).catch(() => {});
-            } else {
-              db.collection('vouchers').add(v as any).catch(() => {});
-            }
-          }).catch(() => {});
-        }
-      }).catch(() => {});
-    } catch { /* ignore */ }
+    const vouchers = Array.from(this.voucherCache.values());
+    // 全量入队，不再截断
+    for (const v of vouchers) {
+      writeQueue.enqueue({
+        collection: 'vouchers',
+        operation: 'upsert',
+        data: v as any,
+      });
+    }
   }
 
   private syncTransactionsToCloud(): void {
     if (typeof window === 'undefined') return;
-    try {
-      import('../../services/cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-        if (!isCloudBaseReady()) return;
-        const db = getCloudBaseApp().database();
-        const txs = Array.from(this.transactionCache.values());
-        for (const tx of txs.slice(-20)) {
-          db.collection('voucher_transactions').where({ id: tx.id }).get().then(res => {
-            if (res.data.length > 0) {
-              db.collection('voucher_transactions').doc(res.data[0]._id).update(tx as any).catch(() => {});
-            } else {
-              db.collection('voucher_transactions').add(tx as any).catch(() => {});
-            }
-          }).catch(() => {});
-        }
-      }).catch(() => {});
-    } catch { /* ignore */ }
+    const txs = Array.from(this.transactionCache.values());
+    // 全量入队，不再截断
+    for (const tx of txs) {
+      writeQueue.enqueue({
+        collection: 'voucher_transactions',
+        operation: 'upsert',
+        data: tx as any,
+      });
+    }
   }
 
   async syncFromCloudBase(): Promise<void> {

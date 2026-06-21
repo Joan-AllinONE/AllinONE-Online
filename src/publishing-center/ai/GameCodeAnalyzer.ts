@@ -139,11 +139,22 @@ export class GameCodeAnalyzer {
     const allCodeContent = this.getAllCodeContent();
     console.log('[GameCodeAnalyzer] 代码内容总长度:', allCodeContent.length);
 
-    // 检查 CloudBase 是否可用
+    // 检查 CloudBase 是否可用，并确保匿名登录完成后再使用 AI
     let useAI = false;
     try {
       await initCloudBase();
-      useAI = isCloudBaseReady();
+      if (isCloudBaseReady()) {
+        // 额外验证 AI 模型可用性：尝试创建模型并做简单调用
+        // CloudBase AI 需要 OAuth2 凭据，匿名登录必须完成
+        const { getCloudBaseApp } = await import('../../services/cloudbase');
+        const auth = getCloudBaseApp().auth({ persistence: 'local' });
+        const loginState = await auth.getLoginState().catch(() => null);
+        if (loginState) {
+          useAI = true;
+        } else {
+          console.warn('AI 功能不可用：CloudBase 登录态未就绪，将使用本地分析');
+        }
+      }
     } catch (err) {
       console.warn('AI 功能不可用，将使用本地分析:', err);
     }
@@ -155,11 +166,11 @@ export class GameCodeAnalyzer {
 
     if (useAI) {
       console.log('🤖 使用 CloudBase AI 进行分析...');
-      [framework, features, codeMetrics] = await Promise.all([
-        this.detectFrameworkWithAI(allCodeContent),
-        this.detectFeaturesWithAI(allCodeContent),
-        this.analyzeCodeQualityWithAI(allCodeContent),
-      ]);
+      // 逐个调用而非 Promise.all，避免一个失败影响其他
+      // 每个都有独立的 try-catch 降级到本地分析
+      framework = await this.detectFrameworkWithAI(allCodeContent);
+      features = await this.detectFeaturesWithAI(allCodeContent);
+      codeMetrics = await this.analyzeCodeQualityWithAI(allCodeContent);
     } else {
       console.log('📊 CloudBase AI 不可用，使用本地规则分析...');
       [framework, features, codeMetrics] = await Promise.all([

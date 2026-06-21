@@ -5,9 +5,10 @@ import { PublishingPipeline } from '@/publishing-center/core/PublishingPipeline'
 import { StandardGameValidator } from '@/publishing-center/validator/StandardGameValidator';
 import { GameCodeAnalyzer } from '@/publishing-center/ai/GameCodeAnalyzer';
 import { SkillRecommender } from '@/publishing-center/ai/SkillRecommender';
-import { savePublishedGame } from '@/services/publishedGameService';
+import { savePublishedGame, getPublishedGame } from '@/services/publishedGameService';
 import { useAuth } from '@/contexts/authContext';
 import { toast } from 'sonner';
+import type { GameItemSop } from '@/services/publishedGameService';
 import { Wand2, Sparkles, ArrowRight, CheckCircle } from 'lucide-react';
 
 export default function PublishingCenter() {
@@ -38,26 +39,44 @@ export default function PublishingCenter() {
     }
   }, [location.state]);
 
-  const handlePublishComplete = (result: { gameId: string; url: string; gameName?: string; framework?: string; skills?: string[]; entryPoint?: string; fileCount?: number; size?: number }) => {
-    // 保存发布的游戏到本地存储
-    savePublishedGame({
+  const handlePublishComplete = async (result: { gameId: string; url: string; gameName?: string; framework?: string; skills?: string[]; entryPoint?: string; fileCount?: number; size?: number; itemSop?: GameItemSop; sopDocument?: string }) => {
+    // 获取管线已保存的游戏记录（含 hostingType、baseUrl 等字段）
+    const existing = getPublishedGame(result.gameId);
+
+    // 合并发布结果与管线已有数据，避免覆盖 hostingType/baseUrl
+    await savePublishedGame({
+      ...(existing || {}),
       id: result.gameId,
-      name: result.gameName || '未命名游戏',
-      description: `使用 ${result.framework || 'Unknown'} 框架开发的游戏`,
-      framework: result.framework || 'unknown',
-      version: '1.0.0',
-      icon: 'fa-solid fa-gamepad',
-      difficulty: 'medium',
-      rewards: {
+      name: result.gameName || existing?.name || '未命名游戏',
+      description: existing?.description || `使用 ${result.framework || 'Unknown'} 框架开发的游戏`,
+      framework: result.framework || existing?.framework || 'unknown',
+      version: existing?.version || '1.0.0',
+      icon: existing?.icon || 'fa-solid fa-gamepad',
+      difficulty: existing?.difficulty || 'medium',
+      rewards: existing?.rewards || {
         computingPower: 50,
         gameCoins: 50,
       },
       externalUrl: result.url,
+      cdnUrl: existing?.cdnUrl,
       publishedAt: new Date().toISOString(),
-      skills: result.skills || [],
-      entryPoint: result.entryPoint || 'index.html',
-      fileCount: result.fileCount || 0,
-      size: result.size || 0,
+      skills: result.skills || existing?.skills || [],
+      skillConfigs: existing?.skillConfigs,
+      entryPoint: existing?.entryPoint || result.entryPoint || 'index.html',
+      fileCount: result.fileCount || existing?.fileCount || 0,
+      size: result.size || existing?.size || 0,
+      redeemItems: existing?.redeemItems,
+      protocolMode: existing?.protocolMode,
+      itemSop: result.itemSop || existing?.itemSop,
+      sopDocument: result.sopDocument || existing?.sopDocument,
+      // 保留管线设置的托管模式字段
+      hostingType: existing?.hostingType,
+      baseUrl: existing?.baseUrl,
+      publisherId: existing?.publisherId,
+      publisherName: existing?.publisherName,
+      revenueSharePercent: existing?.revenueSharePercent,
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
     
     toast.success('游戏发布成功！', {

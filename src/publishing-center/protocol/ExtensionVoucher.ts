@@ -265,7 +265,18 @@ export class ExtensionVoucherService {
     } else {
       all.push(voucher);
     }
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+    // 本地缓存
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+    } catch { /* 缓存空间不足 */ }
+    // ✅ CloudBase 双写（通过写入队列，保证零丢失）
+    import('../../services/writeQueue').then(({ writeQueue }) => {
+      writeQueue.enqueue({
+        collection: 'extension_vouchers',
+        operation: 'upsert',
+        data: voucher as any,
+      });
+    }).catch(() => {});
   }
 
   static get(voucherId: string): ExtensionVoucher | undefined {
@@ -278,6 +289,27 @@ export class ExtensionVoucherService {
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
+    }
+  }
+
+  /** 异步从 CloudBase 刷新缓存（云端数据覆盖本地） */
+  static async refreshFromCloud(): Promise<ExtensionVoucher[]> {
+    try {
+      const { isCloudBaseReady, getCloudBaseApp } = await import('../../services/cloudbase');
+      if (!isCloudBaseReady()) return this.getAll();
+      const res = await getCloudBaseApp().database().collection('extension_vouchers').limit(500).get();
+      if (res.data.length === 0) return this.getAll();
+      const local = this.getAll();
+      // ✅ CloudBase 数据覆盖本地同名 ID
+      const cloudMap = new Map(res.data.map(d => [d.id, d]));
+      const localOnly = local.filter(v => !cloudMap.has(v.id));
+      const merged = [...res.data as ExtensionVoucher[], ...localOnly];
+      try {
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(merged));
+      } catch { /* 缓存空间不足 */ }
+      return merged;
+    } catch {
+      return this.getAll();
     }
   }
 

@@ -26,7 +26,6 @@ import {
   ItemSupplyPolicy,
   ItemVoucherTemplate,
   VoucherStatus,
-  TransactionType,
   Voucher,
   isCurrencyVoucher,
   VoucherMetadata,
@@ -46,6 +45,10 @@ import type {
   GameProposalPayload,
 } from '@/types/gameProposal';
 import { gameProposalService } from './gameProposalService';
+import { getDefaultRegistry } from '@/publishing-center/protocol/SchemaRegistry';
+import { ExtensionVoucherService } from '@/publishing-center/protocol/ExtensionVoucher';
+import { getDefaultEngine } from '@/publishing-center/protocol/ProtocolEngine';
+import { writeQueue } from './writeQueue';
 
 // ==================== 常量定义 ====================
 
@@ -103,11 +106,31 @@ export interface RedeemItemVoucherRequest {
 function loadTemplates(): ItemVoucherTemplate[] {
   try {
     const raw = localStorage.getItem(ITEM_TEMPLATE_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const data = raw ? JSON.parse(raw) : [];
+    if (!_templatesCloudSyncInitiated) {
+      _templatesCloudSyncInitiated = true;
+      import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+        if (!isCloudBaseReady()) return;
+        getCloudBaseApp().database().collection('voucher_templates').limit(500).get().then(res => {
+          if (res.data.length === 0) return;
+          const freshRaw = localStorage.getItem(ITEM_TEMPLATE_STORAGE_KEY);
+          const fresh: ItemVoucherTemplate[] = freshRaw ? JSON.parse(freshRaw) : [];
+          // ✅ CloudBase 数据覆盖本地同名 ID（云端为准）
+          const cloudMap = new Map(res.data.map(d => [d.id, d]));
+          const localOnly = fresh.filter(t => !cloudMap.has(t.id));
+          const merged = [...res.data as ItemVoucherTemplate[], ...localOnly];
+          localStorage.setItem(ITEM_TEMPLATE_STORAGE_KEY, JSON.stringify(merged));
+          window.dispatchEvent(new CustomEvent('templates-list-updated'));
+        }).catch(() => {});
+      }).catch(() => {});
+    }
+    return data;
   } catch {
     return [];
   }
 }
+
+let _templatesCloudSyncInitiated = false;
 
 function saveTemplates(templates: ItemVoucherTemplate[]): void {
   localStorage.setItem(ITEM_TEMPLATE_STORAGE_KEY, JSON.stringify(templates));
@@ -115,29 +138,44 @@ function saveTemplates(templates: ItemVoucherTemplate[]): void {
 }
 
 function syncTemplatesToCloud(templates: ItemVoucherTemplate[]): void {
-  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-    if (!isCloudBaseReady()) return;
-    const db = getCloudBaseApp().database();
-    for (const t of templates.slice(-10)) {
-      db.collection('voucher_templates').where({ id: t.id }).get().then(res => {
-        if (res.data.length > 0) {
-          db.collection('voucher_templates').doc(res.data[0]._id).update(t as any).catch(() => {});
-        } else {
-          db.collection('voucher_templates').add(t as any).catch(() => {});
-        }
-      }).catch(() => {});
-    }
-  }).catch(() => {});
+  // 通过写入队列，全量入队不再截断
+  for (const t of templates) {
+    writeQueue.enqueue({
+      collection: 'voucher_templates',
+      operation: 'upsert',
+      data: t as any,
+    });
+  }
 }
 
 function loadPurchases(): ItemVoucherPurchase[] {
   try {
     const raw = localStorage.getItem(ITEM_PURCHASE_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const data = raw ? JSON.parse(raw) : [];
+    if (!_purchasesCloudSyncInitiated) {
+      _purchasesCloudSyncInitiated = true;
+      import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
+        if (!isCloudBaseReady()) return;
+        getCloudBaseApp().database().collection('purchases').limit(500).get().then(res => {
+          if (res.data.length === 0) return;
+          const freshRaw = localStorage.getItem(ITEM_PURCHASE_STORAGE_KEY);
+          const fresh: ItemVoucherPurchase[] = freshRaw ? JSON.parse(freshRaw) : [];
+          // ✅ CloudBase 数据覆盖本地同名 ID（云端为准）
+          const cloudMap = new Map(res.data.map(d => [d.id, d]));
+          const localOnly = fresh.filter(p => !cloudMap.has(p.id));
+          const merged = [...res.data as ItemVoucherPurchase[], ...localOnly];
+          localStorage.setItem(ITEM_PURCHASE_STORAGE_KEY, JSON.stringify(merged));
+          window.dispatchEvent(new CustomEvent('purchases-list-updated'));
+        }).catch(() => {});
+      }).catch(() => {});
+    }
+    return data;
   } catch {
     return [];
   }
 }
+
+let _purchasesCloudSyncInitiated = false;
 
 function savePurchases(purchases: ItemVoucherPurchase[]): void {
   localStorage.setItem(ITEM_PURCHASE_STORAGE_KEY, JSON.stringify(purchases));
@@ -145,19 +183,14 @@ function savePurchases(purchases: ItemVoucherPurchase[]): void {
 }
 
 function syncPurchasesToCloud(purchases: ItemVoucherPurchase[]): void {
-  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-    if (!isCloudBaseReady()) return;
-    const db = getCloudBaseApp().database();
-    for (const p of purchases.slice(-10)) {
-      db.collection('purchases').where({ id: p.id }).get().then(res => {
-        if (res.data.length > 0) {
-          db.collection('purchases').doc(res.data[0]._id).update(p as any).catch(() => {});
-        } else {
-          db.collection('purchases').add(p as any).catch(() => {});
-        }
-      }).catch(() => {});
-    }
-  }).catch(() => {});
+  // 通过写入队列，全量入队不再截断
+  for (const p of purchases) {
+    writeQueue.enqueue({
+      collection: 'purchases',
+      operation: 'upsert',
+      data: p as any,
+    });
+  }
 }
 
 // ==================== 服务类 ====================
@@ -303,12 +336,118 @@ class VoucherItemService {
       mintedCount: template.mintedCount + vouchers.length,
     });
 
+    // 🆕 如果铸造给特定用户（非平台池），异步为每张凭证生成兑换码
+    const isDirectToUser = request.recipientId && request.recipientId !== PLATFORM_POOL_ID;
+    if (isDirectToUser && vouchers.length > 0) {
+      this.generateRedeemCodesForMintedVouchers(template, vouchers, request.recipientId!, request.recipientName);
+    }
+
     console.log(`[VoucherItem] 铸造完成: ${template.name} x ${vouchers.length} 张`);
     return {
       success: vouchers.length > 0,
       vouchers,
       message: `成功铸造 ${vouchers.length} 张道具凭证`,
     };
+  }
+
+  /**
+   * 🆕 为铸造给用户的凭证异步生成兑换码
+   * 不影响铸造主流程，失败仅记录日志
+   */
+  private async generateRedeemCodesForMintedVouchers(
+    template: ItemVoucherTemplate,
+    vouchers: Voucher[],
+    recipientId: string,
+    recipientName?: string,
+  ): Promise<void> {
+    try {
+      const hostedItems = redeemCodeService.getHostedItems(template.gameId);
+      let hostedItem = hostedItems.find(
+        h => h.name === template.name && h.gameId === template.gameId
+      );
+
+      if (!hostedItem) {
+        hostedItem = await redeemCodeService.createHostedItem({
+          gameId: template.gameId,
+          name: template.name,
+          description: template.description || '',
+          type: (template.itemType === 'permanent' ? ItemType.PERMANENT : ItemType.CONSUMABLE) as ItemType,
+          codeConfig: {
+            prefix: 'IV-',
+            length: 8,
+            charset: 'alphanumeric',
+            caseSensitive: false,
+            singleUse: true,
+          },
+          initialInventory: 0,
+          pricing: {
+            price: template.pricing.price,
+            currency: template.pricing.currency,
+          },
+          gameEffect: {
+            itemId: template.gameEffect.itemId || template.gameEffect.schemaName || 'ugc-item',
+            quantity: template.gameEffect.quantity,
+            metadata: template.gameEffect.metadata,
+            // 保留 Schema 信息，确保 GamePlay.tsx 能发送 EXTENSION_VOUCHER
+            schemaName: template.gameEffect.schemaName,
+            itemData: template.gameEffect.itemData,
+          },
+        });
+      }
+
+      // 为每张凭证生成兑换码
+      const allCodes = redeemCodeService.getAllCodes();
+      const existingCodes = new Set(allCodes.map(c => c.code.toUpperCase()));
+      const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+      for (const voucher of vouchers) {
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const randomPart = Array.from({ length: 8 }, () =>
+            CHARS[Math.floor(Math.random() * CHARS.length)]
+          ).join('');
+          const testCode = `IV-${randomPart}`;
+          if (!existingCodes.has(testCode.toUpperCase())) {
+            const newCode: RedeemCode = {
+              id: `code-${generateUUID().slice(0, 8)}`,
+              code: testCode,
+              gameId: template.gameId,
+              itemId: hostedItem.id,
+              status: RedeemCodeStatus.SOLD,
+              createdAt: new Date().toISOString(),
+              soldAt: new Date().toISOString(),
+              soldTo: recipientId,
+              verifyCount: 0,
+            };
+            allCodes.push(newCode);
+            existingCodes.add(testCode.toUpperCase());
+            // 将兑换码关联到购买记录
+            const purchase: ItemVoucherPurchase = {
+              id: `purchase-${generateUUID().slice(0, 8)}`,
+              userId: recipientId,
+              userName: recipientName || '玩家',
+              templateId: template.id,
+              voucherId: voucher.id,
+              gameId: template.gameId,
+              quantity: 1,
+              price: template.pricing.price,
+              currency: template.pricing.currency,
+              status: 'pending',
+              paidAt: Date.now(),
+              redeemCode: testCode,
+              note: `道具工坊直接铸造`,
+            };
+            const purchases = loadPurchases();
+            purchases.push(purchase);
+            savePurchases(purchases);
+            break;
+          }
+        }
+      }
+      localStorage.setItem('allinone_redeem_codes', JSON.stringify(allCodes));
+      console.log(`[VoucherItem] 已为 ${vouchers.length} 张凭证生成兑换码`);
+    } catch (e) {
+      console.warn('[VoucherItem] 生成兑换码失败（不影响铸造）:', e);
+    }
   }
 
   /**
@@ -344,13 +483,6 @@ class VoucherItemService {
     }
 
     // 检查是否有可用凭证
-    const poolVouchers = voucherService.getUserVouchers(PLATFORM_POOL_ID)
-      .filter(v =>
-        v.status === VoucherStatus.ACTIVE &&
-        (v as any).sourceType === VoucherSourceType.ITEM &&
-        v.metadata?.customData?.itemTemplateId === request.templateId
-      );
-
     // 强制约束：如果没有可用的道具凭证，不允许购买，提示先铸造
     const availableVouchers = voucherService.getUserVouchers(PLATFORM_POOL_ID)
       .filter(v =>
@@ -420,7 +552,7 @@ class VoucherItemService {
         }
 
         // 🆕 记录收入到游戏开发者账户
-        gameDeveloperService.recordPurchaseRevenue({
+        await gameDeveloperService.recordPurchaseRevenue({
           gameId: request.gameId,
           gameName: template.gameName || '游戏',
           amount: voucherPrice,
@@ -462,7 +594,7 @@ class VoucherItemService {
         }
 
         // 🆕 记录收入到游戏开发者账户
-        gameDeveloperService.recordPurchaseRevenue({
+        await gameDeveloperService.recordPurchaseRevenue({
           gameId: request.gameId,
           gameName: template.gameName || '游戏',
           amount: price,
@@ -517,9 +649,12 @@ class VoucherItemService {
               currency: template.pricing.currency,
             },
             gameEffect: {
-              itemId: template.gameEffect.itemId,
+              itemId: template.gameEffect.itemId || template.gameEffect.schemaName || 'ugc-item',
               quantity: template.gameEffect.quantity,
               metadata: template.gameEffect.metadata,
+              // 保留 Schema 信息，确保 GamePlay.tsx 能发送 EXTENSION_VOUCHER
+              schemaName: template.gameEffect.schemaName,
+              itemData: template.gameEffect.itemData,
             },
           });
         }
@@ -602,7 +737,9 @@ class VoucherItemService {
   redeemItemVoucher(request: RedeemItemVoucherRequest): {
     success: boolean;
     message: string;
-    gameInfo?: { itemId: string; quantity: number; metadata?: Record<string, any> };
+    gameInfo?: { itemId?: string; schemaName?: string; itemData?: Record<string, any>; quantity: number; metadata?: Record<string, any> };
+    /** Schema 模式下是否已下发到游戏 */
+    dispatchedToGame?: boolean;
   } {
     // 检查凭证
     const voucher = voucherService.getVoucherById(request.voucherId);
@@ -630,6 +767,13 @@ class VoucherItemService {
 
     const gameEffect = customData.gameEffect;
 
+    // === 模式判断：Schema 模式 vs 传统模式 ===
+    if (gameEffect.schemaName && gameEffect.itemData) {
+      // Schema 模式——通过 ProtocolEngine 下发到游戏
+      return this.redeemItemVoucherBySchema(request);
+    }
+
+    // 传统模式——返回 itemId
     // 统一标记凭证为已使用（REDEEMED），保留在用户记录中
     voucherService.redeemVoucher(
       request.voucherId,
@@ -657,6 +801,112 @@ class VoucherItemService {
       success: true,
       message: `已使用 ${voucher.metadata?.name}，该凭证已标记为已使用`,
       gameInfo,
+    };
+  }
+
+  /**
+   * 🆕 Schema 模式兑换：将道具凭证下发到游戏运行时
+   *
+   * 通过 ProtocolEngine.issueVoucher() 将道具数据 postMessage 到游戏 iframe。
+   * 游戏端 ProtocolClient.on('voucher') 接收后，调用 ItemFactory 动态创建道具。
+   *
+   * 与传统 redeemItemVoucher 的区别：
+   * - 传统：验证 itemId → 标记凭证已使用
+   * - Schema 模式：验证 schemaName → ProtocolEngine 下发 → 标记已使用
+   */
+  redeemItemVoucherBySchema(request: RedeemItemVoucherRequest): {
+    success: boolean;
+    message: string;
+    gameInfo?: { schemaName?: string; itemData?: Record<string, any>; quantity: number; metadata?: Record<string, any> };
+    dispatchedToGame?: boolean;
+  } {
+    // 基础验证
+    const voucher = voucherService.getVoucherById(request.voucherId);
+    if (!voucher) {
+      return { success: false, message: '凭证不存在' };
+    }
+
+    if (voucher.currentHolderId !== request.userId) {
+      return { success: false, message: '您不是该凭证的持有者' };
+    }
+
+    if (voucher.status !== VoucherStatus.ACTIVE) {
+      return { success: false, message: '凭证不可用' };
+    }
+
+    const sourceType = (voucher as any).sourceType;
+    if (sourceType !== VoucherSourceType.ITEM) {
+      return { success: false, message: '该凭证不是道具凭证' };
+    }
+
+    const customData = voucher.metadata?.customData;
+    if (!customData?.gameId || !customData?.gameEffect) {
+      return { success: false, message: '凭证缺少游戏信息' };
+    }
+
+    const gameEffect = customData.gameEffect;
+    const { schemaName, itemData } = gameEffect;
+
+    // 校验 Schema 注册
+    const registry = getDefaultRegistry();
+    const schema = registry.getSchema(schemaName);
+    if (!schema) {
+      return { success: false, message: `Schema "${schemaName}" 未注册，请联系游戏开发者` };
+    }
+
+    // 生成扩展凭证
+    const extensionVoucher = ExtensionVoucherService.create({
+      schemaName,
+      sourceGameId: customData.gameId,
+      targetGameId: request.gameId,
+      data: itemData,
+      signature: ExtensionVoucherService.sign(itemData),
+      expiresIn: 365 * 24 * 60 * 60 * 1000, // 1年有效
+    });
+
+    // 通过协议引擎下发给游戏（sendToGame 是同步方法，直接调用可避免 Promise 包裹）
+    const protocolEngine = getDefaultEngine();
+    const dispatched = protocolEngine.sendToGame(request.gameId, {
+      type: 'EXTENSION_VOUCHER',
+      voucher: ExtensionVoucherService.toPayload(extensionVoucher),
+      timestamp: Date.now(),
+    });
+
+    if (!dispatched) {
+      return { success: false, message: '游戏通道不可用，请确认游戏正在运行' };
+    }
+
+    // 标记凭证已使用
+    voucherService.redeemVoucher(
+      request.voucherId,
+      request.userId,
+      request.userName,
+      `Schema兑换: ${schemaName} → ${customData.gameId}`
+    );
+
+    // 更新购买记录
+    const purchases = loadPurchases();
+    const purchaseIndex = purchases.findIndex(p => p.voucherId === request.voucherId);
+    if (purchaseIndex >= 0) {
+      purchases[purchaseIndex].status = 'redeemed';
+      purchases[purchaseIndex].redeemedAt = Date.now();
+      savePurchases(purchases);
+    }
+
+    const gameInfo = {
+      schemaName,
+      itemData,
+      quantity: gameEffect.quantity,
+      metadata: gameEffect.metadata,
+    };
+
+    console.log(`[VoucherItem] ✅ Schema 兑换成功: ${schemaName} → ${request.gameId}, 道具: ${itemData?.name || '未知'}`);
+
+    return {
+      success: true,
+      message: `道具「${itemData?.name || schemaName}」已发送到游戏，即刻生效！`,
+      gameInfo,
+      dispatchedToGame: true,
     };
   }
 
@@ -750,7 +1000,14 @@ class VoucherItemService {
         itemType: params.template.itemType,
         rarity: params.template.rarity || 'common',
         pricing: { price: params.template.pricing.price, currency: params.template.pricing.currency },
-        gameEffect: { itemId: params.template.gameEffect.itemId, quantity: params.template.gameEffect.quantity },
+        gameEffect: {
+          itemId: params.template.gameEffect.itemId || params.template.gameEffect.schemaName || '',
+          quantity: params.template.gameEffect.quantity,
+          // 🆕 Schema 模式字段直通
+          schemaName: params.template.gameEffect.schemaName,
+          itemData: params.template.gameEffect.itemData,
+          schemaVersion: params.template.gameEffect.schemaVersion,
+        },
         supplyPolicy: params.template.supplyPolicy === ItemSupplyPolicy.LIMITED ? 'limited' : 'open',
         totalSupply: params.template.totalSupply,
         mintCount: 100, // 默认初始铸造100张
@@ -866,7 +1123,11 @@ class VoucherItemService {
           },
           gameEffect: {
             itemId: tmpl.gameEffect.itemId,
-            quantity: tmpl.gameEffect.quantity,
+            quantity: tmpl.gameEffect.quantity || 1,
+            // 🆕 Schema 模式字段直通
+            schemaName: (tmpl.gameEffect as any).schemaName,
+            itemData: (tmpl.gameEffect as any).itemData,
+            schemaVersion: (tmpl.gameEffect as any).schemaVersion,
             metadata: {},
           },
           rarity: tmpl.rarity,
@@ -874,6 +1135,8 @@ class VoucherItemService {
           stackable: true,
           isActive: true,
           createdBy: proposal.proposerId,
+          // 🆕 标记来源
+          source: (tmpl as any).source || 'developer',
         });
 
         // 自动铸造初始库存

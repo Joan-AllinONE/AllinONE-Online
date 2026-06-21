@@ -28,18 +28,20 @@ export default function GameDeveloperPanel({ gameId, onBack }: Props) {
   const [transactions, setTransactions] = useState<DeveloperRevenueTransaction[]>([]);
   const [showSettleConfirm, setShowSettleConfirm] = useState(false);
 
-  const loadData = useCallback(() => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const devAccount = gameDeveloperService.getAccount(gameId);
+      const devAccount = await gameDeveloperService.getAccount(gameId);
       setAccount(devAccount || null);
 
       const pubGame = getPublishedGame(gameId);
       setGame(pubGame);
 
       if (devAccount) {
-        setItemSales(gameDeveloperService.getItemSalesStats(gameId));
-        setTransactions(gameDeveloperService.getTransactions(gameId, 20));
+        const sales = await gameDeveloperService.getItemSalesStats(gameId);
+        setItemSales(sales);
+        const txs = await gameDeveloperService.getTransactions(gameId, 20);
+        setTransactions(txs);
       }
     } catch (e) {
       console.error('[DevPanel] 加载数据失败:', e);
@@ -52,9 +54,9 @@ export default function GameDeveloperPanel({ gameId, onBack }: Props) {
     loadData();
   }, [loadData]);
 
-  const handleSettle = () => {
+  const handleSettle = async () => {
     if (!account) return;
-    const result = gameDeveloperService.executeDailySettlement(gameId);
+    const result = await gameDeveloperService.executeDailySettlement(gameId);
     if (result.settledAccounts > 0) {
       alert(result.message);
     } else {

@@ -30,6 +30,8 @@ export interface PlayerIntent {
   targetGameId: string;
   /** 可选的目标 Schema */
   preferredSchema?: string;
+  /** 🆕 创作等级 */
+  tier?: 'preset' | 'intermediate' | 'advanced';
   /** 附加上下文 */
   context?: Record<string, any>;
 }
@@ -116,12 +118,13 @@ export class ProtocolAIBridge {
         };
       }
 
-      // Step 3: 校验数据
-      const validation = this.schemaRegistry.validateData(schemaName, analysis.data!);
+      // Step 3: 校验数据（按创作等级）
+      const tier = intent.tier || 'advanced';  // 默认高级（兼容旧行为）
+      const validation = this.schemaRegistry.validateDataForTier(schemaName, analysis.data!, tier);
       if (!validation.valid) {
         return {
           success: false,
-          error: `数据校验失败: ${validation.errors.join('; ')}`,
+          error: `数据校验失败（${tier === 'preset' ? '初级' : tier === 'intermediate' ? '中级' : '高级'}模式）: ${validation.errors.join('; ')}`,
           questions: validation.errors.map(e =>
             `请检查 "${e}" 相关的信息`
           ),
@@ -183,84 +186,55 @@ export class ProtocolAIBridge {
 
     // 检查目标游戏支持哪些 Schema
     const capabilities = this.schemaRegistry.getGameCapabilities(intent.targetGameId);
-    if (capabilities.length === 0) {
-      // 检查内置 Schema（Mode A 游戏默认全部兼容）
-      const allSchemas = this.schemaRegistry.getAllSchemas();
-      if (allSchemas.length === 0) {
-        return { error: '没有可用的 Schema 定义' };
+
+    // v2: 优先使用游戏声明的 Schema，不再做关键词猜测
+    if (capabilities.length > 0) {
+      const schemas: Array<{ schema: ExtensionSchema; name: string }> = [];
+      for (const name of capabilities) {
+        const schema = this.schemaRegistry.getSchema(name);
+        if (schema) {
+          schemas.push({ schema, name });
+        }
       }
-      // 内置 Schema 都可用
-      const guessed = this.guessSchemaFromIntent(intent.rawInput, allSchemas);
-      if (guessed) {
-        return { schema: guessed.schema, schemaName: guessed.schemaName };
+
+      if (schemas.length === 0) {
+        return { error: '目标游戏暂未实现任何扩展 Schema' };
       }
-      // 提示玩家选择
+
+      // 只有一个 Schema → 自动选择
+      if (schemas.length === 1) {
+        return { schema: schemas[0].schema, schemaName: schemas[0].name };
+      }
+
+      // 多个 Schema → 让玩家选择
       return {
         questions: [
-          `你想创建什么？可用的模板：${allSchemas.map(s => s.name).join('、')}`,
-          ...allSchemas.map(s => `- ${s.name}: ${s.description}`),
+          `你想创建哪种类型的内容？游戏 "${intent.targetGameId}" 支持：`,
+          ...schemas.map(s => `- ${s.name}: ${s.schema.description}`),
         ],
-        suggestedSchema: allSchemas[0].name,
+        suggestedSchema: schemas[0].name,
       };
     }
 
-    // 遍历游戏支持的 Schema 找匹配
-    const schemas: Array<{ schema: ExtensionSchema; name: string }> = [];
-    for (const name of capabilities) {
-      const schema = this.schemaRegistry.getSchema(name);
-      if (schema) {
-        schemas.push({ schema, name });
-      }
+    // 游戏未声明 Schema → 列出所有可用 Schema 供玩家选择
+    const allSchemas = this.schemaRegistry.getAllSchemas();
+    if (allSchemas.length === 0) {
+      return { error: '没有可用的 Schema 定义' };
     }
 
-    if (schemas.length === 0) {
-      return { error: '目标游戏暂未实现任何扩展 Schema' };
+    // 如果只有一个 Schema，自动选择
+    if (allSchemas.length === 1) {
+      return { schema: allSchemas[0], schemaName: allSchemas[0].name };
     }
 
-    // 根据玩家意图猜测
-    const guessed = this.guessSchemaFromIntent(
-      intent.rawInput,
-      schemas.map(s => ({ schema: s.schema, schemaName: s.name }))
-    );
-
-    if (guessed) return guessed;
-
-    // 无法确认，需要向玩家追问
+    // 提示玩家选择
     return {
       questions: [
-        `你想创建哪种类型的内容？游戏 "${intent.targetGameId}" 支持：`,
-        ...schemas.map(s => `- ${s.name}: ${s.schema.description}`),
+        `你想创建什么？可用的模板：`,
+        ...allSchemas.map(s => `- ${s.name}: ${s.description}`),
       ],
-      suggestedSchema: schemas[0].name,
+      suggestedSchema: allSchemas[0].name,
     };
-  }
-
-  /**
-   * 根据玩家意图关键词猜测目标 Schema
-   */
-  private guessSchemaFromIntent(
-    input: string,
-    available: Array<{ schema: ExtensionSchema; schemaName: string }>
-  ): { schema: ExtensionSchema; schemaName: string } | null {
-    const lower = input.toLowerCase();
-
-    // 关键词映射
-    const keywordMap: Record<string, string[]> = {
-      weapon: ['武器', '剑', '刀', '斧', '弓', '枪', '装备', 'weapon', 'sword', 'bow', 'axe'],
-      shop: ['商店', '店', 'shop', 'store', 'market', '出售', '购买'],
-      quest: ['任务', 'quest', 'mission', '挑战', '目标', '委托'],
-    };
-
-    for (const { schema, schemaName } of available) {
-      const keywords = keywordMap[schemaName] || [];
-      for (const kw of keywords) {
-        if (lower.includes(kw)) {
-          return { schema, schemaName };
-        }
-      }
-    }
-
-    return null;
   }
 
   // ==================== AI 意图分析 ====================
@@ -282,9 +256,12 @@ export class ProtocolAIBridge {
     questions?: string[];
     reasoning?: string;
   }> {
-    // 尝试用 AI 模型
+    // 尝试用 AI 模型，失败则自动回退模板
     if (this.config.aiModel) {
-      return this.analyzeWithAI(input, schema, schemaName);
+      const aiResult = await this.analyzeWithAI(input, schema, schemaName);
+      if (aiResult.success) return aiResult;
+      // AI 失败，记录原因并降级到模板
+      this.log('AI 分析失败，降级到模板回退:', aiResult.error);
     }
 
     // 回退：用 Schema 的示例数据 + 关键词填充
@@ -377,26 +354,80 @@ export class ProtocolAIBridge {
       data.name = nameMatch[1];
     }
 
-    // 尝试提取数字
-    const numMatches = input.match(/(\d+)/g);
-    if (schema.inputSchema.properties?.damage && numMatches) {
-      data.damage = Math.min(parseInt(numMatches[0]), 99999);
+    // 🆕 match3-powerup Schema 的效果检测
+    if (_schemaName === 'match3-powerup' || schema.tags?.includes('match3')) {
+      const effectMap: Record<string, string> = {
+        '炸弹': 'remove_area', '爆炸': 'remove_area', '炸': 'remove_area', 'bomb': 'remove_area',
+        '闪电': 'remove_row', '十字': 'remove_row', '雷': 'remove_row', 'lightning': 'remove_row',
+        '彩虹': 'remove_color', '同色消除': 'remove_color', 'rainbow': 'remove_color',
+        '冷冻时间': 'add_time', '加时间': 'add_time', '延时': 'add_time', '时间': 'add_time',
+        '加步': 'add_moves', '步数': 'add_moves', '加步数': 'add_moves',
+        '变色': 'replace_color', '万能': 'replace_color', '变换': 'replace_color',
+        '洗牌': 'shuffle', '重排': 'shuffle', '打乱': 'shuffle',
+      };
+      for (const [key, effect] of Object.entries(effectMap)) {
+        if (lower.includes(key)) {
+          data.effect = effect;
+          if (!data.name) {
+            const effectNames: Record<string, string> = {
+              remove_area: '炸弹道具', remove_row: '闪电道具', remove_color: '彩虹道具',
+              add_time: '冷冻时间', add_moves: '额外步数', replace_color: '万能方块', shuffle: '洗牌道具',
+            };
+            data.name = effectNames[effect] || `${effect}道具`;
+          }
+          // 提取效果参数
+          data.params = {};
+          if (effect === 'remove_area') {
+            const radiusMatch = input.match(/半径\s*(\d)|(\d)×(\d)/);
+            data.params.radius = radiusMatch ? Math.min(parseInt(radiusMatch[1] || radiusMatch[3]), 3) : 1;
+          } else if (effect === 'add_time') {
+            const secMatch = input.match(/(\d+)\s*秒/);
+            data.params.seconds = secMatch ? Math.min(parseInt(secMatch[1]), 30) : 10;
+          } else if (effect === 'add_moves') {
+            const cntMatch = input.match(/(\d+)\s*步/);
+            data.params.count = cntMatch ? Math.min(parseInt(cntMatch[1]), 5) : 1;
+          } else if (effect === 'replace_color') {
+            const colorMap: Record<string, string> = {
+              '红': 'red', '蓝': 'blue', '绿': 'green', '黄': 'yellow', '紫': 'purple', '橙': 'orange',
+            };
+            const colorKeys = Object.keys(colorMap);
+            const foundColors: string[] = [];
+            for (const ck of colorKeys) {
+              if (input.includes(ck)) foundColors.push(colorMap[ck]);
+            }
+            if (foundColors.length >= 2) {
+              data.params.fromColor = foundColors[0];
+              data.params.toColor = foundColors[1];
+            } else if (foundColors.length === 1) {
+              data.params.fromColor = foundColors[0];
+            }
+          }
+          break;
+        }
+      }
     }
 
-    // 尝试提取元素关键词
-    const elementMap: Record<string, string> = {
-      '火': '火', '炎': '火', '烈焰': '火',
-      '水': '水', '冰': '水', '霜': '水',
-      '雷': '雷', '电': '雷', '闪电': '雷',
-      '风': '风',
-      '土': '土', '地': '土',
-      '光': '光', '圣': '光',
-      '暗': '暗', '黑': '暗', '影': '暗',
-    };
-    for (const [key, val] of Object.entries(elementMap)) {
-      if (lower.includes(key)) {
-        data.element = val;
-        break;
+    // 通用：尝试提取数字 → damage
+    if (schema.inputSchema.properties?.damage && !data.damage) {
+      const numMatches = input.match(/(\d+)/g);
+      if (numMatches) {
+        data.damage = Math.min(parseInt(numMatches[0]), 99999);
+      }
+    }
+
+    // 通用：尝试提取元素关键词
+    if (schema.inputSchema.properties?.element && !data.element) {
+      const elementMap: Record<string, string> = {
+        '火': '火', '炎': '火', '烈焰': '火',
+        '水': '水', '冰': '水', '霜': '水',
+        '雷': '雷', '电': '雷',
+        '风': '风', '土': '土', '光': '光', '暗': '暗',
+      };
+      for (const [key, val] of Object.entries(elementMap)) {
+        if (lower.includes(key)) {
+          data.element = val;
+          break;
+        }
       }
     }
 
@@ -441,7 +472,7 @@ export class ProtocolAIBridge {
   // ==================== 辅助方法 ====================
 
   /**
-   * 构建 AI 提示词
+   * 构建 AI 提示词（含 SOP 注入）
    */
   private buildAIPrompt(input: string, schema: ExtensionSchema, _schemaName: string): string {
     const requiredFields = schema.inputSchema.required || [];
@@ -458,8 +489,64 @@ export class ProtocolAIBridge {
       return desc;
     }).join('\n');
 
+    // 所有可用属性（包括可选的 effectScript）
+    const allProps = Object.entries(properties);
+    if (allProps.length > requiredFields.length) {
+      const optionalFields = allProps.filter(([key]) => !requiredFields.includes(key));
+      if (optionalFields.length > 0) {
+        fieldsDesc += '\n\n可选字段:\n' + optionalFields.map(([key, p]) => {
+          const prop = p as any;
+          let desc = `- ${key}: ${prop.description || ''}`;
+          if (prop.type) desc += ` (类型: ${prop.type})`;
+          return desc;
+        }).join('\n');
+      }
+    }
+
     const examples = schema.examples?.length
       ? `\n参考示例:\n${JSON.stringify(schema.examples[0], null, 2)}`
+      : '';
+
+    // SOP 注入
+    const sopSection = schema.aiGuide ? this.buildSOPPrompt(schema.aiGuide) : '';
+
+    // effectScript 说明（高级模式）
+    const effectScriptSection = schema.aiGuide?.creationTiers?.advanced?.effectScriptEnabled
+      ? '\neffectScript 效果组合（高级功能）:\n' +
+        '当玩家需要组合多个效果时，使用 effectScript 字段。格式如下：\n' +
+        'effectScript: {\n' +
+        '  op: "sequence" | "parallel" | "chain",\n' +
+        '  effects: [\n' +
+        '    { effect: "效果名", params: {...} },\n' +
+        '    { effect: "效果名", params: {...} }\n' +
+        '  ]\n' +
+        '}\n' +
+        '- sequence: 效果按顺序依次执行\n' +
+        '- parallel: 效果同时执行（匹配去重）\n' +
+        '- chain: 前一个效果的终点触发下一个效果\n' +
+        '注意：使用 effectScript 时，effect 字段填第一个子效果名，params 填第一个子效果参数。\n'
+      : '';
+
+    // 🆕 effectCode 说明（高级模式 - 自定义效果函数）
+    const effectCodeSection = schema.aiGuide?.creationTiers?.advanced?.effectCodeEnabled
+      ? '\neffectCode 自定义效果函数（高级功能，用于创造全新效果类型）:\n' +
+        '当玩家想要的效果不在已注册效果列表中时，可以使用 effectCode 定义全新的效果逻辑。\n' +
+        'effectCode 是一个字符串，内容为完整的 JavaScript 函数表达式。格式如下：\n' +
+        'effectCode: "function(params, row, col) {\\n' +
+        '  // params: 道具参数对象\\n' +
+        '  // row, col: 玩家点击的目标格坐标\\n' +
+        '  // 可用变量: board(棋盘二维数组, board[r][c].color 获取颜色),\\n' +
+        '  //           BOARD_SIZE(棋盘尺寸, 通常8),\\n' +
+        '  //           gameStats(游戏状态: .score/.moves/.timeLeft),\\n' +
+        '  //           renderBoard(fn, 传false), showToast(fn)\\n' +
+        '  // 返回值: { matches: [{row,col},...], boardEffect: function(){}, instantMessage: \\"文字\\", animType: \\"bomb|lightning|rainbow\\" }\\n' +
+        '}"\n' +
+        '注意：\n' +
+        '- effectCode 中的函数禁止使用 eval/Function/import/window/document/fetch 等危险API\n' +
+        '- 函数体不超过4000字符\n' +
+        '- 必须同时提供 effect 字段作为效果名称标识（如 "randomize_cell"）\n' +
+        '- 示例：随机改变选中宝石颜色的 effectCode:\n' +
+        '  effect: "randomize_cell", effectCode: "function(params,row,col){var colors=[\'red\',\'blue\',\'green\',\'yellow\',\'purple\',\'orange\'];var nc=colors[Math.floor(Math.random()*colors.length)];board[row][col].color=nc;return{matches:[],boardEffect:function(){renderBoard(false);},instantMessage:\'\u53d8\u6210\'+nc+\'\u8272\uff01\'};}"\n'
       : '';
 
     return `你是一个游戏内容生成助手。请根据玩家的需求，生成一个符合以下 Schema 的 JSON 数据。
@@ -469,7 +556,7 @@ export class ProtocolAIBridge {
 
 必需字段:
 ${fieldsDesc}${examples}
-
+${sopSection}${effectScriptSection}${effectCodeSection}
 玩家需求: "${input}"
 
 请严格按照以下 JSON 格式返回（不要包含其他内容）:
@@ -477,6 +564,49 @@ ${fieldsDesc}${examples}
   "data": { ... 符合 Schema 的JSON },
   "reasoning": "简要解释你的分析过程"
 }`;
+  }
+
+  /**
+   * 🆕 构建 SOP（能力声明）提示词段落
+   */
+  private buildSOPPrompt(aiGuide: NonNullable<ExtensionSchema['aiGuide']>): string {
+    const parts: string[] = [''];
+
+    // 能力上下文
+    if (aiGuide.prompt) {
+      parts.push(`游戏能力声明:\n${aiGuide.prompt}`);
+    }
+
+    // 可用效果
+    if (aiGuide.availableEffects && aiGuide.availableEffects.length > 0) {
+      parts.push(`\n可用效果:\n${aiGuide.availableEffects.map(e => `- ${e}`).join('\n')}`);
+    }
+
+    // 数值约束
+    if (aiGuide.constraints) {
+      const c = aiGuide.constraints;
+      parts.push('\n硬性约束（必须严格遵守）:');
+      if (c.damageRange) parts.push(`- 伤害范围: ${c.damageRange[0]} ~ ${c.damageRange[1]}`);
+      if (c.maxEffectsPerItem) parts.push(`- 每个道具最多 ${c.maxEffectsPerItem} 个特效`);
+      if (c.validElements) parts.push(`- 可用元素: ${c.validElements.join(', ')}`);
+      for (const [key, val] of Object.entries(c)) {
+        if (!['damageRange', 'maxEffectsPerItem', 'validElements'].includes(key)) {
+          parts.push(`- ${key}: ${JSON.stringify(val)}`);
+        }
+      }
+    }
+
+    // 效果组合规则
+    if (aiGuide.effectRules && aiGuide.effectRules.length > 0) {
+      parts.push(`\n效果组合规则:\n${aiGuide.effectRules.map(r => `- ${r}`).join('\n')}`);
+    }
+
+    // 禁止事项
+    if (aiGuide.forbidden && aiGuide.forbidden.length > 0) {
+      parts.push(`\n禁止事项（绝对不可违反）:\n${aiGuide.forbidden.map(f => `- ${f}`).join('\n')}`);
+    }
+
+    return parts.join('\n');
   }
 
   /**

@@ -1,11 +1,8 @@
 /**
  * GameDeveloperService - 游戏开发者账户管理服务
  *
- * 管理 game-{gameId} 账户体系：
- * - 发布游戏时自动创建开发者账户
- * - 玩家购买道具的凭证收入转入 game-{gameId}
- * - 每日自动结算：按分成比例将平台分成转入 platform_treasury
- * - 提供查询：收入明细、销售统计、提现申请
+ * 存储已迁移到后端数据库（MemoryDB / PostgreSQL）。
+ * 前端维护内存缓存以避免频繁 API 调用。
  */
 
 import { voucherService } from '@/voucher-system/services/VoucherService';
@@ -20,76 +17,42 @@ import {
   SYSTEM_ACCOUNTS,
 } from '@/types/gameDeveloper';
 import { platformTreasuryService } from './platformTreasuryService';
+import { getCachedToken } from './authTokenService';
 
 // ==================== 常量 ====================
 
-const DEVELOPER_ACCOUNTS_KEY = 'game_developer_accounts';
-const DEVELOPER_TX_KEY = 'game_developer_transactions';
-const DEFAULT_REVENUE_SHARE = 10; // 默认平台分成 10%
+const API_BASE = '/api/v1/game-developers';
+const DEFAULT_REVENUE_SHARE = 10;
 const DAY_MS = 86400000;
 
-// ==================== 存储工具 ====================
+// ==================== 内存缓存 ====================
 
-function loadAccounts(): GameDeveloperAccount[] {
-  try {
-    const raw = localStorage.getItem(DEVELOPER_ACCOUNTS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+const accountCache = new Map<string, GameDeveloperAccount>();
+let txCache: DeveloperRevenueTransaction[] = [];
+let allAccountsLoaded = false;
+
+// ==================== API 工具 ====================
+
+/**
+ * 检查后端 API 是否可用（有有效 token）
+ * 无 token 时跳过 API 调用，仅使用内存缓存，避免 401 错误洪流
+ */
+function isApiAvailable(): boolean {
+  return getCachedToken() !== null;
 }
 
-function saveAccounts(accounts: GameDeveloperAccount[]): void {
-  localStorage.setItem(DEVELOPER_ACCOUNTS_KEY, JSON.stringify(accounts));
-  syncAccountsToCloud(accounts);
-}
+async function apiFetch(path: string, options: RequestInit = {}): Promise<any> {
+  const token = getCachedToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as any || {}),
+  };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
 
-function syncAccountsToCloud(accounts: GameDeveloperAccount[]): void {
-  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-    if (!isCloudBaseReady()) return;
-    const db = getCloudBaseApp().database();
-    for (const a of accounts) {
-      db.collection('game_developers').where({ accountId: a.accountId }).get().then(res => {
-        if (res.data.length > 0) {
-          db.collection('game_developers').doc(res.data[0]._id).update(a as any).catch(() => {});
-        } else {
-          db.collection('game_developers').add(a as any).catch(() => {});
-        }
-      }).catch(() => {});
-    }
-  }).catch(() => {});
-}
-
-function loadTx(): DeveloperRevenueTransaction[] {
-  try {
-    const raw = localStorage.getItem(DEVELOPER_TX_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveTx(txs: DeveloperRevenueTransaction[]): void {
-  if (txs.length > 500) txs.splice(0, txs.length - 500);
-  localStorage.setItem(DEVELOPER_TX_KEY, JSON.stringify(txs));
-  syncTxToCloud(txs);
-}
-
-function syncTxToCloud(txs: DeveloperRevenueTransaction[]): void {
-  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-    if (!isCloudBaseReady()) return;
-    const db = getCloudBaseApp().database();
-    for (const tx of txs.slice(-10)) {
-      db.collection('game_developers').where({ accountId: tx.accountId }).get().then(res => {
-        if (res.data.length > 0) {
-          db.collection('game_developers').doc(res.data[0]._id).update({
-            revenueTransactions: db.command.push([tx]),
-            _updatedAt: Date.now(),
-          } as any).catch(() => {});
-        }
-      }).catch(() => {});
-    }
-  }).catch(() => {});
+  const resp = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const json = await resp.json();
+  if (!resp.ok) throw new Error(json.error || `HTTP ${resp.status}`);
+  return json.data;
 }
 
 // ==================== 服务类 ====================
@@ -97,29 +60,37 @@ function syncTxToCloud(txs: DeveloperRevenueTransaction[]): void {
 class GameDeveloperService {
   // ============ 账户管理 ============
 
-  /**
-   * 确保开发者账户存在（发布游戏时调用）
-   * 已存在则更新游戏名称等信息，不存在则创建
-   */
-  ensureAccount(params: {
+  async ensureAccount(params: {
     gameId: string;
     gameName: string;
     publisherId: string;
     publisherName: string;
     revenueSharePercent?: number;
-  }): GameDeveloperAccount {
-    const accounts = loadAccounts();
+  }): Promise<GameDeveloperAccount> {
     const accountId = getGameDeveloperAccountId(params.gameId);
-    const existing = accounts.find(a => a.accountId === accountId);
+    const existing = accountCache.get(accountId);
 
     if (existing) {
-      // 更新信息
       existing.gameName = params.gameName;
       existing.publisherName = params.publisherName;
       existing.updatedAt = Date.now();
-      saveAccounts(accounts);
-      console.log(`[GameDev] 更新开发者账户: ${accountId}`);
+      await this.saveAccount(existing);
       return existing;
+    }
+
+    // 尝试从后端获取（仅在有 token 时）
+    if (isApiAvailable()) {
+      try {
+        const remote = await apiFetch(`/${accountId}`) as GameDeveloperAccount | null;
+        if (remote) {
+          accountCache.set(accountId, remote);
+          remote.gameName = params.gameName;
+          remote.publisherName = params.publisherName;
+          remote.updatedAt = Date.now();
+          await this.saveAccount(remote);
+          return remote;
+        }
+      } catch { /* 404 = 不存在，继续创建 */ }
     }
 
     const now = Date.now();
@@ -136,60 +107,66 @@ class GameDeveloperService {
       platformOwed: 0,
       platformSettled: 0,
       lastDailySettlement: now,
-      stats: {
-        totalSoldItems: 0,
-        totalSoldVouchers: 0,
-        itemSales: {},
-      },
+      stats: { totalSoldItems: 0, totalSoldVouchers: 0, itemSales: {} },
       status: 'active',
       createdAt: now,
       updatedAt: now,
     };
 
-    accounts.push(newAccount);
-    saveAccounts(accounts);
+    accountCache.set(accountId, newAccount);
+    await this.saveAccount(newAccount);
     console.log(`[GameDev] 创建开发者账户: ${accountId} (${params.gameName}), 分成: ${newAccount.revenueSharePercent}%`);
     return newAccount;
   }
 
-  /**
-   * 获取单个开发者账户
-   */
-  getAccount(gameId: string): GameDeveloperAccount | undefined {
+  async getAccount(gameId: string): Promise<GameDeveloperAccount | undefined> {
     const accountId = getGameDeveloperAccountId(gameId);
-    return loadAccounts().find(a => a.accountId === accountId);
+    if (accountCache.has(accountId)) return accountCache.get(accountId);
+    if (isApiAvailable()) {
+      try {
+        const remote = await apiFetch(`/${accountId}`) as GameDeveloperAccount;
+        if (remote) { accountCache.set(accountId, remote); return remote; }
+      } catch { /* 404 */ }
+    }
+    return undefined;
   }
 
-  /**
-   * 获取所有开发者账户
-   */
-  getAllAccounts(activeOnly = true): GameDeveloperAccount[] {
-    const accounts = loadAccounts();
-    return activeOnly ? accounts.filter(a => a.status === 'active') : accounts;
+  async getAllAccounts(activeOnly = true): Promise<GameDeveloperAccount[]> {
+    if (!allAccountsLoaded && isApiAvailable()) {
+      try {
+        const accounts = await apiFetch('') as GameDeveloperAccount[];
+        for (const a of accounts) accountCache.set(a.accountId, a);
+        allAccountsLoaded = true;
+      } catch (e) {
+        console.warn('[GameDev] 加载账户列表失败:', e);
+      }
+    }
+    const all = Array.from(accountCache.values());
+    return activeOnly ? all.filter(a => a.status === 'active') : all;
   }
 
-  /**
-   * 更新开发者账户
-   */
-  updateAccount(gameId: string, updates: Partial<GameDeveloperAccount>): GameDeveloperAccount | undefined {
-    const accounts = loadAccounts();
-    const idx = accounts.findIndex(a => a.accountId === getGameDeveloperAccountId(gameId));
-    if (idx === -1) return undefined;
-    accounts[idx] = { ...accounts[idx], ...updates, updatedAt: Date.now() };
-    saveAccounts(accounts);
-    return accounts[idx];
+  async updateAccount(gameId: string, updates: Partial<GameDeveloperAccount>): Promise<GameDeveloperAccount | undefined> {
+    const accountId = getGameDeveloperAccountId(gameId);
+    const account = accountCache.get(accountId);
+    if (!account) return undefined;
+    Object.assign(account, updates, { updatedAt: Date.now() });
+    await this.saveAccount(account);
+    return account;
+  }
+
+  private async saveAccount(account: GameDeveloperAccount): Promise<void> {
+    accountCache.set(account.accountId, account);
+    if (!isApiAvailable()) return; // 无 token 时跳过 API 调用
+    try {
+      await apiFetch('', { method: 'POST', body: JSON.stringify(account) });
+    } catch (e) {
+      console.warn('[GameDev] API 保存失败（仅内存）:', e);
+    }
   }
 
   // ============ 收入记录 ============
 
-  /**
-   * 💰 记录道具销售收入（购买时调用）
-   * 
-   * 计算平台分成并更新账户余额。
-   * 分成采用"配对记账"方式：玩家付款全转游戏商，同时记录 platformOwed。
-   * 每日结算时将 platformOwed 转移到 platform_treasury。
-   */
-  recordPurchaseRevenue(params: {
+  async recordPurchaseRevenue(params: {
     gameId: string;
     gameName?: string;
     amount: number;
@@ -197,25 +174,22 @@ class GameDeveloperService {
     templateId?: string;
     buyerId: string;
     buyerName: string;
-  }): void {
-    const account = this.getAccount(params.gameId);
+  }): Promise<void> {
+    const account = await this.getAccount(params.gameId);
     if (!account) {
       console.warn(`[GameDev] 游戏 ${params.gameId} 无开发者账户，无法记录收入`);
       return;
     }
 
-    // 计算平台分成
     const sharePercent = account.revenueSharePercent;
     const platformCut = Math.floor(params.amount * sharePercent / 100);
 
-    // 更新账户余额
     account.totalRevenue += params.amount;
     account.availableBalance += params.amount;
     account.platformOwed += platformCut;
     account.stats.totalSoldItems += 1;
     account.stats.totalSoldVouchers += 1;
 
-    // 更新道具销售统计
     if (params.templateId) {
       if (!account.stats.itemSales[params.templateId]) {
         account.stats.itemSales[params.templateId] = {
@@ -230,13 +204,9 @@ class GameDeveloperService {
     }
 
     account.updatedAt = Date.now();
-    const accounts = loadAccounts();
-    const idx = accounts.findIndex(a => a.accountId === account.accountId);
-    if (idx >= 0) accounts[idx] = account;
-    saveAccounts(accounts);
+    await this.saveAccount(account);
 
-    // 记录交易日志
-    this.recordTransaction({
+    await this.recordTransaction({
       gameId: params.gameId,
       accountId: account.accountId,
       type: 'purchase',
@@ -253,47 +223,36 @@ class GameDeveloperService {
     );
   }
 
-  /**
-   * 🔄 每日结算：将 game-{gameId} 的 platformOwed 转入 platform_treasury
-   * 
-   * 应在每日 00:00 或应用启动时调用。
-   * 从游戏商账户转移 platformOwed 面额的凭证到平台金库。
-   */
-  executeDailySettlement(gameId?: string): {
+  async executeDailySettlement(gameId?: string): Promise<{
     success: boolean;
     settledAccounts: number;
     totalSettled: number;
     message: string;
-  } {
-    const accounts = gameId
-      ? loadAccounts().filter(a => a.accountId === getGameDeveloperAccountId(gameId) && a.status === 'active')
-      : loadAccounts().filter(a => a.status === 'active');
+  }> {
+    const accounts = await this.getAllAccounts(true);
+    const targets = gameId
+      ? accounts.filter(a => a.accountId === getGameDeveloperAccountId(gameId))
+      : accounts;
 
     const now = Date.now();
     let settledCount = 0;
     let totalSettled = 0;
-
     const batchId = `settlement_${Date.now()}`;
 
-    for (const account of accounts) {
-      // 🔒 S2-4 修复：检查幂等性 — 同一天不重复结算
+    for (const account of targets) {
       const shouldSettle = account.platformOwed > 0 &&
         (now - account.lastDailySettlement >= DAY_MS);
-
       if (!shouldSettle) continue;
 
       const settleAmount = account.platformOwed;
-
       try {
-        // 从游戏商账户转移凭证到平台金库
         const devVouchers = voucherService.getUserVouchers(account.accountId)
           .filter(v => v.status === VoucherStatus.ACTIVE)
           .sort((a, b) => a.denomination - b.denomination);
 
         let remainingToSettle = settleAmount;
-        let settledFromVouchers: Voucher[] = [];
+        const settledFromVouchers: Voucher[] = [];
 
-        // 尝试用现有凭证拆分（优先选面额最小的组合）
         for (const v of devVouchers) {
           if (remainingToSettle <= 0) break;
           if (v.denomination <= remainingToSettle) {
@@ -302,70 +261,41 @@ class GameDeveloperService {
           }
         }
 
-        // 转移选中的凭证到 platform_treasury
         for (const v of settledFromVouchers) {
           try {
             voucherService.transferVoucher(
-              {
-                voucherId: v.id,
-                toUserId: SYSTEM_ACCOUNTS.PLATFORM_TREASURY,
-                toUserName: '平台金库',
-                note: `每日结算: ${account.gameName} 分成 ${v.denomination} A币`,
-              },
-              account.accountId,
-              account.gameName
+              { voucherId: v.id, toUserId: SYSTEM_ACCOUNTS.PLATFORM_TREASURY, toUserName: '平台金库', note: `每日结算: ${account.gameName} 分成 ${v.denomination} A币` },
+              account.accountId, account.gameName
             );
-          } catch (e) {
-            console.warn(`[GameDev] 凭证 ${v.id} 转移失败:`, e);
+          } catch {
             remainingToSettle += v.denomination;
           }
         }
 
         const actuallySettled = settleAmount - Math.max(0, remainingToSettle);
-
         if (actuallySettled > 0) {
-          // 记录到平台金库
-          platformTreasuryService.depositCommission(
-            'aCoins',
-            actuallySettled,
-            'platform_collect',
+          platformTreasuryService.depositCommission('aCoins', actuallySettled, 'platform_collect',
             `每日结算: ${account.gameName} (${account.revenueSharePercent}% 分成)`,
-            { gameId: account.gameId, accountId: account.accountId, batchId }
-          );
+            { gameId: account.gameId, accountId: account.accountId, batchId });
 
-          // 更新开发者账户
           account.platformOwed = Math.max(0, account.platformOwed - actuallySettled);
           account.platformSettled += actuallySettled;
           account.lastDailySettlement = now;
           account.updatedAt = now;
+          await this.saveAccount(account);
 
-          // 记录结算交易
-          this.recordTransaction({
-            gameId: account.gameId,
-            accountId: account.accountId,
-            type: 'settlement',
-            amount: actuallySettled,
-            currency: 'aCoins',
+          await this.recordTransaction({
+            gameId: account.gameId, accountId: account.accountId,
+            type: 'settlement', amount: actuallySettled, currency: 'aCoins',
             description: `每日结算: ${account.gameName} → platform_treasury, ${account.revenueSharePercent}% = ${actuallySettled} A币`,
             metadata: { settleAmount, actuallySettled, remainingToSettle, batchId },
           });
 
-          // 🔒 S2-4 修复：立即持久化该账户（不等待其他账户）
-          const allAccounts = loadAccounts();
-          const idx = allAccounts.findIndex(ac => ac.accountId === account.accountId);
-          if (idx >= 0) {
-            allAccounts[idx] = account;
-            saveAccounts(allAccounts);
-          }
-
           settledCount++;
           totalSettled += actuallySettled;
-          console.log(`[GameDev] ✅ 每日结算: ${account.gameName} → platform_treasury ${actuallySettled} A币 (batch: ${batchId})`);
         }
-
       } catch (e) {
         console.error(`[GameDev] 结算 ${account.gameName} 失败:`, e);
-        // 🔒 S2-4 修复：单个账户失败不影响其他账户，下次 checkAndSettle 重试
       }
     }
 
@@ -379,12 +309,9 @@ class GameDeveloperService {
     };
   }
 
-  /**
-   * 检查并自动执行每日结算（应在应用启动时调用）
-   */
-  checkAndSettle(): void {
+  async checkAndSettle(): Promise<void> {
     console.log('[GameDev] 🔍 检查每日结算...');
-    const result = this.executeDailySettlement();
+    const result = await this.executeDailySettlement();
     if (result.settledAccounts > 0) {
       console.log(`[GameDev] 📊 ${result.message}`);
     }
@@ -392,92 +319,54 @@ class GameDeveloperService {
 
   // ============ 提现管理 ============
 
-  /**
-   * 发起提现申请（开发者从游戏账户提现到个人钱包）
-   * 
-   * 注意：实际提现应走投票治理流程，此处为直接提现（MVP 阶段简化）
-   */
-  withdrawRevenue(params: {
+  async withdrawRevenue(params: {
     gameId: string;
     amount: number;
     toUserId: string;
     toUserName: string;
-  }): { success: boolean; message: string } {
-    const account = this.getAccount(params.gameId);
-    if (!account) {
-      return { success: false, message: '开发者账户不存在' };
-    }
-
-    if (account.status !== 'active') {
-      return { success: false, message: '账户已被冻结或关闭' };
-    }
+  }): Promise<{ success: boolean; message: string }> {
+    const account = await this.getAccount(params.gameId);
+    if (!account) return { success: false, message: '开发者账户不存在' };
+    if (account.status !== 'active') return { success: false, message: '账户已被冻结或关闭' };
 
     const availableForWithdraw = account.availableBalance - account.platformOwed;
     if (params.amount > availableForWithdraw) {
-      return {
-        success: false,
-        message: `余额不足，可提现金额 ${availableForWithdraw} A币（总余额 ${account.availableBalance} - 待结算 ${account.platformOwed}）`,
-      };
+      return { success: false, message: `余额不足，可提现金额 ${availableForWithdraw} A币` };
     }
 
-    // 从游戏商账户转移凭证到用户
     const devVouchers = voucherService.getUserVouchers(account.accountId)
       .filter(v => v.status === VoucherStatus.ACTIVE)
       .sort((a, b) => a.denomination - b.denomination);
 
     let remaining = params.amount;
-    const transferredVouchers: Voucher[] = [];
-
+    const transferred: Voucher[] = [];
     for (const v of devVouchers) {
       if (remaining <= 0) break;
-      if (v.denomination <= remaining) {
-        transferredVouchers.push(v);
-        remaining -= v.denomination;
-      }
+      if (v.denomination <= remaining) { transferred.push(v); remaining -= v.denomination; }
     }
+    if (remaining > 0) return { success: false, message: `无法拆分凭证完成 ${params.amount} A币提现` };
 
-    if (remaining > 0) {
-      return { success: false, message: `无法拆分凭证完成 ${params.amount} A币提现，剩余 ${remaining} A币` };
-    }
-
-    // 执行转移
-    for (const v of transferredVouchers) {
+    for (const v of transferred) {
       try {
         voucherService.transferVoucher(
-          {
-            voucherId: v.id,
-            toUserId: params.toUserId,
-            toUserName: params.toUserName,
-            note: `提现: ${account.gameName} 收入 ${v.denomination} A币`,
-          },
-          account.accountId,
-          account.gameName
+          { voucherId: v.id, toUserId: params.toUserId, toUserName: params.toUserName, note: `提现: ${account.gameName} 收入 ${v.denomination} A币` },
+          account.accountId, account.gameName
         );
       } catch (e) {
         return { success: false, message: `凭证转移失败: ${e instanceof Error ? e.message : String(e)}` };
       }
     }
 
-    // 更新账户
     account.totalWithdrawn += params.amount;
     account.availableBalance -= params.amount;
     account.updatedAt = Date.now();
+    await this.saveAccount(account);
 
-    const accounts = loadAccounts();
-    const idx = accounts.findIndex(a => a.accountId === account.accountId);
-    if (idx >= 0) accounts[idx] = account;
-    saveAccounts(accounts);
-
-    // 记录交易
-    this.recordTransaction({
-      gameId: params.gameId,
-      accountId: account.accountId,
-      type: 'withdrawal',
-      amount: params.amount,
-      currency: 'aCoins',
+    await this.recordTransaction({
+      gameId: params.gameId, accountId: account.accountId,
+      type: 'withdrawal', amount: params.amount, currency: 'aCoins',
       description: `${account.publisherName} 提现 ${params.amount} A币`,
-      fromUserId: params.toUserId,
-      fromUserName: params.toUserName,
+      fromUserId: params.toUserId, fromUserName: params.toUserName,
     });
 
     console.log(`[GameDev] 💸 提现: ${account.gameName} → ${params.toUserName} ${params.amount} A币`);
@@ -486,80 +375,68 @@ class GameDeveloperService {
 
   // ============ 查询方法 ============
 
-  /**
-   * 获取游戏开发者概览列表（平台管理端用）
-   */
-  getDeveloperOverview(): GameDeveloperOverview[] {
-    return this.getAllAccounts(true).map(a => ({
-      accountId: a.accountId,
-      gameId: a.gameId,
-      gameName: a.gameName,
-      publisherId: a.publisherId,
-      publisherName: a.publisherName,
+  async getDeveloperOverview(): Promise<GameDeveloperOverview[]> {
+    const accounts = await this.getAllAccounts(true);
+    return accounts.map(a => ({
+      accountId: a.accountId, gameId: a.gameId, gameName: a.gameName,
+      publisherId: a.publisherId, publisherName: a.publisherName,
       revenueSharePercent: a.revenueSharePercent,
-      totalRevenue: a.totalRevenue,
-      availableBalance: a.availableBalance,
-      platformOwed: a.platformOwed,
-      platformSettled: a.platformSettled,
-      totalWithdrawn: a.totalWithdrawn,
-      totalSoldItems: a.stats.totalSoldItems,
-      status: a.status,
-      lastDailySettlement: a.lastDailySettlement,
+      totalRevenue: a.totalRevenue, availableBalance: a.availableBalance,
+      platformOwed: a.platformOwed, platformSettled: a.platformSettled,
+      totalWithdrawn: a.totalWithdrawn, totalSoldItems: a.stats.totalSoldItems,
+      status: a.status, lastDailySettlement: a.lastDailySettlement,
     }));
   }
 
-  /**
-   * 获取游戏收入交易记录
-   */
-  getTransactions(gameId?: string, limit?: number): DeveloperRevenueTransaction[] {
-    const all = loadTx();
-    const filtered = gameId ? all.filter(t => t.gameId === gameId) : all;
-    const sorted = filtered.sort((a, b) => b.timestamp - a.timestamp);
-    return limit ? sorted.slice(0, limit) : sorted;
+  async getTransactions(gameId?: string, limit?: number): Promise<DeveloperRevenueTransaction[]> {
+    if (isApiAvailable()) {
+      try {
+        if (gameId) {
+          const accountId = getGameDeveloperAccountId(gameId);
+          return await apiFetch(`/${accountId}/transactions?limit=${limit || 50}`);
+        }
+        return await apiFetch(`/transactions?limit=${limit || 50}`);
+      } catch (e) {
+        console.warn('[GameDev] 获取交易记录失败:', e);
+      }
+    }
+    const filtered = gameId ? txCache.filter(t => t.gameId === gameId) : txCache;
+    return filtered.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit || 50);
   }
 
-  /**
-   * 获取游戏道具销售统计
-   */
-  getItemSalesStats(gameId: string): GameItemSaleStat[] {
-    const account = this.getAccount(gameId);
+  async getItemSalesStats(gameId: string): Promise<GameItemSaleStat[]> {
+    const account = await this.getAccount(gameId);
     if (!account) return [];
-    return Object.values(account.stats.itemSales)
-      .sort((a, b) => b.totalRevenue - a.totalRevenue);
+    return Object.values(account.stats.itemSales).sort((a, b) => b.totalRevenue - a.totalRevenue);
   }
 
-  /**
-   * 获取开发者账户的凭证持有情况
-   */
-  getDeveloperVoucherHoldings(gameId: string): {
-    totalFaceValue: number;
-    voucherCount: number;
-    activeCount: number;
-    vouchers: Voucher[];
-  } {
+  async getDeveloperVoucherHoldings(gameId: string): Promise<{
+    totalFaceValue: number; voucherCount: number; activeCount: number; vouchers: Voucher[];
+  }> {
     const accountId = getGameDeveloperAccountId(gameId);
     const vouchers = voucherService.getUserVouchers(accountId);
     const active = vouchers.filter(v => v.status === VoucherStatus.ACTIVE);
     return {
       totalFaceValue: active.reduce((s, v) => s + v.denomination, 0),
-      voucherCount: vouchers.length,
-      activeCount: active.length,
-      vouchers,
+      voucherCount: vouchers.length, activeCount: active.length, vouchers,
     };
   }
 
   // ============ 私有方法 ============
 
-  private recordTransaction(tx: Omit<DeveloperRevenueTransaction, 'id' | 'timestamp'>): void {
+  private async recordTransaction(tx: Omit<DeveloperRevenueTransaction, 'id' | 'timestamp'>): Promise<void> {
     const full: DeveloperRevenueTransaction = {
       id: `devtx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       timestamp: Date.now(),
       ...tx,
     };
-
-    const txs = loadTx();
-    txs.push(full);
-    saveTx(txs);
+    txCache.push(full);
+    if (!isApiAvailable()) return;
+    try {
+      await apiFetch(`/${full.accountId}/transaction`, { method: 'POST', body: JSON.stringify(full) });
+    } catch (e) {
+      console.warn('[GameDev] 交易记录 API 保存失败（仅内存）:', e);
+    }
   }
 }
 

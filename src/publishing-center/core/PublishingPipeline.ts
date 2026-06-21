@@ -24,6 +24,7 @@ import {
 import { SkillInitializer, type SkillInitializationResult } from './SkillInitializer';
 import { savePublishedGame, saveGameFiles, type PublishedGame, type RedeemItemConfig } from '@/services/publishedGameService';
 import { gameDeveloperService } from '@/services/gameDeveloperService';
+import { getToken } from '@/services/authTokenService';
 
 // ==================== 流水线配置 ====================
 
@@ -97,7 +98,7 @@ class Logger {
 export class PublishingPipeline {
   private config: PublishingPipelineConfig;
   private state: PublishPipelineState;
-  private context: PipelineContext;
+  private context!: PipelineContext;
   private steps: PipelineStep[];
   private isRunning: boolean = false;
   private subscribers: Set<(state: PublishPipelineState) => void> = new Set();
@@ -483,13 +484,14 @@ export class PublishingPipeline {
     if (files && files.length > 0 && config.gameId) {
       const entryPoint = config.analysisResult.fileStructure.entryPoints[0] || 'index.html';
       
-      // 查找 HTML 入口文件
-      const htmlFile = files.find(f => 
-        f.path === entryPoint || 
-        f.name === entryPoint || 
-        f.path.endsWith('/' + entryPoint) ||
-        f.name.endsWith('.html')
-      );
+      // 查找 HTML 入口文件（优先选择 dist/ 编译版本，而非 src/ 源码版本）
+      let htmlFile = files.find(f => f.path === entryPoint);
+      if (!htmlFile) {
+        const htmlCandidates = files.filter(f => f.name === 'index.html' || f.name.endsWith('.html'));
+        htmlFile = htmlCandidates.find(f => f.path.includes('/dist/'))
+          || htmlCandidates.find(f => f.path.endsWith('/' + entryPoint))
+          || htmlCandidates[0];
+      }
 
       if (htmlFile) {
         try {
@@ -582,41 +584,160 @@ export class PublishingPipeline {
       return;
     }
 
-    // 模拟上传进度（实际保存到 localStorage）
     const totalFiles = files.length;
-    const batchSize = Math.ceil(totalFiles / 5);
+    const rawEntryPoint = config.analysisResult.fileStructure.entryPoints[0] || 'index.html';
 
-    logger.info(`准备保存 ${totalFiles} 个游戏文件到本地存储...`, PublishStep.PUBLISH);
-
-    for (let i = 0; i < 5; i++) {
-      await this.delay(100);
-      const saved = Math.min((i + 1) * batchSize, totalFiles);
-      logger.info(`已处理: ${saved}/${totalFiles} 个文件`, PublishStep.PUBLISH);
+    // ── 0. 路径标准化：去除 ZIP 公共根目录前缀 ──
+    // 例：ZIP 中所有文件都在 "zuma/" 下，去掉前缀后路径变为 "dist/index.html"
+    const allPaths = files.map(f => f.path || f.name);
+    const commonPrefix = this.findCommonDirPrefix(allPaths);
+    // stripPrefix 也要先统一反斜杠为正斜杠
+    const normalizePath = (p: string) => p.replace(/\\/g, '/');
+    const stripPrefix = (p: string) => {
+      const norm = normalizePath(p);
+      return commonPrefix && norm.startsWith(commonPrefix) ? norm.slice(commonPrefix.length) : norm;
+    };
+    if (commonPrefix) {
+      logger.info(`路径标准化：去除公共前缀 "${commonPrefix}"`, PublishStep.PUBLISH);
     }
+    const entryPoint = stripPrefix(rawEntryPoint);
 
-    // 真正保存文件内容到 IndexedDB
+    // ── 1. 保存到本地 IndexedDB（本地缓存，兼容离线） ──
+    logger.info(`准备保存 ${totalFiles} 个游戏文件到本地存储...`, PublishStep.PUBLISH);
     try {
-      const result = await saveGameFiles(config.gameId, files);
+      // 本地存储也使用标准化路径
+      const normalizedFiles = files.map(f => ({
+        ...f,
+        path: stripPrefix(f.path || f.name),
+      }));
+      const result = await saveGameFiles(config.gameId, normalizedFiles);
       if (result.warnings.length > 0) {
         for (const w of result.warnings) {
           logger.warning(w, PublishStep.PUBLISH);
         }
       }
       logger.success(
-        `所有游戏资源已保存到本地存储 (${result.saved} 个文件` +
+        `本地存储已保存 (${result.saved} 个文件` +
         (result.skipped > 0 ? `, 跳过 ${result.skipped} 个大文件` : '') +
         ')',
         PublishStep.PUBLISH
       );
     } catch (e) {
       logger.warning(
-        `保存游戏文件时出现问题: ${e instanceof Error ? e.message : String(e)}`,
+        `保存游戏文件到本地时出现问题: ${e instanceof Error ? e.message : String(e)}`,
         PublishStep.PUBLISH
       );
-      logger.warning('发布流程将继续，但游戏可能无法正常加载', PublishStep.PUBLISH);
     }
+
+    // ── 2. 上传到服务端（服务端托管模式） ──
+    let serverUploadOk = false;
+
+    // 获取 JWT token：通过集中式 token 服务
+    let token: string | null = await getToken();
+
+    if (token) {
+      logger.info('已获取 JWT token', PublishStep.PUBLISH);
+    }
+
+    if (token) {
+      try {
+        logger.info(`正在上传 ${totalFiles} 个文件到服务端...`, PublishStep.PUBLISH);
+
+        // 将文件内容转为字符串
+        // 文本文件（HTML/CSS/JS/JSON等）用 UTF-8 解码，二进制文件用 base64 编码
+        const TEXT_EXTENSIONS = new Set([
+          '.html', '.htm', '.css', '.js', '.mjs', '.json', '.xml', '.svg',
+          '.ts', '.tsx', '.jsx', '.vue', '.svelte',
+          '.md', '.txt', '.csv', '.yaml', '.yml', '.toml',
+          '.scss', '.sass', '.less', '.styl',
+          '.sh', '.bash', '.zsh', '.bat', '.ps1',
+          '.py', '.rb', '.php', '.java', '.c', '.cpp', '.h',
+          '.graphql', '.gql', '.proto',
+        ]);
+
+        function isTextFile(filePath: string): boolean {
+          const ext = '.' + filePath.split('.').pop()?.toLowerCase();
+          return TEXT_EXTENSIONS.has(ext);
+        }
+
+        const uploadFiles = files.map(f => {
+          let content: string;
+          const filePath = stripPrefix(f.path || f.name);
+
+          if (typeof f.content === 'string') {
+            content = f.content;
+          } else if (f.content instanceof Uint8Array || f.content instanceof ArrayBuffer) {
+            const bytes = f.content instanceof Uint8Array ? f.content : new Uint8Array(f.content);
+            if (isTextFile(filePath)) {
+              // 文本文件：UTF-8 解码为字符串
+              content = new TextDecoder('utf-8').decode(bytes);
+            } else {
+              // 二进制文件：base64 编码
+              let binary = '';
+              for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+              content = btoa(binary);
+            }
+          } else {
+            content = String(f.content);
+          }
+          return {
+            path: filePath,
+            name: f.name,
+            content,
+            size: f.size || content.length,
+          };
+        });
+
+        const resp = await fetch(`/api/v1/games/${config.gameId}/upload`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({ files: uploadFiles }),
+        });
+
+        if (resp.ok) {
+          const result = await resp.json();
+          serverUploadOk = true;
+          logger.success(
+            `服务端托管就绪：${result.data?.saved ?? totalFiles} 个文件已上传`,
+            PublishStep.PUBLISH
+          );
+        } else {
+          const errBody = await resp.json().catch(() => ({}));
+          logger.warning(
+            `服务端上传失败 (${resp.status}): ${errBody.error || resp.statusText}`,
+            PublishStep.PUBLISH
+          );
+        }
+      } catch (e) {
+        logger.warning(
+          `服务端上传异常: ${e instanceof Error ? e.message : String(e)}`,
+          PublishStep.PUBLISH
+        );
+      }
+    } else {
+      logger.warning('未找到 JWT Token，跳过服务端上传（将使用 inline 模式）', PublishStep.PUBLISH);
+    }
+
+    // ── 3. 设置托管模式 ──
+    if (serverUploadOk) {
+      const baseUrl = `/api/v1/games/${config.gameId}/files/`;
+      context.data.set('hostingType', 'server');
+      context.data.set('baseUrl', baseUrl);
+      context.data.set('cdnUrl', `${baseUrl}${entryPoint}`);
+      context.data.set('normalizedEntryPoint', entryPoint);
+      logger.info(`托管模式: server → ${baseUrl}${entryPoint}`, PublishStep.PUBLISH);
+    } else {
+      // 降级到 inline 模式（仅 HTML 内容，srcDoc 方式）
+      context.data.set('hostingType', 'inline');
+      context.data.set('cdnUrl', `local://game/${config.gameId}/${entryPoint}`);
+      context.data.set('normalizedEntryPoint', entryPoint);
+      logger.warning('降级到 inline 模式（服务端不可用）', PublishStep.PUBLISH);
+    }
+
     context.data.set('deploySuccess', true);
-    context.data.set('cdnUrl', `local://game/${config.gameId}/${config.analysisResult.fileStructure.entryPoints[0] || 'index.html'}`);
   }
 
   private async stepRegisterPlatform(context: PipelineContext): Promise<void> {
@@ -636,6 +757,10 @@ export class PublishingPipeline {
     const publisherName = config.publisherName || '平台管理员';
     const revenueSharePercent = config.revenueSharePercent ?? 10;
 
+    // 获取托管模式信息（由 stepDeploy 设置）
+    const hostingType = context.data.get('hostingType') || 'inline';
+    const baseUrl = context.data.get('baseUrl') || undefined;
+
     // 创建PublishedGame记录
     const publishedGame: Omit<PublishedGame, 'players' | 'status'> = {
       id: config.gameId,
@@ -645,9 +770,9 @@ export class PublishingPipeline {
       version: '1.0.0',
       skills: initializedSkills,
       skillConfigs: skillConfigs,
-      entryPoint: config.analysisResult.fileStructure.entryPoints[0] || 'index.html',
+      entryPoint: context.data.get('normalizedEntryPoint') || config.analysisResult.fileStructure.entryPoints[0] || 'index.html',
       fileCount: config.analysisResult.fileStructure.totalFiles,
-      size: config.analysisResult.fileStructure.totalSize,
+      size: config.analysisResult.fileStructure.estimatedSize,
       cdnUrl: cdnUrl,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -656,12 +781,14 @@ export class PublishingPipeline {
       publisherId,
       publisherName,
       revenueSharePercent,
+      hostingType: hostingType as 'server' | 'inline' | 'external',
+      baseUrl,
     };
 
     logger.info('保存游戏数据...', PublishStep.PUBLISH);
     
     // 保存到平台
-    const saved = savePublishedGame(publishedGame);
+    const saved = await savePublishedGame(publishedGame);
     
     logger.info('配置访问权限...', PublishStep.PUBLISH);
     await this.delay(300);
@@ -824,6 +951,44 @@ export class PublishingPipeline {
             setTimeout(function() { statusEl.classList.remove('show'); }, 3000);
           }
         }
+      }
+    });
+
+    // ===== EXTENSION_VOUCHER 处理 + CustomEvent 分发（UGC 道具） =====
+    window.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'EXTENSION_VOUCHER') {
+        var v = event.data.voucher;
+        if (!v || !v.schemaName) { console.warn('[AllinONE] EXTENSION_VOUCHER 无效'); return; }
+
+        // 根据 schema 提取 itemId
+        var schemaToItem = {};
+        try {
+          if (v.schemaName === 'weapon') {
+            schemaToItem.itemId = v.data && v.data.effectType || 'match3_bomb';
+            schemaToItem.itemName = (v.data && v.data.name) || 'UGC武器';
+          } else if (v.schemaName === 'match3-powerup') {
+            schemaToItem.itemId = (v.data && v.data.effect) || (v.data && v.data.effectType) || v.schemaName;
+            schemaToItem.itemName = (v.data && v.data.name) || v.schemaName;
+          } else {
+            schemaToItem.itemId = (v.data && v.data.effectType) || v.schemaName;
+            schemaToItem.itemName = (v.data && v.data.name) || v.schemaName;
+          }
+        } catch(e) { console.error('[AllinONE] 解析失败:', e); return; }
+
+        console.log('[AllinONE] EXTENSION_VOUCHER → CustomEvent 已分发:', schemaToItem.itemId);
+
+        var detail = {
+          code: v.signature || 'ugc-' + Date.now(),
+          itemId: schemaToItem.itemId,
+          itemName: schemaToItem.itemName,
+          quantity: 1,
+          effects: {},
+          effectType: 'custom',
+          source: 'ugc',
+          voucherData: v.data
+        };
+        window.dispatchEvent(new CustomEvent('allinone:item-redeemed', { detail: detail }));
+        window.dispatchEvent(new CustomEvent('allinone-item-redeemed', { detail: detail }));
       }
     });
 
@@ -1252,7 +1417,62 @@ export class PublishingPipeline {
     });
   };
 
-  // ==================== 定时器控制 (setInterval/setTimeout) — 延迟按时间膨胀缩放 ====================
+  // ==================== Canvas 文本拦截 (score_boost 视觉层增强) ====================
+  var _scoreMultiplier = 1;
+  var _canvasInterceptionActive = false;
+
+  function _setupCanvasInterception() {
+    if (_canvasInterceptionActive) return;
+    if (typeof CanvasRenderingContext2D === 'undefined') return;
+    _canvasInterceptionActive = true;
+    var _origFillText = CanvasRenderingContext2D.prototype.fillText;
+    var _origStrokeText = CanvasRenderingContext2D.prototype.strokeText;
+
+    CanvasRenderingContext2D.prototype.fillText = function(text, x, y) {
+      if (_scoreMultiplier !== 1 && typeof text === 'string') {
+        var modified = _interceptScoreText(text, this, x, y);
+        if (modified !== text) {
+          return _origFillText.call(this, modified, x, y);
+        }
+      }
+      return _origFillText.call(this, text, x, y);
+    };
+
+    CanvasRenderingContext2D.prototype.strokeText = function(text, x, y) {
+      if (_scoreMultiplier !== 1 && typeof text === 'string') {
+        var modified = _interceptScoreText(text, this, x, y);
+        if (modified !== text) {
+          return _origStrokeText.call(this, modified, x, y);
+        }
+      }
+      return _origStrokeText.call(this, text, x, y);
+    };
+  }
+
+  function _interceptScoreText(text, ctx, x, y) {
+    // 模式1: 纯数字（常见于简洁风格的分数显示）
+    if (/^\\d{1,8}$/.test(text.trim())) {
+      var num = parseInt(text.trim(), 10);
+      if (num >= 1 && num < 999999) {
+        return String(Math.floor(num * _scoreMultiplier));
+      }
+    }
+    // 模式2: 包含分数关键词的文本
+    var keywords = ['score', '分数', 'points', 'pts', '得分', '积分', 'combo', 'x '];
+    var lower = text.toLowerCase();
+    for (var ki = 0; ki < keywords.length; ki++) {
+      if (lower.indexOf(keywords[ki]) !== -1) {
+        var replaced = text.replace(/(\\d{1,8})/g, function(m) {
+          var n = parseInt(m, 10);
+          return (n >= 1 && n < 999999) ? String(Math.floor(n * _scoreMultiplier)) : m;
+        });
+        if (replaced !== text) return replaced;
+      }
+    }
+    return text;
+  }
+
+  // 定时器控制 (setInterval/setTimeout) — 延迟按时间膨胀缩放 ====================
   var _origSetInterval = window.setInterval;
   var _origSetTimeout = window.setTimeout;
 
@@ -1370,19 +1590,49 @@ export class PublishingPipeline {
     }
   }
 
-  function searchAndModify(keywords, modifier) {
+  function searchAndModify(keywords, modifier, maxDepth) {
+    maxDepth = maxDepth || 5;
     // 每次扫描前重置访问列表（允许访问新创建的对象），但保留已修改路径记录
     _visitedObjects = [];
-    // 扫描 window 全局变量
-    for (var key in window) {
-      if (key === 'AllinONE' || key === 'window' || key === 'self' || key === 'top' || key === 'parent' || key === 'frames' || key === 'document') continue;
-      try {
-        var val = window[key];
-        if (val && typeof val === 'object') {
-          deepModify(val, keywords, modifier, 3, key);
+    var modifiedCount = 0;
+    var scanRoots = [window];
+    // 额外扫描 document.all 中可能挂载的全局对象
+    try {
+      if (document && document.all) {
+        for (var di = 0; di < Math.min(document.all.length, 20); di++) {
+          var el = document.all[di];
+          if (el && el.id && typeof el === 'object') scanRoots.push(el);
         }
-      } catch(e) {}
+      }
+    } catch(e) {}
+
+    for (var ri = 0; ri < scanRoots.length; ri++) {
+      var root = scanRoots[ri];
+      var rootName = ri === 0 ? '' : (root.id || 'docEl_' + ri);
+      for (var key in root) {
+        if (ri === 0 && (key === 'AllinONE' || key === 'window' || key === 'self' || key === 'top' || key === 'parent' || key === 'frames' || key === 'document' || key === 'chrome' || key === 'performance')) continue;
+        try {
+          var val = root[key];
+          if (val && typeof val === 'object') {
+            var before = Object.keys(_modifiedPaths).length;
+            deepModify(val, keywords, modifier, maxDepth, rootName ? rootName + '.' + key : key);
+            modifiedCount += (Object.keys(_modifiedPaths).length - before);
+          } else if (typeof val === 'number' && hasMatchingKeyword(key, keywords) && val > 0.01 && val < 10000) {
+            var fullPath = rootName ? rootName + '.' + key : key;
+            if (!_modifiedPaths[fullPath]) {
+              var orig = val;
+              root[key] = modifier(val);
+              if (root[key] !== orig) {
+                _modifiedPaths[fullPath] = true;
+                modifiedCount++;
+                console.log('[AllinONE] Effect Engine: 修改(顶层) ' + fullPath + ': ' + orig + ' -> ' + root[key]);
+              }
+            }
+          }
+        } catch(e) {}
+      }
     }
+    return modifiedCount;
   }
 
   // ==================== 效果处理器 ====================
@@ -1458,13 +1708,33 @@ export class PublishingPipeline {
       var multiplier = (itemData.effects && itemData.effects.multiplier) || 2;
       console.log('[AllinONE] Effect Engine: 执行分数加成, 倍率=' + multiplier);
 
-      // 扫描并加倍分数相关的变量
+      // 策略 A: 全局变量扫描（深度5，更多关键词）
+      var scoreKeywords = ['score', 'points', 'multiplier', 'scoremultiplier', 'combo', 'total', 'value', 'pts', 'gameScore', 'playerScore', 'scoreTotal', 'currentScore', 'finalScore', 'totalScore'];
+
+      function doScan(delay, label) {
+        setTimeout(function() {
+          var count = searchAndModify(
+            scoreKeywords,
+            function(val) { return Math.min(999999, val * multiplier); },
+            5
+          );
+          console.log('[AllinONE] Effect Engine: ' + label + '扫描完成, 修改了 ' + count + ' 个变量');
+        }, delay);
+      }
+
+      doScan(300, '第1次');
+      doScan(1500, '第2次');
+      doScan(4000, '第3次');
+
+      // 策略 B: Canvas fillText/strokeText 拦截（视觉层修改分数显示）
+      _scoreMultiplier = multiplier;
       setTimeout(function() {
-        searchAndModify(
-          ['score', 'points', 'multiplier', 'scoremultiplier', 'combo'],
-          function(val) { return Math.min(999999, val * multiplier); }
-        );
-      }, 500);
+        _setupCanvasInterception();
+        console.log('[AllinONE] Effect Engine: Canvas 文本拦截已激活, 分数倍率=' + multiplier);
+      }, 100);
+
+      // 策略 C: 全局变量挂载（游戏可读取 window.__allinoneScoreMultiplier）
+      window.__allinoneScoreMultiplier = multiplier;
     },
 
     'extra_life': function(itemData) {
@@ -1527,7 +1797,7 @@ export class PublishingPipeline {
     }
   };
 
-  console.log('[AllinONE] Effect Engine v1.0 已就绪, 已注册 ' + Object.keys(effectHandlers).length + ' 种效果处理器');
+  console.log('[AllinONE] Effect Engine v1.1 已就绪, 已注册 ' + Object.keys(effectHandlers).length + ' 种效果处理器');
   } catch(e) {
     console.error('[AllinONE] Effect Engine 初始化失败:', e && e.message ? e.message : e);
     // 即使初始化失败，确保 SDK 仍能调用公共 API
@@ -1731,6 +2001,50 @@ export class PublishingPipeline {
     }
   });
 
+  // 🆕 ===== EXTENSION_VOUCHER 处理 + CustomEvent 分发（UGC 道具） =====
+  window.addEventListener('message', function(event) {
+    if (event.data && event.data.type === 'EXTENSION_VOUCHER') {
+      var v = event.data.voucher;
+      if (!v || !v.schemaName) { console.warn('[AllinONE SDK] EXTENSION_VOUCHER 无效'); return; }
+
+      var schemaToItem = {};
+      try {
+        if (v.schemaName === 'weapon') {
+          schemaToItem.itemId = (v.data && v.data.effectType) || 'match3_bomb';
+          schemaToItem.itemName = (v.data && v.data.name) || 'UGC武器';
+        } else if (v.schemaName === 'shop') {
+          schemaToItem.itemId = (v.data && v.data.effectType) || 'match3_bomb';
+          schemaToItem.itemName = (v.data && v.data.name) || 'UGC商店';
+        } else if (v.schemaName === 'quest') {
+          schemaToItem.itemId = (v.data && v.data.effectType) || 'match3_lightning';
+          schemaToItem.itemName = (v.data && v.data.name) || 'UGC任务';
+        } else if (v.schemaName === 'match3-powerup') {
+          // match3-powerup: 优先使用 data.effect（效果类型），如 replace_color, remove_row 等
+          schemaToItem.itemId = (v.data && v.data.effect) || (v.data && v.data.effectType) || v.schemaName;
+          schemaToItem.itemName = (v.data && v.data.name) || v.schemaName;
+        } else {
+          schemaToItem.itemId = (v.data && v.data.effectType) || v.schemaName;
+          schemaToItem.itemName = (v.data && v.data.name) || v.schemaName;
+        }
+      } catch(e) { console.error('[AllinONE SDK] 解析失败:', e); return; }
+
+      console.log('[AllinONE SDK] EXTENSION_VOUCHER → CustomEvent 分发:', schemaToItem.itemId);
+
+      var detail = {
+        code: v.signature || 'ugc-' + Date.now(),
+        itemId: schemaToItem.itemId,
+        itemName: schemaToItem.itemName,
+        quantity: 1,
+        effects: {},
+        effectType: 'custom',
+        source: 'ugc',
+        voucherData: v.data
+      };
+      window.dispatchEvent(new CustomEvent('allinone:item-redeemed', { detail: detail }));
+      window.dispatchEvent(new CustomEvent('allinone-item-redeemed', { detail: detail }));
+    }
+  });
+
   // ===== SDK API（供游戏方手动调用） =====
   window.AllinONE = window.AllinONE || {};
   window.AllinONE.GAME_ID = GAME_ID;
@@ -1756,6 +2070,18 @@ export class PublishingPipeline {
   console.log('[AllinONE SDK] v1.0 兑换条已注入, 游戏ID:', GAME_ID, ', 道具:', ITEMS.length + ' 种');
 })();
 </script>`;
+  }
+
+  /** 查找文件路径的公共目录前缀（用于去除 ZIP 根目录），兼容正斜杠和反斜杠 */
+  private findCommonDirPrefix(paths: string[]): string | null {
+    if (paths.length <= 1) return null;
+    // 统一反斜杠为正斜杠
+    const normalized = paths.map(p => p.replace(/\\/g, '/'));
+    const parts0 = normalized[0].split('/');
+    if (parts0.length <= 1) return null;
+    const firstDir = parts0[0] + '/';
+    const allShare = normalized.every(p => p.startsWith(firstDir));
+    return allShare ? firstDir : null;
   }
 
   private delay(ms: number): Promise<void> {

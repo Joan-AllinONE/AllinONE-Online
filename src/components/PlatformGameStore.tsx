@@ -22,8 +22,9 @@ import {
   X, Search, SlidersHorizontal, ChevronDown, Package, TrendingUp,
   ShieldCheck, ArrowLeft, Tag, Sparkles, Settings,
   BookOpen, Code, Server, Terminal, AlertCircle,
-  CheckCircle2, ClipboardList, UserPlus,
+  CheckCircle2, ClipboardList, UserPlus, Download,
 } from 'lucide-react';
+import sopMarkdown from '../../docs/allinone-game-store-developer-sop.md?raw';
 
 // ==================== 类型 ====================
 
@@ -363,6 +364,18 @@ function MyItemsPanel() {
 function DeveloperGuidePanel() {
   const [activeSection, setActiveSection] = useState<'overview' | 'api' | 'integration'>('overview');
 
+  const handleDownloadSop = () => {
+    const blob = new Blob([sopMarkdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'AllinONE-游戏开发商接入SOP.md';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const sections = [
     { id: 'overview' as const, label: '流程概览', icon: <BookOpen className="w-4 h-4" /> },
     { id: 'api' as const, label: 'API 文档', icon: <Code className="w-4 h-4" /> },
@@ -385,6 +398,14 @@ function DeveloperGuidePanel() {
             </p>
           </div>
         </div>
+        {/* 一键下载 SOP 文档 */}
+        <button
+          onClick={handleDownloadSop}
+          className="mt-4 flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white rounded-xl font-medium text-sm transition-all shadow-lg shadow-purple-500/20 hover:shadow-purple-500/40"
+        >
+          <Download className="w-4 h-4" />
+          下载 AI 可执行 SOP 文档 (.md)
+        </button>
       </div>
 
       {/* 子标签 */}
@@ -1043,9 +1064,9 @@ export default function PlatformGameStore() {
 
               {/* 管理入口 */}
               <button
-                onClick={() => navigate('/platform-store-manage')}
+                onClick={() => navigate('/game-store-manage')}
                 className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/50 hover:bg-slate-600/80 text-slate-300 hover:text-white rounded-lg text-sm font-medium transition-colors"
-                title="管理外部游戏和道具"
+                title="管理我的游戏和道具"
               >
                 <Settings className="w-4 h-4" />
                 <span className="hidden sm:inline">管理</span>

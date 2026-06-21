@@ -10,6 +10,7 @@ import {
   JSONSchema,
 } from '../types';
 import { SkillErrors } from '../errors';
+import { writeQueue } from '../../services/writeQueue';
 
 // ==================== 类型定义 ====================
 
@@ -756,21 +757,15 @@ export class InventorySkill extends BaseSkill {
         updatedAt: new Date().toISOString(),
       };
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data));
-      // CloudBase 双写
-      import('../../services/cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-        if (!isCloudBaseReady()) return;
-        const db = getCloudBaseApp().database();
-        const items = Array.from(this.items.values());
-        for (const item of items.slice(-20)) {
-          db.collection('inventories').where({ id: item.id }).get().then(res => {
-            if (res.data.length > 0) {
-              db.collection('inventories').doc(res.data[0]._id).update(item as any).catch(() => {});
-            } else {
-              db.collection('inventories').add(item as any).catch(() => {});
-            }
-          }).catch(() => {});
-        }
-      }).catch(() => {});
+      // CloudBase 双写（通过写入队列，全量入队不再截断）
+      const items = Array.from(this.items.values());
+      for (const item of items) {
+        writeQueue.enqueue({
+          collection: 'inventories',
+          operation: 'upsert',
+          data: item as any,
+        });
+      }
     } catch (error) {
       console.error('[InventorySkill] 保存数据失败:', error);
     }

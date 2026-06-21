@@ -3,6 +3,7 @@
  */
 
 import type { AllinONEGame } from '../index';
+import { getCachedToken } from './tokenManager';
 
 export interface Currency {
   type: string;
@@ -211,6 +212,6 @@ export class WalletAPI {
   }
 
   private getToken(): string | null {
-    return localStorage.getItem('allinone_token');
+    return getCachedToken();
   }
 }

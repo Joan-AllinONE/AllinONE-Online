@@ -339,15 +339,7 @@ function PurchaseHistoryPanel() {
           setPurchases(expenses);
         }
       } catch {
-        // Fallback: 从 localStorage 的 purchases 读取
-        try {
-          const raw = localStorage.getItem('purchases');
-          if (raw) {
-            const uid = currentUser?.uid || currentUser?.id || 'anonymous';
-            const all = JSON.parse(raw);
-            setPurchases(all.filter((p: any) => p.userId === uid));
-          }
-        } catch { /* ignore */ }
+        // 数据库不可用，显示空列表
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -402,15 +394,7 @@ function TransactionPanel() {
           setTransactions(txList);
         }
       } catch {
-        // Fallback: 从 wallet_tx 读取
-        try {
-          const raw = localStorage.getItem('wallet_tx');
-          if (raw) {
-            const uid = currentUser?.uid || currentUser?.id || 'anonymous';
-            const all: any[] = JSON.parse(raw);
-            setTransactions(all.filter(t => t.userId === uid).slice(-50).reverse());
-          }
-        } catch { /* ignore */ }
+        // 数据库不可用，显示空列表
       } finally {
         if (!cancelled) setLoading(false);
       }

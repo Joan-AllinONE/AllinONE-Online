@@ -13,6 +13,7 @@ import {
   ChevronDown, ChevronUp, Copy, Maximize2,
 } from 'lucide-react';
 import { voucherService } from '../services/VoucherService';
+import { voucherDB } from '../storage/VoucherDatabase';
 import {
   Voucher, VoucherStatus, Transaction, VoucherSourceType,
 } from '../types';
@@ -62,9 +63,9 @@ export const VoucherManagementDashboard: React.FC<VoucherManagementDashboardProp
     try {
       const vouchers = voucherService.filterVouchers({});
       setAllVouchers(vouchers);
-      // 读取交易 — 用 localStorage 直接读取更方便
-      const raw = localStorage.getItem('allinone_voucher_transactions');
-      setAllTransactions(raw ? JSON.parse(raw) : []);
+      // 通过 VoucherDatabase 获取交易记录
+      const txs = voucherDB.getRecentTransactions(500);
+      setAllTransactions(txs);
     } catch (e: any) {
       showMsg('error', '加载数据失败: ' + e.message);
     } finally {

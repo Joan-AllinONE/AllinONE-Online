@@ -35,6 +35,7 @@ interface VerifyCodeResult {
 
 export class GameConnectorSkill extends BaseSkill {
   private games: Map<string, GameConnectorConfig> = new Map();
+  private cloudLoaded = false;
 
   constructor() {
     super({
@@ -105,7 +106,13 @@ export class GameConnectorSkill extends BaseSkill {
       },
     });
 
-    // 从 CloudBase 加载已注册的游戏连接器
+    // 尝试从 CloudBase 加载已注册的游戏连接器（延迟+可重试）
+    await this.ensureLoadedFromCloud();
+  }
+
+  /** 从 CloudBase 加载数据 — 首次调用时加载，失败后允许重试 */
+  private async ensureLoadedFromCloud(): Promise<void> {
+    if (this.cloudLoaded) return;
     try {
       const app = getCloudBaseApp();
       const db = app.database();
@@ -113,11 +120,14 @@ export class GameConnectorSkill extends BaseSkill {
         .where({ isActive: true })
         .get();
       for (const config of res.data) {
-        this.games.set(config.gameId, config as GameConnectorConfig);
+        if (!this.games.has(config.gameId)) {
+          this.games.set(config.gameId, config as GameConnectorConfig);
+        }
       }
+      this.cloudLoaded = true;
       console.log(`[game-connector] ✅ 加载了 ${this.games.size} 个游戏连接器`);
-    } catch (err) {
-      console.warn('[game-connector] ⚠️ CloudBase 未初始化，使用内存模式');
+    } catch {
+      console.warn('[game-connector] CloudBase 未就绪，将在首次操作时重试加载');
     }
   }
 
@@ -186,6 +196,7 @@ export class GameConnectorSkill extends BaseSkill {
     params: { gameId: string; code: string },
     context: SkillContext
   ): Promise<{ success: boolean; data?: VerifyCodeResult; message?: string }> {
+    await this.ensureLoadedFromCloud();
     const { gameId, code } = params;
     const game = this.games.get(gameId);
 
@@ -236,6 +247,7 @@ export class GameConnectorSkill extends BaseSkill {
     params: any,
     context: SkillContext
   ): Promise<{ success: boolean; data: GameConnectorConfig[] }> {
+    await this.ensureLoadedFromCloud();
     const games = Array.from(this.games.values());
     return { success: true, data: games };
   }

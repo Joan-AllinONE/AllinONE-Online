@@ -38,6 +38,7 @@ import {
   DEFAULT_POOL_CONFIG,
   DEFAULT_SETTLEMENT_OPTIONS,
 } from '../types/algorithm';
+import { persistWithCloudSync, loadWithCloudSync } from '../storage/cloudSync';
 
 // Storage keys
 const STORAGE_KEY = 'algorithm_voucher_system';
@@ -45,6 +46,11 @@ const TEMPLATES_KEY = `${STORAGE_KEY}:templates`;
 const CYCLES_KEY = `${STORAGE_KEY}:cycles`;
 const SETTLEMENT_RESULTS_KEY = `${STORAGE_KEY}:settlement_results`;
 const USER_RESULTS_KEY = `${STORAGE_KEY}:user_results`;
+
+// CloudBase 集合名
+const CLOUD_TEMPLATES = 'algo_voucher_templates';
+const CLOUD_CYCLES = 'algo_voucher_cycles';
+const CLOUD_USER_RESULTS = 'algo_voucher_user_results';
 
 /**
  * 生成唯一ID
@@ -1341,18 +1347,32 @@ export class AlgorithmVoucherService {
   private async loadFromStorage(): Promise<void> {
     try {
       // 加载模板
-      const templatesData = localStorage.getItem(TEMPLATES_KEY);
-      if (templatesData) {
-        const templates = JSON.parse(templatesData) as AlgorithmVoucherTemplate[];
-        this.templates = new Map(templates.map(t => [t.id, t]));
-      }
+      const { data: templates, cloudSync: templatesSync } = loadWithCloudSync<AlgorithmVoucherTemplate>(TEMPLATES_KEY, CLOUD_TEMPLATES);
+      this.templates = new Map(templates.map(t => [t.id, t]));
+      const templateOriginalIds = new Set(templates.map(t => t.id));
+      templatesSync.then(merged => {
+        let added = false;
+        for (const t of merged) {
+          if (!templateOriginalIds.has(t.id) && !this.templates.has(t.id)) {
+            this.templates.set(t.id, t); added = true;
+          }
+        }
+        if (added) this.saveToStorage();
+      }).catch(() => {});
       
       // 加载周期
-      const cyclesData = localStorage.getItem(CYCLES_KEY);
-      if (cyclesData) {
-        const cycles = JSON.parse(cyclesData) as SettlementCycle[];
-        this.cycles = new Map(cycles.map(c => [c.id, c]));
-      }
+      const { data: cycles, cloudSync: cyclesSync } = loadWithCloudSync<SettlementCycle>(CYCLES_KEY, CLOUD_CYCLES);
+      this.cycles = new Map(cycles.map(c => [c.id, c]));
+      const cycleOriginalIds = new Set(cycles.map(c => c.id));
+      cyclesSync.then(merged => {
+        let added = false;
+        for (const c of merged) {
+          if (!cycleOriginalIds.has(c.id) && !this.cycles.has(c.id)) {
+            this.cycles.set(c.id, c); added = true;
+          }
+        }
+        if (added) this.saveToStorage();
+      }).catch(() => {});
       
       console.log(`[AlgorithmVoucherService] 加载完成: ${this.templates.size} 模板, ${this.cycles.size} 周期`);
     } catch (error) {
@@ -1365,8 +1385,8 @@ export class AlgorithmVoucherService {
    */
   private saveToStorage(): void {
     try {
-      localStorage.setItem(TEMPLATES_KEY, JSON.stringify(Array.from(this.templates.values())));
-      localStorage.setItem(CYCLES_KEY, JSON.stringify(Array.from(this.cycles.values())));
+      persistWithCloudSync(TEMPLATES_KEY, Array.from(this.templates.values()), CLOUD_TEMPLATES);
+      persistWithCloudSync(CYCLES_KEY, Array.from(this.cycles.values()), CLOUD_CYCLES);
     } catch (error) {
       console.error('[AlgorithmVoucherService] 保存数据失败:', error);
     }
@@ -1378,7 +1398,8 @@ export class AlgorithmVoucherService {
   private saveSettlementResults(cycleId: string, userResults: UserSettlementResult[]): void {
     try {
       const key = `${USER_RESULTS_KEY}:${cycleId}`;
-      localStorage.setItem(key, JSON.stringify(userResults));
+      const dataWithId = userResults.map((r, i) => ({ ...r, id: `${cycleId}_${i}` }));
+      persistWithCloudSync(key, dataWithId, CLOUD_USER_RESULTS);
     } catch (error) {
       console.error('[AlgorithmVoucherService] 保存结算结果失败:', error);
     }
@@ -1390,8 +1411,8 @@ export class AlgorithmVoucherService {
   getSettlementResults(cycleId: string): UserSettlementResult[] {
     try {
       const key = `${USER_RESULTS_KEY}:${cycleId}`;
-      const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : [];
+      const { data } = loadWithCloudSync<{ id: string } & UserSettlementResult>(key, CLOUD_USER_RESULTS);
+      return data.map(({ id, ...rest }) => rest);
     } catch (error) {
       console.error('[AlgorithmVoucherService] 获取结算结果失败:', error);
       return [];

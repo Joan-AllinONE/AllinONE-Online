@@ -1,0 +1,8 @@
+{
+  "name": "恐慌力场",
+  "effect": "panic_zone_ec",
+  "params": {},
+  "description": "在敌方基地中心释放恐慌力场，范围内敌军单位5秒内攻击力减半，使其进攻受挫。基于 effectCode 调用引擎 panicArea 命令实现。",
+  "icon": "😱",
+  "effectCode": "function(params){var game=arguments[0];if(!game||!game.world)return{error:true,message:'游戏未启动'};var w=game.world;var me=game.localPlayerId,enemyId=-1;w.players.forEach(function(p){if(p.id!==me)enemyId=p.id;});var tx=5,ty=5;w.entities.forEach(function(e){if(e.owner===enemyId){var d=w.rules.units.get(e.typeId);if(d&&d.isConYard){tx=e.cellX;ty=e.cellY;}}});var C=256;game.emit({kind:'panicArea',owner:me,x:tx*C+C/2,y:ty*C+C/2,radius:3*C,panicSec:5});return{message:'😱 恐慌力场！敌方基地单位攻击减半5秒'};}"
+}

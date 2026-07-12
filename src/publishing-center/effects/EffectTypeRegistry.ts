@@ -210,7 +210,7 @@ effectTypeRegistry.register({
   id: 'custom',
   name: '自定义',
   icon: '📦',
-  description: '仅透传数据，需游戏方自行监听 allinone-item-redeemed 事件处理',
+  description: '仅透传数据，需游戏方自行监听 allinone:item-redeemed 事件处理',
   category: 'custom',
   isAutoExecute: false,
   parameters: [],

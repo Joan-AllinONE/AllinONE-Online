@@ -153,6 +153,10 @@ export interface RedeemResultData {
   effects?: Record<string, any>;
   code?: string;
   message?: string;
+  /** Schema 道具完整数据（effect/effectCode/effectScript/params/icon），游戏端桥接通过此字段获取完整效果 */
+  voucherData?: Record<string, any> | null;
+  /** Schema 名称（如 ra2-item、match3-powerup） */
+  schemaName?: string | null;
 }
 
 // ==================== 凭证相关 ====================

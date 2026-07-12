@@ -328,25 +328,44 @@ class WriteQueueService {
         case 'upsert':
           if (entry.data?.id) {
             // 按 id 查找后 upsert
-            const res = await db.collection(entry.collection)
-              .where({ id: entry.data.id }).limit(1).get();
-            if (res.data.length > 0) {
-              await db.collection(entry.collection)
-                .doc(res.data[0]._id).update({ ...entry.data, _updatedAt: now });
-            } else {
-              await db.collection(entry.collection)
-                .add({ ...entry.data, _createdAt: now, _updatedAt: now });
+            try {
+              const res = await db.collection(entry.collection)
+                .where({ id: entry.data.id }).limit(1).get();
+              if (res?.data?.length > 0) {
+                await db.collection(entry.collection)
+                  .doc(res.data[0]._id).update({ ...entry.data, _updatedAt: now });
+              } else {
+                await db.collection(entry.collection)
+                  .add({ ...entry.data, _createdAt: now, _updatedAt: now });
+              }
+            } catch (innerErr: any) {
+              // 集合不存在时 fallback 到 add（CloudBase 自动创建集合）
+              if (innerErr?.message?.includes('collection not found') || innerErr?.code === 'DATABASE_COLLECTION_NOT_EXIST') {
+                await db.collection(entry.collection)
+                  .add({ ...entry.data, _createdAt: now, _updatedAt: now });
+              } else {
+                throw innerErr;
+              }
             }
           } else if (entry.where && entry.data) {
             // 按 where 条件 upsert
-            const res = await db.collection(entry.collection)
-              .where(entry.where).limit(1).get();
-            if (res.data.length > 0) {
-              await db.collection(entry.collection)
-                .doc(res.data[0]._id).update({ ...entry.data, _updatedAt: now });
-            } else {
-              await db.collection(entry.collection)
-                .add({ ...entry.data, ...entry.where, _createdAt: now, _updatedAt: now });
+            try {
+              const res = await db.collection(entry.collection)
+                .where(entry.where).limit(1).get();
+              if (res?.data?.length > 0) {
+                await db.collection(entry.collection)
+                  .doc(res.data[0]._id).update({ ...entry.data, _updatedAt: now });
+              } else {
+                await db.collection(entry.collection)
+                  .add({ ...entry.data, ...entry.where, _createdAt: now, _updatedAt: now });
+              }
+            } catch (innerErr: any) {
+              if (innerErr?.message?.includes('collection not found') || innerErr?.code === 'DATABASE_COLLECTION_NOT_EXIST') {
+                await db.collection(entry.collection)
+                  .add({ ...entry.data, ...entry.where, _createdAt: now, _updatedAt: now });
+              } else {
+                throw innerErr;
+              }
             }
           }
           break;

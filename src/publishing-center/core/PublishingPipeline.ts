@@ -732,7 +732,8 @@ export class PublishingPipeline {
     } else {
       // 降级到 inline 模式（仅 HTML 内容，srcDoc 方式）
       context.data.set('hostingType', 'inline');
-      context.data.set('cdnUrl', `local://game/${config.gameId}/${entryPoint}`);
+      // inline 模式下不设置 cdnUrl，GamePlay 会从 CloudBase/本地缓存加载 HTML 内容用 srcDoc 渲染
+      context.data.set('cdnUrl', undefined);
       context.data.set('normalizedEntryPoint', entryPoint);
       logger.warning('降级到 inline 模式（服务端不可用）', PublishStep.PUBLISH);
     }
@@ -970,7 +971,8 @@ export class PublishingPipeline {
             schemaToItem.itemId = (v.data && v.data.effect) || (v.data && v.data.effectType) || v.schemaName;
             schemaToItem.itemName = (v.data && v.data.name) || v.schemaName;
           } else {
-            schemaToItem.itemId = (v.data && v.data.effectType) || v.schemaName;
+            // 所有自定义 schema（ra2-item 等）：优先 effect → effectType → schemaName
+            schemaToItem.itemId = (v.data && v.data.effect) || (v.data && v.data.effectType) || v.schemaName;
             schemaToItem.itemName = (v.data && v.data.name) || v.schemaName;
           }
         } catch(e) { console.error('[AllinONE] 解析失败:', e); return; }
@@ -1985,15 +1987,18 @@ export class PublishingPipeline {
         }
 
         // 仍然触发 CustomEvent（兼容游戏方手动监听）
+        // 🆕 增加 voucherData 字段，携带 Schema 道具完整数据（effect/effectCode/effectScript/params/icon）
         var detail = {
           code: res.code,
           itemId: res.itemId,
           itemName: res.itemName,
           quantity: res.quantity || 1,
           effects: res.effects || {},
-          effectType: res.effectType
+          effectType: res.effectType,
+          voucherData: res.voucherData || null,
+          schemaName: res.schemaName || null
         };
-        window.dispatchEvent(new CustomEvent('allinone-item-redeemed', { detail: detail }));
+        // ⚠️ 只分发一种格式（allinone:item-redeemed），避免监听两种格式的游戏收到2个道具
         window.dispatchEvent(new CustomEvent('allinone:item-redeemed', { detail: detail }));
       } else {
         showStatus('&#10007; ' + (res.message || '兑换失败'), 'error');
@@ -2023,7 +2028,8 @@ export class PublishingPipeline {
           schemaToItem.itemId = (v.data && v.data.effect) || (v.data && v.data.effectType) || v.schemaName;
           schemaToItem.itemName = (v.data && v.data.name) || v.schemaName;
         } else {
-          schemaToItem.itemId = (v.data && v.data.effectType) || v.schemaName;
+          // 所有自定义 schema（ra2-item 等）：优先 effect → effectType → schemaName
+          schemaToItem.itemId = (v.data && v.data.effect) || (v.data && v.data.effectType) || v.schemaName;
           schemaToItem.itemName = (v.data && v.data.name) || v.schemaName;
         }
       } catch(e) { console.error('[AllinONE SDK] 解析失败:', e); return; }
@@ -2040,8 +2046,8 @@ export class PublishingPipeline {
         source: 'ugc',
         voucherData: v.data
       };
+      // ⚠️ 只分发一种格式（allinone:item-redeemed），避免监听两种格式的游戏收到2个道具
       window.dispatchEvent(new CustomEvent('allinone:item-redeemed', { detail: detail }));
-      window.dispatchEvent(new CustomEvent('allinone-item-redeemed', { detail: detail }));
     }
   });
 
@@ -2052,7 +2058,7 @@ export class PublishingPipeline {
 
   window.AllinONE.onItemRedeemed = function(callback) {
     if (typeof callback === 'function') {
-      window.addEventListener('allinone-item-redeemed', function(e) {
+      window.addEventListener('allinone:item-redeemed', function(e) {
         callback(e.detail);
       });
     }

@@ -209,7 +209,8 @@
     renderCustomPowerUps();
   }
 
-  // ============ 接收平台道具 ============
+  // ============ 接收平台道具（双通道） ============
+  // 通道 1: EXTENSION_VOUCHER postMessage（UGC 道具工坊下发）
   window.addEventListener('message', function(e) {
     if (e.data && e.data.type === 'EXTENSION_VOUCHER') {
       var v = e.data.voucher;
@@ -234,6 +235,37 @@
     }
   });
 
+  // 通道 2: allinone-item-redeemed CustomEvent（兑换码兑换下发）
+  // ⚠️ detail.effectType 固定为 'custom'，真正的效果名在 detail.itemId 中
+  var _redeemedIds = {};
+  function handleRedeemedItem(detail) {
+    var key = detail.code || detail.itemId;
+    if (_redeemedIds[key]) return;  // 去重
+    _redeemedIds[key] = true;
+
+    var voucherData = detail.voucherData || {};
+    // 优先从 voucherData 读 effect，回退到 detail.itemId
+    var realEffect = voucherData.effect || null;
+    if (!realEffect && detail.itemId && detail.itemId !== 'custom') {
+      realEffect = detail.itemId;
+    }
+    if (!realEffect) return;
+
+    customPowerUps.push({
+      id: key || ('ugc_' + Date.now()),
+      name: voucherData.name || detail.itemName || '道具',
+      effect: realEffect,
+      params: voucherData.params || detail.effects || {},
+      description: voucherData.description || '',
+      effectCode: voucherData.effectCode || null,
+      icon: voucherData.icon || '⚡',
+    });
+    renderCustomPowerUps();
+    showToast('🎁 获得道具: ' + (detail.itemName || realEffect), 'success');
+  }
+  window.addEventListener('allinone-item-redeemed', function(e) { handleRedeemedItem(e.detail); });
+  window.addEventListener('allinone:item-redeemed', function(e) { handleRedeemedItem(e.detail); });
+
   renderCustomPowerUps();
 })();
 </script>
@@ -246,6 +278,22 @@
 | `EFFECT_HANDLERS` | 根据你的游戏逻辑，定义每个效果的具体实现 |
 | `sandboxFn` 参数 | 注入你游戏的变量（如 `game`、`board`、`player` 等） |
 | `window.myGame` | 替换为你的游戏实例引用 |
+
+> ### ⚠️ 重要：道具下发的双通道机制
+>
+> 平台通过**两条通道**向游戏下发道具，游戏必须同时监听：
+>
+> | 通道 | 事件 | 触发场景 |
+> |------|------|----------|
+> | postMessage | `EXTENSION_VOUCHER` | UGC 道具工坊创作后下发 |
+> | CustomEvent | `allinone-item-redeemed` | **兑换码兑换**后下发 |
+>
+> **CustomEvent 的 detail 结构注意**：
+> - `detail.effectType` 固定为 `'custom'`（**不是**真正的效果名，不要用）
+> - `detail.itemId` 才是真正的效果名（如 `'become_big'`、`'add_score'`）
+> - `detail.voucherData` 可能不存在（兑换码路径不携带此字段）
+>
+> 如果只监听了 `EXTENSION_VOUCHER`，通过兑换码兑换的道具将无法到达游戏。
 
 ---
 
@@ -450,7 +498,9 @@
 
 - [ ] 添加了 UGC 道具栏 CSS + HTML
 - [ ] 添加了 Toast 通知系统
-- [ ] 添加了 EXTENSION_VOUCHER 监听器
+- [ ] 添加了 EXTENSION_VOUCHER 监听器（通道 1：UGC 道具）
+- [ ] 添加了 allinone-item-redeemed CustomEvent 监听器（通道 2：兑换码道具）
+- [ ] CustomEvent 中正确从 `detail.itemId` 读取效果名（而非 `detail.effectType`）
 - [ ] 实现了 EFFECT_HANDLERS（至少 3 种效果）
 - [ ] 实现了 registerDynamicEffect 沙箱引擎
 - [ ] 沙箱变量正确注入游戏实例
@@ -471,4 +521,5 @@
 - [ ] 游戏能正常打开并运行
 - [ ] 道具栏在游戏底部显示
 - [ ] 从道具工坊创建道具后，游戏中能看到并使用
+- [ ] 通过兑换码兑换道具后，游戏中能看到并使用
 - [ ] effectCode 自定义效果能正常执行

@@ -200,7 +200,8 @@ export function createGamesPublicRouter(
         "media-src 'self' data: blob:; " +
         "font-src 'self' data:; " +
         "connect-src 'self' *; " +
-        "worker-src 'self' blob:;"
+        "worker-src 'self' blob:; " +
+        "manifest-src 'self' data:;"
       );
 
       // 覆盖 Helmet 的其他限制性头

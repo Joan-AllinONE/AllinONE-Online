@@ -1,0 +1,14 @@
+{
+  "envId": "allinonegaming-d4gmsmrzz573264f6",
+  "functionRoot": "cloudfunctions",
+  "functions": [
+    {
+      "name": "gamesApi",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
+      "installDependency": true,
+      "timeout": 15,
+      "memorySize": 256
+    }
+  ]
+}

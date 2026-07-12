@@ -1701,7 +1701,7 @@ AllinONE.onItemRedeemed(function(data) {
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-cyan-400 mt-0.5">•</span>
-                <span><strong className="text-white">效果执行：</strong>由游戏方在 <code className="px-1 py-0.5 bg-slate-700 rounded text-cyan-300">allinone-item-redeemed</code> 事件中自行处理，完全可控。</span>
+                <span><strong className="text-white">效果执行：</strong>由游戏方在 <code className="px-1 py-0.5 bg-slate-700 rounded text-cyan-300">allinone:item-redeemed</code> 事件中自行处理，完全可控。</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-cyan-400 mt-0.5">•</span>
@@ -1779,7 +1779,7 @@ AllinONE.onItemRedeemed(function(data) {
               <p><span className="text-white font-medium">🌟 分数加成</span> — 扫描全局变量中的 <code className="px-1 py-0.5 bg-slate-700 rounded">score</code>、<code className="px-1 py-0.5 bg-slate-700 rounded">points</code>、<code className="px-1 py-0.5 bg-slate-700 rounded">multiplier</code> 等，按倍率修改。</p>
               <p><span className="text-white font-medium">❤️ 额外生命</span> — 扫描 <code className="px-1 py-0.5 bg-slate-700 rounded">life</code>、<code className="px-1 py-0.5 bg-slate-700 rounded">health</code>、<code className="px-1 py-0.5 bg-slate-700 rounded">hp</code> 等变量，自动增加值。</p>
               <p><span className="text-white font-medium">⏱️ 时间奖励</span> — 扫描 <code className="px-1 py-0.5 bg-slate-700 rounded">time</code>、<code className="px-1 py-0.5 bg-slate-700 rounded">timer</code>、<code className="px-1 py-0.5 bg-slate-700 rounded">countdown</code> 等，增加倒计时。</p>
-              <p><span className="text-white font-medium">📦 自定义</span> — 仅透传数据到 <code className="px-1 py-0.5 bg-slate-700 rounded">allinone-item-redeemed</code> 事件，需游戏方自行监听处理。</p>
+              <p><span className="text-white font-medium">📦 自定义</span> — 仅透传数据到 <code className="px-1 py-0.5 bg-slate-700 rounded">allinone:item-redeemed</code> 事件，需游戏方自行监听处理。</p>
             </div>
           </section>
         </div>
@@ -1894,7 +1894,7 @@ const CONFIG_KEY = '__ALLINONE_CONFIG__';`}</pre>
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-red-400 mt-0.5">❌</span>
-                <span><strong className="text-white">不要同时监听两个事件名。</strong> SDK 同时分发 <code className="px-1 py-0.5 bg-slate-700 rounded text-amber-300">allinone:item-redeemed</code> 和 <code className="px-1 py-0.5 bg-slate-700 rounded text-amber-300">allinone-item-redeemed</code>，只监听一个即可，否则会重复计数。</span>
+                <span><strong className="text-white">不要同时监听两个事件名。</strong> 平台现在只分发 <code className="px-1 py-0.5 bg-slate-700 rounded text-amber-300">allinone:item-redeemed</code> 一种格式（旧格式 <code className="px-1 py-0.5 bg-slate-700 rounded text-amber-300">allinone-item-redeemed</code> 已废弃），只监听新格式即可。</span>
               </li>
             </ul>
           </section>
@@ -1933,7 +1933,7 @@ const CONFIG_KEY = '__ALLINONE_CONFIG__';`}</pre>
                   ['1', '在 &lt;head&gt; 引入 SDK', '<code class="px-1 py-0.5 bg-slate-700 rounded text-blue-300">&lt;script src="https://cdn.allinone.game/sdk/v1/standard-sdk.js"&gt;&lt;/script&gt;</code>'],
                   ['2', '定义道具 + 发送 PROTOCOL:READY', '声明 REDEEM_ITEMS，通过 postMessage 发送协议就绪信号'],
                   ['3', '实现效果处理函数', '为每个 itemId 编写效果逻辑（如 g.moveSpeed *= 0.6 降低难度）'],
-                  ['4', '监听兑换事件', '监听 allinone-item-redeemed 和 REDEEM_RESULT 消息'],
+                  ['4', '监听兑换事件', '监听 allinone:item-redeemed 和 REDEEM_RESULT 消息'],
                   ['5', '打包单文件 ZIP 上传', '所有代码内联到一个 index.html，平台自动检测 SDK 选择 Mode B'],
                 ].map(([num, title, desc]) => (
                   <div key={num} className="flex items-start gap-3">
@@ -1995,7 +1995,7 @@ const CONFIG_KEY = '__ALLINONE_CONFIG__';`}</pre>
               <CheckCircle className="w-4 h-4" />
               让 AI 帮您自动适配
             </h5>
-            <p className="mb-3">项目中已提供两份 AI 适配文档，选择对应模式复制给 AI 助手，附上游戏文件即可自动完成接入：</p>
+            <p className="mb-3">项目中已提供 AI 适配文档，选择对应模式复制给 AI 助手，附上游戏文件即可自动完成接入：</p>
             <div className="flex flex-wrap items-center gap-3">
               <a
                 href="/docs/ai-game-integration-prompt.md"
@@ -2013,10 +2013,55 @@ const CONFIG_KEY = '__ALLINONE_CONFIG__';`}</pre>
                 <Wand2 className="w-4 h-4" />
                 Mode B 适配文档
               </a>
+              <a
+                href="/docs/allinone-publishing-guide.md"
+                download="allinone-publishing-guide.md"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-lg font-medium text-sm hover:from-green-400 hover:to-emerald-400 transition-all"
+              >
+                <BookOpen className="w-4 h-4" />
+                发布完整指南
+              </a>
             </div>
+
+            {/* 发布完整指南 - 详细说明 */}
+            <div className="mt-4 p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg">
+              <p className="text-xs text-emerald-300 font-medium mb-2 flex items-center gap-1.5">
+                <BookOpen className="w-3.5 h-3.5" />
+                发布完整指南（推荐首次使用）
+              </p>
+              <p className="text-xs text-gray-400 mb-2">
+                包含从 HTML 集成到发布上线的全流程说明，以及双通道道具接收规范、SOP 定义模板和检查清单。适合需要完整了解发布流程的开发者。
+              </p>
+              <p className="text-xs text-gray-500 mb-2">提示词（复制给 AI）：</p>
+              <div className="max-h-28 overflow-y-auto p-2.5 bg-[#0F0F23]/60 rounded-lg border border-slate-700/30 mb-2">
+                <pre className="text-xs text-gray-400 whitespace-pre-wrap font-mono leading-relaxed">{`你是一个 AllinONE 游戏平台的技术专家。请按照附件中的《发布完整指南》帮我将下面的 HTML 游戏改造为 AllinONE 兼容版本。
+
+## 要求
+1. 按照指南 §2 在游戏 HTML 中集成 AllinONE 代码（UGC 道具栏 + Toast + 双通道道具接收）
+   - 通道 1：EXTENSION_VOUCHER postMessage（UGC 道具工坊）
+   - 通道 2：allinone:item-redeemed CustomEvent（兑换码兑换）
+   - ⚠️ CustomEvent 中 effectType 固定为 'custom'，真正效果名在 detail.itemId 中
+2. 实现 EFFECT_HANDLERS 效果表（根据游戏逻辑定义 3-7 种内置效果）
+3. 实现 effectCode 沙箱引擎（安全编译 + 执行自定义效果函数）
+4. 按照指南 §4 生成 GameItemSop JSON（含 schemaName/aiPrompt/availableEffects/constraints/forbidden/presetItems）
+5. 推荐 Skills 和兑换道具配置
+6. 按照指南 §7 检查清单逐项验证
+
+## 游戏代码
+（粘贴你的 HTML）`}</pre>
+              </div>
+              <button onClick={() => {
+                navigator.clipboard.writeText(`你是一个 AllinONE 游戏平台的技术专家。请按照附件中的《发布完整指南》帮我将下面的 HTML 游戏改造为 AllinONE 兼容版本。\n\n## 要求\n1. 按照指南 §2 在游戏 HTML 中集成 AllinONE 代码（UGC 道具栏 + Toast + 双通道道具接收）\n   - 通道 1：EXTENSION_VOUCHER postMessage（UGC 道具工坊）\n   - 通道 2：allinone:item-redeemed CustomEvent（兑换码兑换）\n   - ⚠️ CustomEvent 中 effectType 固定为 'custom'，真正效果名在 detail.itemId 中\n2. 实现 EFFECT_HANDLERS 效果表（根据游戏逻辑定义 3-7 种内置效果）\n3. 实现 effectCode 沙箱引擎（安全编译 + 执行自定义效果函数）\n4. 按照指南 §4 生成 GameItemSop JSON（含 schemaName/aiPrompt/availableEffects/constraints/forbidden/presetItems）\n5. 推荐 Skills 和兑换道具配置\n6. 按照指南 §7 检查清单逐项验证\n\n## 游戏代码\n（粘贴你的 HTML）`);
+                toast.success('发布指南 AI 提示词已复制到剪贴板');
+              }} className="px-3 py-1.5 text-xs bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 rounded-md hover:bg-emerald-500/25 transition-colors">
+                📋 复制完整指南提示词
+              </button>
+            </div>
+
             <p className="text-xs text-gray-500 mt-2">
               文件位置：<code className="px-1.5 py-0.5 bg-slate-700 rounded text-gray-300">docs/ai-game-integration-prompt.md</code> (Mode A) ｜ 
-              <code className="px-1.5 py-0.5 bg-slate-700 rounded text-gray-300">docs/ai-game-integration-prompt-mode-b.md</code> (Mode B)
+              <code className="px-1.5 py-0.5 bg-slate-700 rounded text-gray-300">docs/ai-game-integration-prompt-mode-b.md</code> (Mode B) ｜
+              <code className="px-1.5 py-0.5 bg-slate-700 rounded text-gray-300">docs/allinone-publishing-guide.md</code> (完整指南)
             </p>
           </section>
         </div>
@@ -2050,7 +2095,7 @@ const CONFIG_KEY = '__ALLINONE_CONFIG__';`}</pre>
             },
             {
               q: '道具兑换后游戏完全没有效果，怎么办？',
-              a: '请检查：1) 协议模式是否正确——未集成 SDK 的游戏请使用 Mode A；2) 道具的「效果类型」是否选择了合适的类型（如「难度降低」对应跳帧）；3) Mode B 模式下是否监听了 allinone-item-redeemed 事件。如在兑换条输入兑换码后无反应，请检查控制台 REDEEM_RESULT 消息。'
+              a: '请检查：1) 协议模式是否正确——未集成 SDK 的游戏请使用 Mode A；2) 道具的「效果类型」是否选择了合适的类型（如「难度降低」对应跳帧）；3) Mode B 模式下是否监听了 allinone:item-redeemed 事件。如在兑换条输入兑换码后无反应，请检查控制台 REDEEM_RESULT 消息。'
             },
             {
               q: '兑换码和道具凭证有什么关系？',

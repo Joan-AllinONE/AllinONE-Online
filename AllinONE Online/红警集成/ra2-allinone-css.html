@@ -1,0 +1,114 @@
+<!-- ============ AllinONE 集成代码 START ============ -->
+<style>
+  /* AllinONE UGC 道具栏 */
+  .ugc-bar {
+    position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center; padding: 8px 16px;
+    background: rgba(0,0,0,0.85); border-radius: 12px; z-index: 9999;
+    font-size: 14px; color: #fff; cursor: default;
+    backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.15);
+  }
+  .ugc-label {
+    color: #ff4444; font-weight: bold; font-size: 12px;
+    padding-right: 8px; border-right: 1px solid rgba(255,255,255,0.3);
+  }
+  .ugc-empty { color: #888; font-size: 12px; }
+  .ugc-item {
+    padding: 4px 10px; background: rgba(255,255,255,0.1); border-radius: 8px;
+    cursor: pointer; transition: background 0.2s;
+  }
+  .ugc-item:hover { background: rgba(255,255,255,0.25); }
+
+  /* Toast 提示 */
+  #toast-container {
+    position: fixed; top: 20px; right: 20px; z-index: 10000;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .toast {
+    padding: 10px 20px; background: rgba(0,0,0,0.85); color: #fff;
+    border-radius: 8px; border-left: 4px solid #4caf50; font-size: 14px;
+    transform: translateX(120%); transition: transform 0.3s ease;
+    backdrop-filter: blur(4px);
+  }
+  .toast.show { transform: translateX(0); }
+
+  /* 状态徽章 */
+  .allinone-badge {
+    position: fixed; top: 16px; left: 16px; padding: 6px 14px;
+    color: #fff; font-size: 13px; border-radius: 8px; z-index: 9999;
+    backdrop-filter: blur(4px); animation: badge-pulse 1.5s infinite;
+  }
+  @keyframes badge-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  /* 闪光脉冲 */
+  .allinone-flash {
+    position: fixed; inset: 0; opacity: 0; z-index: 9997;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+  }
+  .allinone-flash.active { opacity: 0.25; }
+
+  /* 地雷标记 */
+  .allinone-mine-marker {
+    position: fixed; width: 20px; height: 20px;
+    background: rgba(255,0,0,0.6); border-radius: 50%;
+    transform: translate(-50%, -50%);
+    animation: mine-pulse 0.8s infinite;
+    z-index: 9998;
+  }
+  @keyframes mine-pulse {
+    0%, 100% { box-shadow: 0 0 4px rgba(255,0,0,0.6); }
+    50% { box-shadow: 0 0 16px rgba(255,0,0,0.9); }
+  }
+  .allinone-mine-ghost {
+    position: fixed; width: 24px; height: 24px;
+    background: rgba(255,0,0,0.3); border: 2px solid rgba(255,0,0,0.6);
+    border-radius: 50%; transform: translate(-50%, -50%);
+    animation: mine-pulse 1s infinite;
+    pointer-events: none;
+  }
+  .allinone-mine-boom {
+    position: fixed; width: 60px; height: 60px;
+    background: radial-gradient(circle, #ff6600, #ff3300, transparent);
+    border-radius: 50%; transform: translate(-50%, -50%);
+    animation: boom-expand 0.8s ease-out forwards;
+    z-index: 9999;
+  }
+  @keyframes boom-expand {
+    0% { width: 10px; height: 10px; opacity: 1; }
+    50% { width: 120px; height: 120px; opacity: 0.8; }
+    100% { width: 200px; height: 200px; opacity: 0; }
+  }
+
+  /* 空投箱 */
+  .allinone-crate {
+    position: fixed; width: 50px; height: 50px;
+    background: #c8a82e; border: 3px solid #8b6914; border-radius: 4px;
+    transform: translateX(-50%);
+    animation: crate-drop 2s ease-in forwards;
+    z-index: 9999;
+  }
+  .allinone-crate-landing {
+    position: fixed; width: 10px; height: 10px;
+    background: rgba(200,168,46,0.8); border-radius: 50%;
+    animation: crate-land 0.5s ease-out forwards;
+  }
+  @keyframes crate-drop {
+    0% { top: -80px; opacity: 1; }
+    90% { top: calc(100vh - 140px); opacity: 1; }
+    100% { top: calc(100vh - 140px); opacity: 0; }
+  }
+  @keyframes crate-land {
+    0% { width: 20px; height: 20px; opacity: 1; }
+    100% { width: 180px; height: 180px; opacity: 0; }
+  }
+</style>
+
+<div id="ugc-bar" class="ugc-bar">
+  <span class="ugc-label">PROPS</span>
+  <span class="ugc-empty">No items yet</span>
+</div>
+<div id="toast-container"></div>

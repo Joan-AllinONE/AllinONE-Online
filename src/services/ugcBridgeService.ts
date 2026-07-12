@@ -571,6 +571,7 @@ export class UGCBridgeService {
                 effectCodeEnabled: sop.effectCodeEnabled,
                 allowedOperators: ['sequence', 'parallel', 'chain'],
                 maxScriptDepth: 5,
+                effectCodeSandbox: sop.effectCodeSandbox || {},
               },
             },
           };
@@ -648,6 +649,10 @@ export class UGCBridgeService {
               effectCodeEnabled: sop.effectCodeEnabled,
               allowedOperators: ['sequence', 'parallel', 'chain'],
               maxScriptDepth: 5,
+              // 🆕 effectCodeSandbox: 从 SOP JSON 中提取的沙箱变量配置
+              // 包含游戏方注册的安全桥接对象描述（如 "红警桥接对象 window.__ra2allinone"）
+              // 用于 effectCode 安全校验时提取允许的 window.xxx 白名单
+              effectCodeSandbox: sop.effectCodeSandbox || {},
             },
           },
         },

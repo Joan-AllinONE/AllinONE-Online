@@ -1,0 +1,9 @@
+{
+  "name": "gamesApi",
+  "version": "1.0.0",
+  "description": "AllinONE 已发布游戏列表 HTTP 云函数",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.18.1"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "核弹空投",
+  "effect": "nuclear_strike_ec",
+  "params": {},
+  "description": "在地图随机位置空投一枚核弹，3x3格范围爆炸，爆炸中心5秒内敌方单位陷入恐慌（攻击力减半）。基于 effectCode 调用引擎 nuclearStrike 命令实现。",
+  "icon": "☢️",
+  "effectCode": "function(params){var game=arguments[0];if(!game||!game.world)return{error:true,message:'游戏未启动'};var w=game.world;var rx=Math.floor(Math.random()*w.terrain.width);var ry=Math.floor(Math.random()*w.terrain.height);var C=256;game.emit({kind:'nuclearStrike',owner:game.localPlayerId,x:rx*C+C/2,y:ry*C+C/2,radiusCells:3,damage:320,panicSec:5});return{message:'☢️ 核弹空投！3x3范围爆炸，中心敌军恐慌5秒（攻击减半）'};}"
+}

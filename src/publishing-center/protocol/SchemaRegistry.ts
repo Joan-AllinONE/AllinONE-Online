@@ -406,13 +406,37 @@ export class SchemaRegistry {
           errors.push('使用 effectCode 时必须指定 effect 字段作为效果名称');
         }
         // 安全检查：禁止危险关键词
+        // ⚠️ 从 Schema 的 effectCodeSandbox 配置中提取允许的全局桥接对象（如 window.__ra2allinone）
+        // 这些是游戏方注册的安全访问点，effectCode 通过沙箱参数（如 game）或白名单桥接名访问
+        const sandboxConfig = schema.aiGuide?.creationTiers?.advanced?.effectCodeSandbox || {};
+        const allowedGlobalPatterns: string[] = [];
+        for (const varName of Object.keys(sandboxConfig)) {
+          const desc = sandboxConfig[varName];
+          // 如果沙箱变量描述包含 window.xxx 模式（如 "红警桥接对象 window.__ra2allinone"），提取并加入白名单
+          const windowMatch = desc.match(/window\.[\w_]+/g);
+          if (windowMatch) {
+            allowedGlobalPatterns.push(...windowMatch);
+          }
+        }
         const blockedPatterns = [
           'eval(', 'new Function', 'import(', 'require(', '__proto__',
-          'window.', 'document.', 'parent.', 'top.', 'globalThis',
+          'document.', 'parent.', 'top.', 'globalThis',
           'fetch(', 'XMLHttpRequest', 'WebSocket', 'Worker(',
           'localStorage', 'sessionStorage',
         ];
         const lowerCode = data.effectCode.toLowerCase();
+        // 检查 window. 访问：仅允许白名单中的桥接对象，禁止其他 window. 访问
+        const windowDotPattern = /window\.([\w_]+)/gi;
+        let windowMatch;
+        while ((windowMatch = windowDotPattern.exec(data.effectCode)) !== null) {
+          const fullMatch = windowMatch[0]; // e.g. "window.__ra2allinone"
+          const isAllowed = allowedGlobalPatterns.some(p => p.toLowerCase() === fullMatch.toLowerCase());
+          if (!isAllowed) {
+            errors.push(`effectCode 包含禁止关键词: ${fullMatch}（仅允许: ${allowedGlobalPatterns.join(', ') || '无'}）`);
+            break;
+          }
+        }
+        // 检查其他危险关键词
         for (const pattern of blockedPatterns) {
           if (lowerCode.includes(pattern.toLowerCase())) {
             errors.push(`effectCode 包含禁止关键词: ${pattern}`);

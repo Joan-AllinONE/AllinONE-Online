@@ -47,6 +47,12 @@ export class VoucherDatabase {
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly PERSIST_DELAY = 500; // 500ms 批量窗口
 
+  // 🔒 CloudBase 增量同步：仅同步变更的条目，避免全量入队导致队列洪水
+  private cloudSyncDirtyVouchers = new Set<string>();
+  private cloudSyncDirtyTransactions = new Set<string>();
+  private cloudSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly CLOUD_SYNC_DELAY = 2000; // 2s 防抖窗口
+
   private constructor() {
     this.initCache();
   }
@@ -203,6 +209,7 @@ export class VoucherDatabase {
     }
 
     this.voucherCache.set(voucher.id, voucher);
+    this.cloudSyncDirtyVouchers.add(voucher.id);
     this.persistVouchers();
   }
 
@@ -215,6 +222,7 @@ export class VoucherDatabase {
     }
 
     this.voucherCache.set(voucher.id, voucher);
+    this.cloudSyncDirtyVouchers.add(voucher.id);
     this.persistVouchers();
   }
 
@@ -327,6 +335,7 @@ export class VoucherDatabase {
    */
   insertTransaction(transaction: Transaction): void {
     this.transactionCache.set(transaction.id, transaction);
+    this.cloudSyncDirtyTransactions.add(transaction.id);
     this.persistTransactions();
   }
 
@@ -334,7 +343,10 @@ export class VoucherDatabase {
    * 批量插入交易记录
    */
   insertTransactions(transactions: Transaction[]): void {
-    transactions.forEach(t => this.transactionCache.set(t.id, t));
+    transactions.forEach(t => {
+      this.transactionCache.set(t.id, t);
+      this.cloudSyncDirtyTransactions.add(t.id);
+    });
     this.persistTransactions();
   }
 
@@ -526,13 +538,21 @@ export class VoucherDatabase {
     // 清空现有数据
     this.voucherCache.clear();
     this.transactionCache.clear();
+    this.cloudSyncDirtyVouchers.clear();
+    this.cloudSyncDirtyTransactions.clear();
 
     // 导入凭证
-    data.vouchers.forEach(v => this.voucherCache.set(v.id, v));
+    data.vouchers.forEach(v => {
+      this.voucherCache.set(v.id, v);
+      this.cloudSyncDirtyVouchers.add(v.id);
+    });
     this.persistVouchers();
 
     // 导入交易
-    data.transactions.forEach(t => this.transactionCache.set(t.id, t));
+    data.transactions.forEach(t => {
+      this.transactionCache.set(t.id, t);
+      this.cloudSyncDirtyTransactions.add(t.id);
+    });
     this.persistTransactions();
   }
 
@@ -556,28 +576,69 @@ export class VoucherDatabase {
 
   private syncVouchersToCloud(): void {
     if (typeof window === 'undefined') return;
-    const vouchers = Array.from(this.voucherCache.values());
-    // 全量入队，不再截断
-    for (const v of vouchers) {
-      writeQueue.enqueue({
-        collection: 'vouchers',
-        operation: 'upsert',
-        data: v as any,
-      });
+    // 增量同步：仅入队标记为脏的条目
+    for (const id of this.cloudSyncDirtyVouchers) {
+      const v = this.voucherCache.get(id);
+      if (v) {
+        writeQueue.enqueue({
+          collection: 'vouchers',
+          operation: 'upsert',
+          data: v as any,
+        });
+      }
     }
+    this.cloudSyncDirtyVouchers.clear();
+    // 启动防抖定时器（全量同步仅作为兜底，2s 后触发一次）
+    this.scheduleCloudSyncFallback();
   }
 
   private syncTransactionsToCloud(): void {
     if (typeof window === 'undefined') return;
-    const txs = Array.from(this.transactionCache.values());
-    // 全量入队，不再截断
-    for (const tx of txs) {
-      writeQueue.enqueue({
-        collection: 'voucher_transactions',
-        operation: 'upsert',
-        data: tx as any,
-      });
+    // 增量同步：仅入队标记为脏的条目
+    for (const id of this.cloudSyncDirtyTransactions) {
+      const tx = this.transactionCache.get(id);
+      if (tx) {
+        writeQueue.enqueue({
+          collection: 'voucher_transactions',
+          operation: 'upsert',
+          data: tx as any,
+        });
+      }
     }
+    this.cloudSyncDirtyTransactions.clear();
+    this.scheduleCloudSyncFallback();
+  }
+
+  /**
+   * 防抖全量同步兜底 — 2s 内无新变更时触发一次全量同步
+   * 确保即使增量标记遗漏，数据最终也会一致
+   */
+  private scheduleCloudSyncFallback(): void {
+    if (this.cloudSyncTimer) clearTimeout(this.cloudSyncTimer);
+    this.cloudSyncTimer = setTimeout(() => {
+      // 全量兜底：仅在没有脏标记且有缓存数据时才全量同步
+      if (this.cloudSyncDirtyVouchers.size === 0 && this.voucherCache.size > 0) {
+        const vouchers = Array.from(this.voucherCache.values()).slice(0, 200); // 限制 200 条兜底
+        for (const v of vouchers) {
+          writeQueue.enqueue({
+            collection: 'vouchers',
+            operation: 'upsert',
+            data: v as any,
+          });
+        }
+      }
+      if (this.cloudSyncDirtyTransactions.size === 0 && this.transactionCache.size > 0) {
+        const txs = Array.from(this.transactionCache.values()).slice(0, 100);
+        for (const tx of txs) {
+          writeQueue.enqueue({
+            collection: 'voucher_transactions',
+            operation: 'upsert',
+            data: tx as any,
+          });
+        }
+      }
+      this.cloudSyncTimer = null;
+    }, this.CLOUD_SYNC_DELAY);
   }
 
   async syncFromCloudBase(): Promise<void> {

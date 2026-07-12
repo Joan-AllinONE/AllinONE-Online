@@ -4,7 +4,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getPublishedGames, type PublishedGame } from '@/services/publishedGameService';
 import { platformBindingService, GameType, type PlatformBindingConfig } from '@/voucher-system';
 import { AuthContext } from '@/contexts/authContext';
-import { Coins, CheckCircle, AlertCircle, X } from 'lucide-react';
+import { isCloudBaseReady } from '@/services/cloudbase';
+import { writeQueue, type QueueStatus } from '@/services/writeQueue';
+import { Coins, CheckCircle, AlertCircle, X, Bug, Wifi, WifiOff, Database, Activity, RefreshCw } from 'lucide-react';
 
 interface GameCard {
   id: string;
@@ -95,6 +97,49 @@ export default function GameCenter() {
   const [publishedGames, setPublishedGames] = useState<GameCard[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
+  // ==================== 诊断面板状态 ====================
+  const [showDebug, setShowDebug] = useState(false);
+  const [debugInfo, setDebugInfo] = useState({
+    cloudBaseReady: false,
+    queueStatus: null as QueueStatus | null,
+    gamesSource: 'initializing' as 'cloudbase' | 'cache' | 'indexeddb' | 'none',
+    lastRefresh: '',
+    refreshCount: 0,
+    _fetchDone: false,
+  });
+  
+  // 定时刷新诊断信息
+  useEffect(() => {
+    const updateDebugInfo = () => {
+      const cbReady = isCloudBaseReady();
+      const qs = writeQueue.getStatus();
+      setDebugInfo(prev => ({
+        ...prev,
+        cloudBaseReady: cbReady,
+        queueStatus: qs,
+      }));
+    };
+
+    updateDebugInfo();
+    const timer = setInterval(updateDebugInfo, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // 监听存储变化时更新来源信息
+  useEffect(() => {
+    const onGamesUpdated = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setDebugInfo(prev => ({
+        ...prev,
+        lastRefresh: new Date().toLocaleTimeString(),
+        refreshCount: prev.refreshCount + 1,
+        gamesSource: detail?.count !== undefined ? 'cloudbase' : prev.gamesSource,
+      }));
+    };
+    window.addEventListener('games-list-updated', onGamesUpdated);
+    return () => window.removeEventListener('games-list-updated', onGamesUpdated);
+  }, []);
+  
   // 奖励提示状态
   const [rewardToast, setRewardToast] = useState<{
     show: boolean;
@@ -108,6 +153,18 @@ export default function GameCenter() {
     const loadPublishedGames = () => {
       try {
         const published = getPublishedGames();
+        // 诊断：判断数据来源
+        let source: 'cloudbase' | 'cache' | 'indexeddb' | 'none' = 'none';
+        if (published.length > 0) {
+          const hasCloudData = localStorage.getItem('allinone_published_games') !== null;
+          source = hasCloudData ? 'cache' : 'indexeddb';
+        }
+        setDebugInfo(prev => ({
+          ...prev,
+          gamesSource: source,
+          lastRefresh: published.length > 0 ? new Date().toLocaleTimeString() : prev.lastRefresh,
+        }));
+
         const formattedGames: GameCard[] = published.map(pg => ({
           id: pg.id,
           name: pg.name,
@@ -130,11 +187,16 @@ export default function GameCenter() {
 
     loadPublishedGames();
     
-    // 监听storage变化，实时更新
+    // 监听同页面 JS 派发的 games-list-updated 事件（CloudBase 刷新后触发）
+    const handleGameListUpdated = () => loadPublishedGames();
+    window.addEventListener('games-list-updated', handleGameListUpdated);
+    
+    // 监听 storage 变化（跨标签页同步）
     const handleStorageChange = () => loadPublishedGames();
     window.addEventListener('storage', handleStorageChange);
     
     return () => {
+      window.removeEventListener('games-list-updated', handleGameListUpdated);
       window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
@@ -525,6 +587,146 @@ export default function GameCenter() {
           ))}
         </div>
       </main>
+
+      {/* ==================== 诊断面板（开发/调试用） ==================== */}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
+        <AnimatePresence>
+          {showDebug && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-md rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-5 w-80 text-sm"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-indigo-500" />
+                  系统诊断
+                </h3>
+                <button
+                  onClick={() => setShowDebug(false)}
+                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
+                >
+                  <X className="w-4 h-4 text-slate-400" />
+                </button>
+              </div>
+
+              {/* CloudBase 状态 */}
+              <div className="mb-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-900/50">
+                <div className="flex items-center gap-2 mb-1.5">
+                  {debugInfo.cloudBaseReady ? (
+                    <Wifi className="w-4 h-4 text-green-500" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-red-400" />
+                  )}
+                  <span className="font-medium text-slate-700 dark:text-slate-200">
+                    CloudBase: {debugInfo.cloudBaseReady ? '已就绪' : '未就绪'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                  <Database className="w-3 h-3" />
+                  <span>
+                    数据来源: {
+                      debugInfo.gamesSource === 'cloudbase' ? '☁️ CloudBase' :
+                      debugInfo.gamesSource === 'cache' ? '💾 localStorage缓存' :
+                      debugInfo.gamesSource === 'indexeddb' ? '📦 IndexedDB缓存' :
+                      '❌ 无数据'
+                    }
+                  </span>
+                </div>
+                {debugInfo.lastRefresh && (
+                  <div className="text-xs text-slate-400 mt-1">
+                    最近刷新: {debugInfo.lastRefresh} (×{debugInfo.refreshCount})
+                  </div>
+                )}
+              </div>
+
+              {/* WriteQueue 状态 */}
+              {debugInfo.queueStatus && (
+                <div className="mb-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-900/50">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Activity className="w-4 h-4 text-amber-500" />
+                    <span className="font-medium text-slate-700 dark:text-slate-200">
+                      写入队列
+                    </span>
+                    {debugInfo.queueStatus.authBroken && (
+                      <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">
+                        Auth断裂
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span className="bg-white dark:bg-slate-800 rounded px-2 py-1 text-center">
+                      ⏳ 待处理 {debugInfo.queueStatus.pending}
+                    </span>
+                    <span className="bg-white dark:bg-slate-800 rounded px-2 py-1 text-center">
+                      ❌ 失败 {debugInfo.queueStatus.failed}
+                    </span>
+                    <span className="bg-white dark:bg-slate-800 rounded px-2 py-1 text-center">
+                      📦 共 {debugInfo.queueStatus.total}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs text-slate-400 mt-1.5">
+                    <span>已完成: {debugInfo.queueStatus.totalProcessed}</span>
+                    <span>累计失败: {debugInfo.queueStatus.totalFailed}</span>
+                  </div>
+                  {debugInfo.queueStatus.authPaused > 0 && (
+                    <div className="text-xs text-amber-600 mt-1">
+                      ⚠️ {debugInfo.queueStatus.authPaused} 项暂停（等待Auth恢复）
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 快速操作 */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    writeQueue.retryAll();
+                    setDebugInfo(prev => ({ ...prev, lastRefresh: new Date().toLocaleTimeString(), refreshCount: prev.refreshCount + 1 }));
+                  }}
+                  className="flex-1 py-1.5 px-3 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors flex items-center justify-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  重试失败项
+                </button>
+                <button
+                  onClick={() => {
+                    // 强制从 CloudBase 刷新
+                    import('@/services/publishedGameService').then(({ refreshGamesFromCloudBase }) => {
+                      refreshGamesFromCloudBase().then(count => {
+                        setDebugInfo(prev => ({
+                          ...prev,
+                          gamesSource: 'cloudbase' as const,
+                          lastRefresh: new Date().toLocaleTimeString(),
+                          refreshCount: prev.refreshCount + 1,
+                        }));
+                      });
+                    });
+                  }}
+                  className="flex-1 py-1.5 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors flex items-center justify-center gap-1"
+                >
+                  <Database className="w-3 h-3" />
+                  强制同步
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* 诊断触发按钮 */}
+        <button
+          onClick={() => setShowDebug(prev => !prev)}
+          className={`p-2.5 rounded-full shadow-lg transition-all ${
+            showDebug
+              ? 'bg-indigo-600 text-white'
+              : 'bg-white dark:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-700'
+          }`}
+          title="系统诊断"
+        >
+          <Bug className="w-5 h-5" />
+        </button>
+      </div>
     </div>
   );
 }

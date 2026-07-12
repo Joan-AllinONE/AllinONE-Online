@@ -62,8 +62,18 @@ if (!USE_MEMORY_DB) {
 
 // ============================================
 // 中间件：安全头 (S1-6)
+// 游戏文件路径跳过 CSP — 游戏运行在 sandbox iframe 中，
+// 由 games 路由自行设置宽松 CSP，Helmet 默认 CSP 会阻止内联脚本
 // ============================================
-app.use(helmet());
+const helmetDefault = helmet();
+const helmetNoCSP = helmet({ contentSecurityPolicy: false });
+app.use((req, res, next) => {
+  if (req.path.includes('/files/')) {
+    helmetNoCSP(req, res, next);
+  } else {
+    helmetDefault(req, res, next);
+  }
+});
 
 // ============================================
 // 中间件：Request ID (S3-2)

@@ -120,7 +120,8 @@ const FILES_STORAGE_PREFIX = 'allinone_game_files_';
 // ==================== 内存缓存 ====================
 
 let _publishedGamesCache: PublishedGame[] | null = null;
-let _cloudSyncInitiated = false;
+let _cloudRefreshRetries = 0;
+const MAX_CLOUD_REFRESH_RETRIES = 3;
 
 /** 清除缓存 */
 function invalidateGamesCache(): void {
@@ -217,21 +218,20 @@ async function loadGamesFromIDBCache(): Promise<PublishedGame[]> {
  * 这是数据的权威来源
  */
 async function loadGamesFromCloudBase(): Promise<PublishedGame[]> {
-  try {
-    const { isCloudBaseReady, getCloudBaseApp } = await import('./cloudbase');
-    if (!isCloudBaseReady()) return [];
-
-    const res = await getCloudBaseApp().database()
-      .collection('published_games')
-      .limit(500)
-      .get();
-
-    if (res.data.length === 0) return [];
-    return res.data as PublishedGame[];
-  } catch (e) {
-    console.warn('[PublishedGame] CloudBase 数据库读取失败:', e);
-    return [];
+  const { isCloudBaseReady, getCloudBaseApp } = await import('./cloudbase');
+  if (!isCloudBaseReady()) {
+    // 抛错而非返回 [] — 让重试机制感知到"未就绪 ≠ 空集合"
+    throw new Error('[PublishedGame] CloudBase 未就绪，无法加载游戏列表');
   }
+
+  const res = await getCloudBaseApp().database()
+    .collection('published_games')
+    .limit(500)
+    .get();
+
+  console.log(`[PublishedGame] CloudBase 返回 ${res.data.length} 条已发布游戏记录`);
+  // 兼容 CloudBase JSON 序列化丢失 undefined / Date 类型的情况
+  return (res.data as PublishedGame[]) || [];
 }
 
 /**
@@ -329,27 +329,55 @@ export function getPublishedGames(): PublishedGame[] {
     }).catch(() => {});
   }
 
-  // 异步从 CloudBase 刷新缓存（首次调用时触发一次）
-  if (!_cloudSyncInitiated) {
-    _cloudSyncInitiated = true;
-    refreshGamesFromCloudBase();
+  // 异步从 CloudBase 刷新缓存（带重试机制）
+  // 条件放宽：只要重试次数未达上限就允许触发刷新（空缓存总是触发，有缓存也触发首次刷新）
+  if (_cloudRefreshRetries < MAX_CLOUD_REFRESH_RETRIES && _publishedGamesCache.length === 0) {
+    scheduleCloudRefresh();
+  } else if (_cloudRefreshRetries === 0 && _publishedGamesCache.length > 0) {
+    // 有缓存时也触发一次后台刷新（静默更新）
+    scheduleCloudRefresh();
   }
 
   return _publishedGamesCache!;
 }
 
 /**
+ * 带重试的 CloudBase 刷新调度器
+ * 指数退避：1s → 2s → 4s，最多 3 次
+ */
+function scheduleCloudRefresh(): void {
+  refreshGamesFromCloudBase()
+    .then((count) => {
+      _cloudRefreshRetries = 0; // 成功，重置计数器
+      console.log(`[PublishedGame] CloudBase 刷新成功，${count} 个游戏`);
+    })
+    .catch((err) => {
+      _cloudRefreshRetries++;
+      if (_cloudRefreshRetries < MAX_CLOUD_REFRESH_RETRIES) {
+        const delay = Math.pow(2, _cloudRefreshRetries) * 1000;
+        console.warn(
+          `[PublishedGame] CloudBase 刷新失败，${delay / 1000}s 后重试 (${_cloudRefreshRetries}/${MAX_CLOUD_REFRESH_RETRIES})`
+        );
+        setTimeout(scheduleCloudRefresh, delay);
+      } else {
+        console.error('[PublishedGame] CloudBase 刷新已达最大重试次数，放弃');
+      }
+    });
+}
+
+/**
  * 从 CloudBase 刷新游戏列表缓存
  * 数据库是权威数据源，本地缓存仅用于加速
  */
-export async function refreshGamesFromCloudBase(): Promise<void> {
+export async function refreshGamesFromCloudBase(): Promise<number> {
   const cloudGames = await loadGamesFromCloudBase();
-  if (cloudGames.length > 0) {
-    // CloudBase 数据覆盖本地缓存（权威数据源）
-    saveGamesToCache(cloudGames);
-    window.dispatchEvent(new CustomEvent('games-list-updated'));
-    console.log(`[PublishedGame] 从 CloudBase 刷新缓存，${cloudGames.length} 个游戏`);
-  }
+  // 无论是否为空都更新缓存 + 派发事件（空也表示已同步过）
+  saveGamesToCache(cloudGames);
+  window.dispatchEvent(new CustomEvent('games-list-updated', {
+    detail: { count: cloudGames.length }
+  }));
+  console.log(`[PublishedGame] 从 CloudBase 刷新缓存，${cloudGames.length} 个游戏`);
+  return cloudGames.length;
 }
 
 /**
@@ -480,17 +508,47 @@ export async function saveGameFiles(
 
   // ① 上传到 CloudBase 云存储（主存储）
   import('./cloudbaseStorage').then(({ uploadGameFiles }) => {
-    uploadGameFiles(gameId, files.map(f => ({
+    const uploadFiles = files.map(f => ({
       name: f.name,
       path: f.path,
       content: typeof f.content === 'string' ? f.content : String(f.content),
-    }))).then(result => {
+    }));
+    
+    uploadGameFiles(gameId, uploadFiles).then(result => {
       if (result.success) {
         console.log(`[PublishedGame] 游戏文件已上传到云存储: ${gameId}, ${result.uploaded} 个文件`);
+        // 将 cloudFileID 清单写入 published_games 文档，使跨浏览器可下载
+        if (result.fileManifest.length > 0) {
+          writeQueue.enqueue({
+            collection: 'published_games',
+            operation: 'upsert',
+            where: { id: gameId },
+            data: { id: gameId, cloudFileManifest: result.fileManifest, _cloudFilesUpdatedAt: Date.now() },
+          });
+        }
       } else {
         console.warn(`[PublishedGame] 云存储上传部分失败: ${result.errors.join(', ')}`);
       }
     }).catch(() => {});
+
+    // ② 同时存储入口 HTML 内容到文档（跨浏览器立即可用，无需云存储下载）
+    // 找到第一个 HTML 文件作为入口内容
+    const htmlFile = uploadFiles.find(f => {
+      const name = (f.path || f.name).toLowerCase();
+      return name.endsWith('.html') || name.endsWith('.htm');
+    });
+    if (htmlFile) {
+      writeQueue.enqueue({
+        collection: 'published_games',
+        operation: 'upsert',
+        where: { id: gameId },
+        data: {
+          id: gameId,
+          entryHtmlContent: typeof htmlFile.content === 'string' ? htmlFile.content : String(htmlFile.content),
+          _entryHtmlUpdatedAt: Date.now(),
+        },
+      });
+    }
   }).catch(() => {});
 
   // ② 同时保存本地缓存（加速后续读取）
@@ -555,7 +613,22 @@ export async function loadGameFiles(gameId: string): Promise<StoredGameFile[] | 
     return JSON.parse(dbData) as StoredGameFile[];
   }
 
-  // ④ 从 CloudBase 云存储下载（最终兜底）
+  // ④ 从 CloudBase 文档中读取 entryHtmlContent（跨浏览器最快路径）
+  const inlineHtml = await loadEntryHtmlFromDocument(gameId);
+  if (inlineHtml) {
+    // 构造单文件清单（仅含入口 HTML），写入本地缓存加速后续
+    const singleFile: StoredGameFile = {
+      path: gameId + '.html',
+      name: gameId + '.html',
+      content: inlineHtml,
+      size: inlineHtml.length,
+    };
+    const json = JSON.stringify([singleFile]);
+    trySaveLS(gameId, json) || await saveToDB(gameId, json).catch(() => {});
+    return [singleFile];
+  }
+
+  // ⑤ 从 CloudBase 云存储下载（cloudFileManifest 方式）
   const cloudFiles = await loadGameFilesFromCloud(gameId);
   if (cloudFiles && cloudFiles.length > 0) {
     // 下载后写入本地缓存，加速下次读取
@@ -568,7 +641,41 @@ export async function loadGameFiles(gameId: string): Promise<StoredGameFile[] | 
 }
 
 /**
+ * 从 CloudBase 文档中读取存储的入口 HTML 内容
+ * 这是跨浏览器加载的最快路径 — 不需要云存储下载
+ */
+async function loadEntryHtmlFromDocument(gameId: string): Promise<string | null> {
+  try {
+    const { isCloudBaseReady, getCloudBaseApp } = await import('./cloudbase');
+    if (!isCloudBaseReady()) return null;
+
+    const db = getCloudBaseApp().database();
+    const res = await db.collection('published_games')
+      .where({ id: gameId })
+      .field({ entryHtmlContent: true })
+      .limit(1)
+      .get();
+
+    if (res?.data?.length > 0 && res.data[0].entryHtmlContent) {
+      console.log(`[PublishedGame] 从 CloudBase 文档加载了入口 HTML: ${gameId} (${res.data[0].entryHtmlContent.length} 字节)`);
+      return res.data[0].entryHtmlContent;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 从 CloudBase 云存储下载游戏文件
+ * 
+ * 策略：
+ * 1. 从 published_games 文档中读取 cloudFileManifest（上传时保存的 cloudFileID 清单）
+ * 2. 使用 getTempFileURL 获取每个文件的临时下载链接
+ * 3. fetch 下载内容，组装为 StoredGameFile[] 返回
+ * 
+ * 如果游戏文档中没有 cloudFileManifest，回退到尝试 getTempFileURL
+ * 直接构造路径（兼容旧数据，但不可靠）
  */
 async function loadGameFilesFromCloud(gameId: string): Promise<StoredGameFile[] | null> {
   try {
@@ -576,43 +683,110 @@ async function loadGameFilesFromCloud(gameId: string): Promise<StoredGameFile[] 
     if (!isCloudBaseReady()) return null;
 
     const app = getCloudBaseApp() as any;
-    // 获取游戏目录下所有文件的临时 URL
+    const db = app.database();
     const cloudPath = `games/${gameId}/`;
-    const result = await app.listFiles({ prefix: cloudPath, limit: 100 });
-    
-    if (!result?.fileList || result.fileList.length === 0) return null;
 
-    const files: StoredGameFile[] = [];
-    const errors: string[] = [];
-
-    // 逐个下载文件内容
-    for (const fileMeta of result.fileList) {
-      try {
-        const tempUrlResult = await app.getTempFileURL({ fileList: [fileMeta.fileid || fileMeta.Key || cloudPath + fileMeta.name] });
-        if (tempUrlResult?.fileList?.[0]?.tempFileURL) {
-          const url = tempUrlResult.fileList[0].tempFileURL;
-          const response = await fetch(url);
-          const content = await response.text();
-          const path = fileMeta.name || fileMeta.Key?.replace(cloudPath, '') || 'unknown';
-          files.push({
-            path,
-            name: path.split('/').pop() || path,
-            content,
-            size: fileMeta.size || content.length,
-          });
-        }
-      } catch (e) {
-        errors.push(`${fileMeta.name}: ${e instanceof Error ? e.message : String(e)}`);
+    // ① 尝试从游戏文档中读取 cloudFileManifest（新路径，可靠）
+    let fileManifest: Array<{ fileName: string; cloudFileID: string }> | null = null;
+    try {
+      const gameDoc = await db.collection('published_games')
+        .where({ id: gameId }).limit(1).get();
+      if (gameDoc?.data?.length > 0) {
+        const doc = gameDoc.data[0];
+        fileManifest = doc.cloudFileManifest || null;
       }
+    } catch { /* 文档不存在或读取失败 */ }
+
+    // ② 如果有清单，逐个下载
+    if (fileManifest && fileManifest.length > 0) {
+      return await downloadFilesFromManifest(app, fileManifest, cloudPath);
     }
 
-    if (errors.length > 0) {
-      console.warn(`[PublishedGame] 云存储文件下载部分失败: ${errors.join(', ')}`);
+    // ③ 无清单时回退：尝试直接构造路径下载（兼容旧数据）
+    console.log(`[PublishedGame] 无 cloudFileManifest，尝试直接路径下载: ${gameId}`);
+    return await downloadFilesFromPathGuess(app, cloudPath);
+
+  } catch (e) {
+    console.warn('[PublishedGame] 云存储文件加载失败:', e);
+    return null;
+  }
+}
+
+/** 从 cloudFileManifest 下载文件（可靠途径） */
+async function downloadFilesFromManifest(
+  app: any,
+  manifest: Array<{ fileName: string; cloudFileID: string }>,
+  _cloudPath: string
+): Promise<StoredGameFile[]> {
+  const cloudFileIDs = manifest.map(f => f.cloudFileID);
+  
+  // 批量获取临时下载 URL
+  const tempUrlResult = await app.getTempFileURL({ fileList: cloudFileIDs });
+  const urlMap = new Map<string, string>();
+  if (tempUrlResult?.fileList) {
+    for (const item of tempUrlResult.fileList) {
+      if (item.tempFileURL) {
+        urlMap.set(item.fileID, item.tempFileURL);
+      }
+    }
+  }
+
+  // 逐个下载文件内容
+  const files: StoredGameFile[] = [];
+  for (const m of manifest) {
+    const url = urlMap.get(m.cloudFileID);
+    if (!url) continue;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) continue;
+      const content = await response.text();
+      files.push({
+        path: m.fileName,
+        name: m.fileName.split('/').pop() || m.fileName,
+        content,
+        size: content.length,
+      });
+    } catch { /* 单个文件下载失败不影响其他文件 */ }
+  }
+
+  if (files.length > 0) {
+    console.log(`[PublishedGame] 从 cloudFileManifest 下载了 ${files.length} 个文件`);
+  }
+  return files;
+}
+
+/** 无清单时回退：直接构造路径获取临时 URL（兼容旧数据） */
+async function downloadFilesFromPathGuess(
+  app: any,
+  cloudPath: string
+): Promise<StoredGameFile[] | null> {
+  // 尝试常见的入口文件名
+  const commonFiles = ['index.html'];
+  const fileList = commonFiles.map(fn => `${cloudPath}${fn}`);
+
+  try {
+    const tempUrlResult = await app.getTempFileURL({ fileList });
+    if (!tempUrlResult?.fileList) return null;
+
+    const files: StoredGameFile[] = [];
+    for (const item of tempUrlResult.fileList) {
+      if (!item.tempFileURL || item.code === 'STORAGE_FILE_NONEXIST') continue;
+      try {
+        const response = await fetch(item.tempFileURL);
+        if (!response.ok) continue;
+        const content = await response.text();
+        const path = item.fileID?.replace(cloudPath, '') || 'index.html';
+        files.push({
+          path,
+          name: path.split('/').pop() || path,
+          content,
+          size: content.length,
+        });
+      } catch { /* skip */ }
     }
 
     return files.length > 0 ? files : null;
-  } catch (e) {
-    console.warn('[PublishedGame] 云存储文件加载失败:', e);
+  } catch {
     return null;
   }
 }
@@ -726,6 +900,167 @@ function resolveRelativePath(baseDir: string, relativePath: string): string {
   return resolved.join('/');
 }
 
+// ==================== 云托管加载（URL 重写方案 / 公开读永久 URL） ====================
+
+/**
+ * 去掉临时下载 URL 的签名查询参数，得到永久公开 URL
+ * 前提：CloudBase 云存储安全规则为公开读（read: true）
+ * 这样 srcDoc 内的子资源可直接从云存储加载，无需任何鉴权 API 调用
+ */
+function stripUrlSignature(url: string): string {
+  const i = url.indexOf('?');
+  return i >= 0 ? url.slice(0, i) : url;
+}
+
+/**
+ * 从 cloudFileManifest 中挑选最佳入口 HTML
+ * 优先级：dist/index.html > dist/*.html > index.html > 非辅助非 src HTML > 非 src HTML > 兜底
+ */
+function pickBestEntryFromManifest(
+  manifest: Array<{ fileName: string; cloudFileID: string }>
+): string | null {
+  const htmls = manifest
+    .map(m => m.fileName)
+    .filter(n => /\.html?$/i.test(n));
+  if (htmls.length === 0) return null;
+
+  const AUX = /(css|style|helper|bridge|test|demo|template|layout|partial|fragment)/i;
+  const lower = (s: string) => s.toLowerCase();
+
+  return (
+    htmls.find(n => lower(n) === 'dist/index.html') ||
+    htmls.find(n => lower(n).startsWith('dist/') && lower(n).endsWith('index.html')) ||
+    htmls.find(n => lower(n).endsWith('/dist/index.html')) ||
+    htmls.find(n => lower(n) === 'index.html') ||
+    htmls.filter(n => !AUX.test(n) && !lower(n).startsWith('src/'))[0] ||
+    htmls.filter(n => !lower(n).startsWith('src/'))[0] ||
+    htmls[0]
+  );
+}
+
+/** 重写 HTML 中的相对路径为云存储永久 URL */
+function rewriteRelativeUrls(
+  html: string,
+  baseDir: string,
+  urlMap: Map<string, string>
+): string {
+  return html.replace(
+    /(href|src)\s*=\s*["']([^"']+)["']/gi,
+    (match, attr: string, rawVal: string) => {
+      const v = rawVal.trim();
+      // 跳过绝对 URL / data / blob / 锚点 / 协议类
+      if (
+        /^(https?:)?\/\//i.test(v) ||
+        v.startsWith('data:') ||
+        v.startsWith('blob:') ||
+        v.startsWith('#') ||
+        v.startsWith('mailto:') ||
+        v.startsWith('javascript:')
+      ) {
+        return match;
+      }
+      const resolved = resolveRelativePath(baseDir, v);
+      const url =
+        urlMap.get(resolved) ||
+        urlMap.get(v) ||
+        urlMap.get(v.replace(/^\.\//, ''));
+      return url ? `${attr}="${url}"` : match;
+    }
+  );
+}
+
+/**
+ * 获取云托管游戏 HTML（URL 重写方案，真正的多文件云加载）
+ *
+ * 流程（"CDN 当网盘"体验，子资源零鉴权）：
+ * 1. 从 published_games 文档读取 cloudFileManifest（fileName → cloudFileID）
+ * 2. getTempFileURL 批量获取 URL（打开游戏时仅调一次），去签名得永久公开 URL
+ * 3. 选取最佳入口 HTML，fetch 其内容
+ * 4. 重写入口 HTML 中所有相对路径为云存储永久 URL
+ * 5. 返回 HTML，交由 iframe srcDoc 渲染；浏览器自动从云存储按需加载子资源
+ *
+ * 前提：CloudBase 云存储安全规则设为公开读（read: true）
+ * 返回 null 时由上层回退到 getSelfContainedGameHtml
+ */
+export async function getCloudHostedGameHtml(gameId: string): Promise<string | null> {
+  try {
+    const { isCloudBaseReady, getCloudBaseApp } = await import('./cloudbase');
+    if (!isCloudBaseReady()) return null;
+
+    const app = getCloudBaseApp() as any;
+    const db = app.database();
+
+    // ① 读取文档中的文件清单 + 入口 HTML 回退内容
+    let manifest: Array<{ fileName: string; cloudFileID: string }> | null = null;
+    let entryHtmlContent: string | null = null;
+    try {
+      const res = await db.collection('published_games')
+        .where({ id: gameId })
+        .field({ cloudFileManifest: true, entryHtmlContent: true })
+        .limit(1)
+        .get();
+      if (res?.data?.length > 0) {
+        manifest = res.data[0].cloudFileManifest || null;
+        entryHtmlContent = res.data[0].entryHtmlContent || null;
+      }
+    } catch { /* 文档读取失败 → 交给上层回退 */ }
+
+    if (!manifest || manifest.length === 0) return null;
+
+    // ② 批量获取临时 URL（一次调用），去签名 → 永久公开 URL
+    const cloudFileIDs = manifest.map(m => m.cloudFileID);
+    const urlMap = new Map<string, string>(); // fileName → 永久公开 URL
+    try {
+      const r = await app.getTempFileURL({ fileList: cloudFileIDs });
+      if (r?.fileList) {
+        for (const item of r.fileList) {
+          if (item.status !== undefined && item.status !== 0) {
+            console.warn(`[PublishedGame] getTempFileURL 项失败: ${item.fileID} status=${item.status} ${item.errMsg || ''}`);
+          }
+          if (item.tempFileURL && item.fileID) {
+            const m = manifest.find(x => x.cloudFileID === item.fileID);
+            if (m) urlMap.set(m.fileName, stripUrlSignature(item.tempFileURL));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[PublishedGame] getTempFileURL 批量获取失败:', e);
+    }
+
+    if (urlMap.size === 0) {
+      console.warn('[PublishedGame] 未获取到任何云存储 URL（检查安全规则是否已设公开读）');
+      return null;
+    }
+
+    // ③ 选取最佳入口 HTML 并 fetch 其内容
+    const entryFileName = pickBestEntryFromManifest(manifest);
+    let html: string | null = null;
+    const entryUrl = entryFileName ? urlMap.get(entryFileName) : null;
+    if (entryUrl) {
+      try {
+        const resp = await fetch(entryUrl);
+        if (resp.ok) html = await resp.text();
+      } catch { /* fetch 失败回退到文档内容 */ }
+    }
+    if (!html && entryHtmlContent) {
+      html = entryHtmlContent;
+      console.log('[PublishedGame] 入口 HTML 使用文档 entryHtmlContent 回退');
+    }
+    if (!html) return null;
+
+    // ④ 重写相对路径为永久 URL
+    const entryDir = entryFileName && entryFileName.includes('/')
+      ? entryFileName.substring(0, entryFileName.lastIndexOf('/') + 1)
+      : '';
+    const rewritten = rewriteRelativeUrls(html, entryDir, urlMap);
+    console.log(`[PublishedGame] 云托管模式（URL 重写完成），入口: ${entryFileName}, HTML 大小: ${rewritten.length} 字节, 子资源: ${urlMap.size} 个`);
+    return rewritten;
+  } catch (e) {
+    console.warn('[PublishedGame] getCloudHostedGameHtml 失败:', e);
+    return null;
+  }
+}
+
 /**
  * 删除游戏文件存储（本地缓存 + 云存储）
  */
@@ -829,6 +1164,8 @@ export default {
   saveGameFiles,
   loadGameFiles,
   getGameEntryContent,
+  getSelfContainedGameHtml,
+  getCloudHostedGameHtml,
   deleteGameFiles,
   refreshGamesFromCloudBase,
 };

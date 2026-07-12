@@ -1,0 +1,93 @@
+{
+  "schemaName": "ra2-item",
+  "description": "红警复刻版道具 — 即时战略增益 + 高级战术道具系统（含炸弹箱地雷放置 + 无限矿产被动收入）",
+  "aiPrompt": "红警(Red Alert 2)即时战略游戏道具创作系统。这是一款经典RTS游戏，玩家选择盟军或苏军阵营，通过采集矿石获取资金，建造基地、兵营、战车工厂等建筑，训练步兵、坦克、飞机等作战单位，组建军队摧毁敌方基地。道具分为三类：① 战术增益（加资金、开视野、强化单位等即时效果）② 高级战术道具（炸弹箱：可放置地雷到地图上，敌方单位靠近时自动引爆造成范围伤害）③ 被动收入道具（无限矿产：持续自动增加资金，模拟无限矿脉）。道具应增强战术体验而非直接决定胜负。",
+  "availableEffects": ["add_cash", "reveal_map", "speed_boost", "armor_boost", "repair_all", "power_surge", "airdrop_supply", "place_mine", "infinite_ore"],
+  "effectRules": [
+    "add_cash: 立即增加资金，amount 为 500-5000 的整数，用于建造和训练",
+    "reveal_map: 开启全图视野（消除战争迷雾），持续一段时间或永久生效",
+    "speed_boost: 己方所有单位移动速度提升，multiplier 为 1.2-3.0 倍率，duration 为 10-30 秒",
+    "armor_boost: 己方所有单位装甲强化，multiplier 为 1.2-3.0 倍率，duration 为 10-30 秒",
+    "repair_all: 立即修复己方所有受损单位至满血",
+    "power_surge: 电力系统超载，提供无限电力 duration 秒（15-60秒），解决电力不足问题",
+    "airdrop_supply: 空投补给包，提供 cash 数量的资金（1000-3000），模拟补给到达",
+    "place_mine: 放置反步兵地雷到地图上。玩家使用道具后点击地图选择放置位置，地雷自动监测敌方单位接近并引爆。damage 为爆炸伤害（30-150），radius 为爆炸范围格数（1-4），triggerPx 为触发距离像素（30-100）。地雷有视觉标记（红色脉冲光圈 + 💣图标），爆炸时有扩散动画和冲击波环。每次最多同时存在 5 颗地雷。",
+    "infinite_ore: 激活无限矿产被动收入，持续自动增加资金。perSec 为每秒收入（50-1000），默认200。资金通过 DOM 注入 + 游戏 tick 钩子双重保障实时生效，视觉有金色飘字动画和右上角状态徽章实时显示累计收入。可调用 deactivateInfiniteOre 停止。"
+  ],
+  "constraints": {
+    "maxCashAdd": 5000,
+    "minCashAdd": 500,
+    "maxSpeedMultiplier": 3.0,
+    "minSpeedMultiplier": 1.2,
+    "maxArmorMultiplier": 3.0,
+    "minArmorMultiplier": 1.2,
+    "maxBuffDuration": 30,
+    "minBuffDuration": 10,
+    "maxPowerSurgeDuration": 60,
+    "maxAirdropCash": 3000,
+    "startingCash": 5000,
+    "maxMineDamage": 150,
+    "minMineDamage": 30,
+    "maxMineRadius": 4,
+    "minMineRadius": 1,
+    "maxMineTriggerPx": 100,
+    "minMineTriggerPx": 30,
+    "maxActiveMines": 5,
+    "maxOrePerSec": 1000,
+    "minOrePerSec": 50,
+    "maxOreTotal": 9999999
+  },
+  "forbidden": [
+    "add_cash 不要超过 5000，避免严重破坏经济平衡",
+    "speed_boost 和 armor_boost 的倍率不要超过 3.0",
+    "buff 持续时间不要超过 30 秒",
+    "不要创建能直接摧毁敌方基地的道具",
+    "不要创建能让己方单位无敌的道具",
+    "不要创建能直接消灭敌方所有单位的道具",
+    "repair_all 不能附带额外攻击加成",
+    "不要创建能跳过建造等待时间的道具",
+    "place_mine 伤害不要超过 150",
+    "place_mine 爆炸半径不要超过 4 格",
+    "同时存在的地雷不要超过 5 颗",
+    "不要创建能自动追踪敌人的智能地雷",
+    "不要创建隐形不可见的地雷（必须有视觉标记）",
+    "infinite_ore 每秒收入不要超过 1000"
+  ],
+  "effectCodeEnabled": true,
+  "effectCodeSignature": "function(params)",
+  "effectCodeReturns": "{ message: string }",
+  "effectCodeSandbox": {
+    "game": "红警桥接对象 window.__ra2allinone = { view, world, localPlayerId, emit(cmd) }。emit 注入命令走引擎管线（与玩家点击移动等价）。可用命令：addCash(owner,amount)、repairAll(owner)、powerSurge(owner,durationTicks)、revealMap(owner,durationTicks)、spawnAlly(owner,typeId,cellX,cellY)",
+    "ra2": "红警桥接对象别名",
+    "Math": "JS Math",
+    "JSON": "JS JSON"
+  },
+  "presetItems": [
+    { "name": "空投资金", "effect": "add_cash", "params": { "amount": 2000 }, "description": "立即获得2000资金，加速基地建设", "icon": "💰" },
+    { "name": "侦察卫星", "effect": "reveal_map", "params": {}, "description": "开启全图视野，洞察敌军动向", "icon": "🛰️" },
+    { "name": "急行军令", "effect": "speed_boost", "params": { "multiplier": 2.0, "duration": 15 }, "description": "全军移速翻倍15秒，快速调动部队", "icon": "⚡" },
+    { "name": "纳米装甲", "effect": "armor_boost", "params": { "multiplier": 2.0, "duration": 20 }, "description": "全军装甲强化2倍20秒，提升生存力", "icon": "🛡️" },
+    { "name": "战场维修站", "effect": "repair_all", "params": {}, "description": "修复所有受损单位至满血", "icon": "🔧" },
+    { "name": "电力超载", "effect": "power_surge", "params": { "duration": 30 }, "description": "无限电力30秒，告别电力不足", "icon": "⚡" },
+    { "name": "超级空投", "effect": "airdrop_supply", "params": { "cash": 3000 }, "description": "空投3000资金补给包", "icon": "📦" },
+    { "name": "炸弹箱", "effect": "place_mine", "params": { "damage": 80, "radius": 2, "triggerPx": 60 }, "description": "放置反步兵地雷，敌人靠近自爆，造成范围伤害", "icon": "💣" },
+    { "name": "重型炸弹箱", "effect": "place_mine", "params": { "damage": 150, "radius": 4, "triggerPx": 80 }, "description": "放置重型地雷，大范围高伤害爆破", "icon": "💥" },
+    { "name": "无限矿产", "effect": "infinite_ore", "params": { "perSec": 200 }, "description": "激活无限矿产，资金持续+200/秒，再也不缺钱", "icon": "⛏️" },
+    { "name": "超级矿脉", "effect": "infinite_ore", "params": { "perSec": 500 }, "description": "超级矿脉，资金狂飙+500/秒", "icon": "💎" }
+  ],
+  "examples": [
+    { "name": "加分宝石", "effect": "add_cash", "params": { "amount": 1000 }, "description": "立即获得1000资金", "icon": "💰" },
+    { "name": "三角雷区", "effect": "custom_mine_field", "params": {}, "description": "effectCode 自定义效果：一次放置3颗三角阵型地雷", "icon": "🔺",
+      "effectCode": "function(params){var cx=params.x||400,cy=params.y||300;game.emit({kind:'placeMine',owner:game.localPlayerId,x:cx-40,y:cy,damage:80,radius:2,triggerPx:60});game.emit({kind:'placeMine',owner:game.localPlayerId,x:cx+40,y:cy,damage:80,radius:2,triggerPx:60});game.emit({kind:'placeMine',owner:game.localPlayerId,x:cx,y:cy-50,damage:80,radius:2,triggerPx:60});return{message:'🔺 三角雷区已部署！3颗地雷'}}" }
+  ],
+  "paramFields": [
+    { "name": "amount", "type": "number", "description": "资金增加数量", "constraints": "500-5000 整数" },
+    { "name": "multiplier", "type": "number", "description": "倍率（速度/装甲提升）", "constraints": "1.2-3.0" },
+    { "name": "duration", "type": "number", "description": "持续时间（秒）", "constraints": "10-60" },
+    { "name": "cash", "type": "number", "description": "空投补给资金量", "constraints": "1000-3000" },
+    { "name": "damage", "type": "number", "description": "地雷爆炸伤害", "constraints": "30-150" },
+    { "name": "radius", "type": "number", "description": "地雷爆炸范围（格）", "constraints": "1-4" },
+    { "name": "triggerPx", "type": "number", "description": "地雷触发距离（像素）", "constraints": "30-100" },
+    { "name": "perSec", "type": "number", "description": "每秒自动增加的资金量", "constraints": "50-1000 整数" }
+  ]
+}

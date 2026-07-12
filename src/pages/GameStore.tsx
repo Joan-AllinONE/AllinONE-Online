@@ -329,23 +329,23 @@ export default function GameStore() {
       }
     };
 
-    window.addEventListener('allinone-item-redeemed', handleItemRedeemed);
+    window.addEventListener('allinone:item-redeemed', handleItemRedeemed);
     window.addEventListener('storage', handleStorageChange);
 
-    // 用户切换到“我的道具”标签时也主动检查一次
+    // 用户切换到"我的道具"标签时也主动检查一次
     const handleVisibilityChange = () => {
       if (!document.hidden) syncRedeemedVouchers();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      window.removeEventListener('allinone-item-redeemed', handleItemRedeemed);
+      window.removeEventListener('allinone:item-redeemed', handleItemRedeemed);
       window.removeEventListener('storage', handleStorageChange);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [syncRedeemedVouchers]);
 
-  // 切换到“我的道具”标签时主动检查并同步凭证状态
+  // 切换到"我的道具"标签时主动检查并同步凭证状态
   useEffect(() => {
     if (activeTab === 'myItems') {
       syncRedeemedVouchers();

@@ -558,7 +558,7 @@ export class AllinONEGame {
         effects: res.effects || {},
         effectType: res.effectType || 'custom',
       };
-      window.dispatchEvent(new CustomEvent('allinone-item-redeemed', { detail }));
+      // ⚠️ 只分发一种格式（allinone:item-redeemed），避免监听两种格式的游戏收到2个道具
       window.dispatchEvent(new CustomEvent('allinone:item-redeemed', { detail }));
     });
   }

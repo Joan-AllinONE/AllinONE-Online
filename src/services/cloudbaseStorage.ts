@@ -35,6 +35,14 @@ function inferContentType(filename: string): string {
   return MIME_MAP[ext] || 'application/octet-stream';
 }
 
+export interface UploadResult {
+  success: boolean;
+  uploaded: number;
+  errors: string[];
+  /** 云存储文件清单：{ fileName, cloudFileID }，用于后续跨浏览器下载 */
+  fileManifest: Array<{ fileName: string; cloudFileID: string }>;
+}
+
 /**
  * 上传游戏文件到云存储
  * 使用 File 对象（而非裸 Blob）确保 SDK 正确传输文件内容和大小
@@ -42,13 +50,14 @@ function inferContentType(filename: string): string {
 export async function uploadGameFiles(
   gameId: string,
   files: Array<{ name: string; content: string; path: string }>
-): Promise<{ success: boolean; uploaded: number; errors: string[] }> {
+): Promise<UploadResult> {
   if (!isCloudBaseReady()) {
-    return { success: false, uploaded: 0, errors: ['CloudBase not ready'] };
+    return { success: false, uploaded: 0, errors: ['CloudBase not ready'], fileManifest: [] };
   }
   const app = getCloudBaseApp() as any;
   let uploaded = 0;
   const errors: string[] = [];
+  const fileManifest: Array<{ fileName: string; cloudFileID: string }> = [];
 
   for (const file of files) {
     try {
@@ -77,6 +86,7 @@ export async function uploadGameFiles(
       // 验证上传结果
       if (result?.fileID) {
         console.log(`[CloudStorage] 上传成功: ${cloudPath} → fileID=${result.fileID}`);
+        fileManifest.push({ fileName, cloudFileID: result.fileID });
       } else {
         console.warn(`[CloudStorage] 上传返回异常: ${JSON.stringify(result)}`);
       }
@@ -87,7 +97,7 @@ export async function uploadGameFiles(
       errors.push(`${file.name}: ${e.message || e}`);
     }
   }
-  return { success: errors.length === 0, uploaded, errors };
+  return { success: errors.length === 0, uploaded, errors, fileManifest };
 }
 
 /**

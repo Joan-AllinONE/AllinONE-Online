@@ -38,6 +38,24 @@ AllinONE Gaming Platform — 游戏管理平台，包含凭证系统、投票治
 - **marketplaceService**：移除 saveListings 的 slice(-20) 限制，改用 waitForCloudBase + Promise.allSettled 并行同步
 - **匿名登录**：需在腾讯云开发控制台开启，envId=allinonegaming-d4gmsmrzz573264f6
 
+## 红警道具创作 SOP（2026-06-26 创建）
+- 文件：`AllinONE Online/ra2-powerup — 红警道具创作 SOP.md`
+- 参照超级玛丽 SOP 模板格式，适配红警 RTS 游戏特点
+- 10 种可用效果 API：add_cash, reveal_map, speed_boost, armor_boost, repair_all, power_surge, airdrop_supply, spawn_ally, place_mine, infinite_ore
+- effectCode 沙箱注入 `game = window.__ra2allinone`，通过 emit(cmd) 走引擎管线
+- 5 种引擎命令：addCash, repairAll, powerSurge, revealMap, spawnAlly
+- 预设道具 11 个（空投资金/侦察卫星/急行军令/纳米装甲/战场维修站/电力超载/超级空投/炸弹箱/重型炸弹箱/无限矿产/超级矿脉）
+
+## RA2 effectCode 命令注入模式（2026-06-24 实施）
+- **设计原则**：effectCode 通过 `game.emit(cmd)` 注入命令，走游戏引擎自身管线（emit → localCommands → takeLocal → stepWith → applyCommands），与 Match3Game 的"直接状态修改模式"不同
+- **桥接对象**：`window.__ra2allinone`（始终暴露，不限 DEV）= `{ view, world, localPlayerId, emit }`
+- **第一次失败根因**：`window.__ra2view` 仅 DEV 模式暴露，生产构建中 undefined → 所有 effectCode 无效
+- **新增 5 种 EffectCommand**：addCash、repairAll、powerSurge（电力激增）、revealMap（全图视野）、spawnAlly（友军增援）
+- **world.ts**：`_powerSurgeTimers` + `_revealTimers` Map 属性，stepPower() 和 step() 中递减计时器
+- **world-renderer.ts**：cellVisible/cellExplored 支持 `_revealTimers`（激活时恒返回 true）
+- **play.ts**：`window.__ra2play` 也改为始终暴露
+- **构建验证**：typecheck + build + build:singlefile 全部通过
+
 ## 核心架构知识（2026-06-05 更新）
 - **A币 = 凭证，非钱包余额**：A币仅在 VoucherService/voucherPaymentService 中管理（凭证制），不在 WalletSkill 中（余额制）。WalletSkill v3 仅管理 gameCoins。
 - **A币余额 = sum of 用户所有 A币类 ACTIVE 凭证的 denomination**（排除道具凭证），通过 `voucherPaymentService.getUserVoucherBalance()` 获取

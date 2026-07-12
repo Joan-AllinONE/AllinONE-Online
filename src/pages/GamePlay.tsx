@@ -6,13 +6,12 @@
 import { useState, useEffect, useCallback, useContext, useRef } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getPublishedGame, getSelfContainedGameHtml, loadGameFiles, type PublishedGame } from '@/services/publishedGameService';
+import { getPublishedGame, getSelfContainedGameHtml, getCloudHostedGameHtml, type PublishedGame } from '@/services/publishedGameService';
 import { skillGateway } from '@/skills';
 import { platformBindingService, GameType, voucherService } from '@/voucher-system';
 import { isCurrencyVoucher } from '@/voucher-system/types';
 import { AuthContext } from '@/contexts/authContext';
 import { redeemCodeService } from '@/services/redeemCodeService';
-import { getToken } from '@/services/authTokenService';
 import { Coins, X, AlertCircle, ShieldCheck } from 'lucide-react';
 import { ProtocolEngine, schemaRegistry } from '@/publishing-center/protocol';
 
@@ -22,89 +21,6 @@ interface GameSkill {
   icon: string;
   description: string;
   enabled: boolean;
-}
-
-/**
- * 从本地 IndexedDB 重新上传游戏文件到服务端
- * 解决后端重启后内存数据丢失的问题
- */
-async function reuploadGameFiles(gameId: string): Promise<boolean> {
-  try {
-    // 1. 从本地 IndexedDB 加载文件
-    const files = await loadGameFiles(gameId);
-    if (!files || files.length === 0) {
-      console.warn('[GamePlay] 本地无文件可重新上传');
-      return false;
-    }
-
-    // 2. 获取 JWT token
-    let token = await getToken();
-
-    if (!token) {
-      console.warn('[GamePlay] 无法获取 JWT token，重新上传失败');
-      return false;
-    }
-
-    // 3. 上传文件到服务端（解码 __BINARY_BASE64__ 前缀，文本文件转为 UTF-8 字符串）
-    const BINARY_PREFIX = '__BINARY_BASE64__';
-    const TEXT_EXTENSIONS = new Set([
-      '.html', '.htm', '.css', '.js', '.mjs', '.json', '.xml', '.svg',
-      '.ts', '.tsx', '.jsx', '.vue', '.svelte',
-      '.md', '.txt', '.csv', '.yaml', '.yml', '.toml',
-      '.scss', '.sass', '.less', '.styl', '.sh',
-    ]);
-    const isTextFile = (filePath: string) => {
-      const ext = '.' + filePath.split('.').pop()?.toLowerCase();
-      return TEXT_EXTENSIONS.has(ext);
-    };
-
-    const uploadFiles = files.map(f => {
-      let content = f.content;
-      // 解码 __BINARY_BASE64__ 前缀
-      if (content.startsWith(BINARY_PREFIX)) {
-        if (isTextFile(f.path)) {
-          // 文本文件：base64 → 二进制 → UTF-8 解码
-          try {
-            const base64 = content.slice(BINARY_PREFIX.length);
-            const binaryStr = atob(base64);
-            const bytes = new Uint8Array(binaryStr.length);
-            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-            content = new TextDecoder('utf-8').decode(bytes);
-          } catch {
-            // 解码失败，保留原样让服务器处理
-          }
-        }
-        // 二进制文件：保留 __BINARY_BASE64__ 前缀，服务器会正确解码
-      }
-      return {
-        path: f.path,
-        name: f.name,
-        content,
-        size: f.size || content?.length || 0,
-      };
-    });
-
-    const resp = await fetch(`/api/v1/games/${gameId}/upload`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({ files: uploadFiles }),
-    });
-
-    if (resp.ok) {
-      const result = await resp.json();
-      console.log('[GamePlay] 重新上传成功:', result.data?.saved, '个文件');
-      return true;
-    } else {
-      console.warn('[GamePlay] 重新上传失败:', resp.status);
-      return false;
-    }
-  } catch (e) {
-    console.warn('[GamePlay] 重新上传异常:', e);
-    return false;
-  }
 }
 
 export default function GamePlay() {
@@ -117,8 +33,6 @@ export default function GamePlay() {
   const [balance, setBalance] = useState<Record<string, number>>({});
   const [voucherBalance, setVoucherBalance] = useState<{ count: number; totalValue: number }>({ count: 0, totalValue: 0 });
   const [gameHtmlContent, setGameHtmlContent] = useState<string | null>(null);
-  // 服务端模式加载失败时回退到 srcDoc 模式
-  const [serverUnavailable, setServerUnavailable] = useState(false);
   
   // 奖励提示状态
   const [rewardToast, setRewardToast] = useState<{
@@ -138,60 +52,28 @@ export default function GamePlay() {
 
       // 根据托管方式加载游戏内容
       (async () => {
-        // 服务端托管模式：通过后端 API 提供多文件游戏
-        // iframe src 指向服务端 HTML，浏览器自动从同路径加载 JS/CSS 等子资源
-        if (publishedGame.hostingType === 'server' && publishedGame.baseUrl) {
-          const serverUrl = `${publishedGame.baseUrl}${publishedGame.entryPoint || 'index.html'}`;
-          console.log('[GamePlay] 服务端托管模式，入口:', serverUrl);
-
-          // 预检服务端文件是否可用
-          let serverOk = false;
-          try {
-            const resp = await fetch(serverUrl, { method: 'HEAD' });
-            if (resp.ok) {
-              serverOk = true;
-              console.log('[GamePlay] 服务端文件可用，将通过 src 加载');
-            } else if (resp.status === 404) {
-              // 文件不存在，可能是后端重启导致内存数据丢失，尝试重新上传
-              console.log('[GamePlay] 服务端文件 404，尝试从本地重新上传...');
-              const reuploaded = await reuploadGameFiles(gameId);
-              if (reuploaded) {
-                serverOk = true;
-                console.log('[GamePlay] 重新上传成功，将通过 src 加载');
-              }
-            } else {
-              console.warn('[GamePlay] 服务端返回', resp.status);
-            }
-          } catch (e) {
-            // 网络不可达，后端可能未启动
-            console.warn('[GamePlay] 服务端不可达:', e);
-          }
-
-          if (!serverOk) {
-            // 服务端不可用，尝试从本地加载作为回退
-            console.log('[GamePlay] 服务端不可用，尝试本地 srcDoc 回退');
-            const entryContent = await getSelfContainedGameHtml(gameId);
-            if (entryContent) {
-              setGameHtmlContent(entryContent);
-              console.log('[GamePlay] 已加载本地回退内容（自包含），大小:', entryContent.length);
-            }
-            setServerUnavailable(true);
-          }
-          return;
-        }
         // 外部 URL 模式：直接通过 CDN/外部 URL 加载
         if (publishedGame.hostingType === 'external' && publishedGame.cdnUrl) {
           console.log('[GamePlay] 外部 URL 模式，将通过 src 加载:', publishedGame.cdnUrl);
           return;
         }
-        // inline 模式（默认 / 旧游戏）：从本地存储加载 HTML 内容，通过 srcDoc 渲染
-        // 使用 getSelfContainedGameHtml 将外部 CSS/JS 内联到 HTML 中，确保 srcdoc 能正确渲染
+
+        // ① 云托管模式（优先）：从 CloudBase 云存储加载，URL 重写为永久公开链接
+        // 子资源由浏览器直接从云存储 CDN 按需加载，零鉴权
+        const cloudHtml = await getCloudHostedGameHtml(gameId);
+        if (cloudHtml) {
+          setGameHtmlContent(cloudHtml);
+          console.log('[GamePlay] 云托管模式（URL 重写），HTML 大小:', cloudHtml.length, '字节');
+          return;
+        }
+
+        // ② 回退：自包含内联模式（本地缓存 / 文档 entryHtmlContent）
         const entryContent = await getSelfContainedGameHtml(gameId);
         if (entryContent) {
           setGameHtmlContent(entryContent);
-          console.log('[GamePlay] inline 模式，已加载自包含内容，大小:', entryContent.length, '字节');
+          console.log('[GamePlay] 自包含内联模式（回退），大小:', entryContent.length, '字节');
         } else {
-          console.log('[GamePlay] 本地存储中未找到游戏文件，使用 cdnUrl 回退');
+          console.log('[GamePlay] 云托管与本地均无内容，使用 cdnUrl 回退');
         }
       })();
 
@@ -391,32 +273,9 @@ export default function GamePlay() {
 
           showRewardToast(true, `兑换成功! 获得 ${item?.name || '道具'}`);
 
-          // 🆕 如果是 Schema 模式道具，追加发送 EXTENSION_VOUCHER 到游戏
-          if (gameEffect?.schemaName && gameEffect?.itemData) {
-            try {
-              const { ExtensionVoucherService } = await import('@/publishing-center/protocol/ExtensionVoucher');
-              const extensionVoucher = ExtensionVoucherService.create({
-                schemaName: gameEffect.schemaName,
-                sourceGameId: targetGameId || gameId!,
-                targetGameId: targetGameId || gameId!,
-                data: gameEffect.itemData,
-                signature: ExtensionVoucherService.sign(gameEffect.itemData),
-                expiresIn: 365 * 24 * 60 * 60 * 1000,
-              });
-
-              const engine = protocolRef.current;
-              if (engine) {
-                engine.sendToGame(targetGameId || gameId!, {
-                  type: 'EXTENSION_VOUCHER',
-                  voucher: ExtensionVoucherService.toPayload(extensionVoucher),
-                  timestamp: Date.now(),
-                });
-                console.log('[GamePlay] Schema 道具 EXTENSION_VOUCHER 已发送:', gameEffect.schemaName);
-              }
-            } catch (e) {
-              console.warn('[GamePlay] 发送 EXTENSION_VOUCHER 失败:', e);
-            }
-          }
+          // ⚠️ 不再单独发送 EXTENSION_VOUCHER（避免与 REDEEM_RESULT 重复导致用户收到2个道具）
+          // Schema 道具数据通过 REDEEM_RESULT.voucherData 单一通道传递
+          // voucherItemService.redeemItemVoucherBySchema 的 URL 参数路径仍使用 EXTENSION_VOUCHER（独立通道，不经过 onRedeem）
 
           return {
             success: true,
@@ -426,6 +285,10 @@ export default function GamePlay() {
             quantity: gameEffect?.quantity || 1,
             effectType,
             effects: effectParams,
+            // 🆕 voucherData: 携带完整的 itemData（effect/effectCode/effectScript/params/icon）
+            // 游戏端 SDK/桥接通过 REDEEM_RESULT → CustomEvent → handleRedeemedItem 接收
+            voucherData: gameEffect?.itemData || null,
+            schemaName: gameEffect?.schemaName || null,
             message: `兑换成功! 获得 ${item?.name || '道具'}`,
           };
         } catch (error) {
@@ -459,9 +322,8 @@ export default function GamePlay() {
   // iframe 加载完成后建立协议通道
   useEffect(() => {
     // 判断是否有任何可加载的游戏内容
-    const hasServerHosting = game?.hostingType === 'server' && !!game?.baseUrl;
     const hasExternalHosting = game?.hostingType === 'external' && !!game?.cdnUrl;
-    if (!gameId || !gameHtmlContent && !game?.cdnUrl && !hasServerHosting && !hasExternalHosting) return;
+    if (!gameId || !gameHtmlContent && !game?.cdnUrl && !hasExternalHosting) return;
 
     // 等待 DOM 渲染完成找到 iframe
     const timer = setTimeout(() => {
@@ -478,7 +340,7 @@ export default function GamePlay() {
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [gameId, gameHtmlContent, game?.cdnUrl, game?.hostingType, game?.baseUrl, skills]);
+  }, [gameId, gameHtmlContent, game?.cdnUrl, game?.hostingType, skills]);
 
   // 🆕 URL 参数自动下发：检测 itemVoucher / redeemVoucher 参数，轮询等待通道就绪后自动下发
   useEffect(() => {
@@ -544,7 +406,7 @@ export default function GamePlay() {
       cancelled = true;
       clearTimeout(startTimer);
     };
-  }, [gameId, searchParams, currentUser?.id, gameHtmlContent, game?.cdnUrl, game?.hostingType, game?.baseUrl]);
+  }, [gameId, searchParams, currentUser?.id, gameHtmlContent, game?.cdnUrl, game?.hostingType]);
 
   if (isLoading) {
     return (
@@ -685,16 +547,8 @@ export default function GamePlay() {
             >
               {/* 游戏嵌入区域 */}
               <div className="aspect-video bg-slate-950 relative">
-                {/* 服务端托管模式：iframe src 指向后端 API，浏览器自动从同路径加载 JS/CSS 子资源 */}
-                {game.hostingType === 'server' && game.baseUrl && !serverUnavailable ? (
-                  <iframe
-                    id="game-iframe"
-                    src={`${game.baseUrl}${game.entryPoint || 'index.html'}`}
-                    className="w-full h-full border-0"
-                    allow="fullscreen"
-                    sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                  ></iframe>
-                ) : game.hostingType === 'external' && game.cdnUrl ? (
+                {/* 外部 URL 模式：iframe src 直连 CDN */}
+                {game.hostingType === 'external' && game.cdnUrl ? (
                   <iframe
                     id="game-iframe"
                     src={game.cdnUrl}

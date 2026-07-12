@@ -1,0 +1,8 @@
+{
+  "name": "轨道炮灰熊",
+  "effect": "railgun_grizzly_ec",
+  "params": { "rangeMul": 2, "pierceWidth": 48 },
+  "description": "给己方灰熊坦克加装轨道炮：射程翻倍（5格→10格，屏幕边缘即可开火），炮弹沿弹道穿透成串敌军，犀牛坦克未入射程已被串糖葫芦。基于 effectCode 调用引擎 railgunMod 命令（按归属方生效，不影响敌方单位）。",
+  "icon": "🚀",
+  "effectCode": "function(params){var game=arguments[0];if(!game||!game.world)return{error:true,message:'游戏未启动'};var g=game;var rangeMul=(params&&params.rangeMul)||2;var pierceWidth=(params&&params.pierceWidth)||48;g.emit({kind:'railgunMod',owner:g.localPlayerId,typeId:'grizzly',rangeMul:rangeMul,pierce:true,pierceWidth:pierceWidth});return{message:'🚀 轨道炮灰熊已部署！射程 x'+rangeMul+'，炮弹穿透成串敌军（仅己方灰熊）'};}"
+}

@@ -13,7 +13,7 @@ import type {
   PaginatedResult,
 } from '../types';
 import { VoucherStatus, TransactionType } from '../types';
-import { writeQueue } from '../../services/writeQueue';
+import { saveVoucherToBackend, loadCollectionFromBackend } from '../../services/voucherBackend';
 
 // 存储键名（模拟表名）
 const STORAGE_KEYS = {
@@ -576,36 +576,37 @@ export class VoucherDatabase {
 
   private syncVouchersToCloud(): void {
     if (typeof window === 'undefined') return;
-    // 增量同步：仅入队标记为脏的条目
-    for (const id of this.cloudSyncDirtyVouchers) {
+    // Bug 013 修复：写入改走 gamesApi 云函数（admin SDK，无浏览器端 auth 限制）
+    // 不再使用 writeQueue（CloudBase JS SDK 浏览器端 auth 已损坏，线上永落库）
+    const dirty = Array.from(this.cloudSyncDirtyVouchers);
+    this.cloudSyncDirtyVouchers.clear();
+    if (dirty.length === 0) {
+      this.scheduleCloudSyncFallback();
+      return;
+    }
+    for (const id of dirty) {
       const v = this.voucherCache.get(id);
       if (v) {
-        writeQueue.enqueue({
-          collection: 'vouchers',
-          operation: 'upsert',
-          data: v as any,
-        });
+        saveVoucherToBackend('vouchers', v as any).catch(() => {});
       }
     }
-    this.cloudSyncDirtyVouchers.clear();
-    // 启动防抖定时器（全量同步仅作为兜底，2s 后触发一次）
     this.scheduleCloudSyncFallback();
   }
 
   private syncTransactionsToCloud(): void {
     if (typeof window === 'undefined') return;
-    // 增量同步：仅入队标记为脏的条目
-    for (const id of this.cloudSyncDirtyTransactions) {
+    const dirty = Array.from(this.cloudSyncDirtyTransactions);
+    this.cloudSyncDirtyTransactions.clear();
+    if (dirty.length === 0) {
+      this.scheduleCloudSyncFallback();
+      return;
+    }
+    for (const id of dirty) {
       const tx = this.transactionCache.get(id);
       if (tx) {
-        writeQueue.enqueue({
-          collection: 'voucher_transactions',
-          operation: 'upsert',
-          data: tx as any,
-        });
+        saveVoucherToBackend('voucher_transactions', tx as any).catch(() => {});
       }
     }
-    this.cloudSyncDirtyTransactions.clear();
     this.scheduleCloudSyncFallback();
   }
 
@@ -620,21 +621,13 @@ export class VoucherDatabase {
       if (this.cloudSyncDirtyVouchers.size === 0 && this.voucherCache.size > 0) {
         const vouchers = Array.from(this.voucherCache.values()).slice(0, 200); // 限制 200 条兜底
         for (const v of vouchers) {
-          writeQueue.enqueue({
-            collection: 'vouchers',
-            operation: 'upsert',
-            data: v as any,
-          });
+          saveVoucherToBackend('vouchers', v as any).catch(() => {});
         }
       }
       if (this.cloudSyncDirtyTransactions.size === 0 && this.transactionCache.size > 0) {
         const txs = Array.from(this.transactionCache.values()).slice(0, 100);
         for (const tx of txs) {
-          writeQueue.enqueue({
-            collection: 'voucher_transactions',
-            operation: 'upsert',
-            data: tx as any,
-          });
+          saveVoucherToBackend('voucher_transactions', tx as any).catch(() => {});
         }
       }
       this.cloudSyncTimer = null;
@@ -644,22 +637,19 @@ export class VoucherDatabase {
   async syncFromCloudBase(): Promise<void> {
     if (typeof window === 'undefined') return;
     try {
-      const { isCloudBaseReady, getCloudBaseApp } = await import('../../services/cloudbase');
-      if (!isCloudBaseReady()) return;
-      const db = getCloudBaseApp().database();
-      const vRes = await db.collection('vouchers').limit(500).get();
-      for (const doc of vRes.data) {
-        if (!this.voucherCache.has(doc.id)) {
-          this.voucherCache.set(doc.id, doc as any);
-        }
+      // Bug 013 修复：读取改分页 + 后端 API 兜底，绝不保留 limit(500) 硬截断
+      const cloudVouchers = await loadCollectionFromBackend<any>('vouchers');
+      for (const doc of cloudVouchers) {
+        // 后端为准：云端的凭证（已铸造）覆盖本地版本，避免另一浏览器显示"未铸造/已售罄"
+        this.voucherCache.set(doc.id, doc);
       }
-      const tRes = await db.collection('voucher_transactions').limit(500).get();
-      for (const doc of tRes.data) {
+      const cloudTx = await loadCollectionFromBackend<any>('voucher_transactions');
+      for (const doc of cloudTx) {
         if (!this.transactionCache.has(doc.id)) {
-          this.transactionCache.set(doc.id, doc as any);
+          this.transactionCache.set(doc.id, doc);
         }
       }
-      if (vRes.data.length > 0 || tRes.data.length > 0) {
+      if (cloudVouchers.length > 0 || cloudTx.length > 0) {
         this.persistVouchers();
         this.persistTransactions();
       }

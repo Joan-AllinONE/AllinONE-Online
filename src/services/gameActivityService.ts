@@ -16,13 +16,18 @@ interface GameActivityData {
 }
 
 interface PlayerActivityStats {
+  userId: string;
+  totalPlayTime: number;
   totalSessions: number;
-  totalDuration: number;
+  averageSessionTime: number;
+  totalScore: number;
   averageScore: number;
-  bestScore: number;
-  totalComputingPower: number;
-  totalGameCoins: number;
-  lastSessionAt: Date;
+  achievementCount: number;
+  consecutiveDays: number;
+  socialInteractions: number;
+  tasksCompleted: number;
+  lastActiveDate: Date;
+  activityLevel: 'low' | 'medium' | 'high' | 'very_high';
 }
 
 // 已废弃类型 — 保留引用兼容（MVP v1.0: computing types removed）
@@ -112,14 +117,15 @@ class GameActivityService {
       achievements: [],
       computingPowerEarned: 10, // 登录奖励10算力
       gameCoinsEarned: 5,
-      activityType: 'daily_login'
+      activityType: 'daily_login',
+      endTime: new Date()
     };
 
     await this.recordGameActivity(loginActivity);
   }
 
   // 记录社交互动
-  async recordSocialInteraction(userId: string, interactionType: string): Promise<void> {
+  async recordSocialInteraction(userId: string, _interactionType: string): Promise<void> {
     const socialActivity: GameActivityData = {
       userId,
       sessionId: `social_${Date.now()}`,
@@ -132,7 +138,8 @@ class GameActivityService {
       achievements: [],
       computingPowerEarned: 5, // 社交互动奖励5算力
       gameCoinsEarned: 3,
-      activityType: 'social_interaction'
+      activityType: 'social_interaction',
+      endTime: new Date()
     };
 
     await this.recordGameActivity(socialActivity);
@@ -152,7 +159,8 @@ class GameActivityService {
       achievements: [],
       computingPowerEarned: reward,
       gameCoinsEarned: Math.floor(reward * 0.5),
-      activityType: 'task_completion'
+      activityType: 'task_completion',
+      endTime: new Date()
     };
 
     await this.recordGameActivity(taskActivity);

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ugcBridgeService, type UGCBridgeResult } from '@/services/ugcBridgeService';
-import { getPublishedGame, savePublishedGame } from '@/services/publishedGameService';
+import { getPublishedGame, savePublishedGame, loadSopFromCloudStorage, loadSopFromBackend } from '@/services/publishedGameService';
 
 // ==================== 类型定义 ====================
 
@@ -77,21 +77,32 @@ const AIDialog: React.FC<AIDialogProps> = ({
   const [sopSaving, setSopSaving] = useState(false);
   const sopFileInputRef = useRef<HTMLInputElement>(null);
 
-  // 加载 SOP 文档（优先读 sopDocument，回退到 schema rawMarkdown，无则为空）
+  // 加载 SOP 文档（优先本地缓存 → 云存储(跨浏览器主通道) → 后端API(辅助) → schema回退）
   useEffect(() => {
     const game = getPublishedGame(gameId);
     if (game?.sopDocument) {
       setSopMarkdown(game.sopDocument);
       return;
     }
-    // 回退：从 schema rawMarkdown 读取（向后兼容）
-    const schemas = ugcBridgeService.getAvailableSchemas(gameId);
-    const withRawMd = schemas.find(s => s.aiGuide?.rawMarkdown);
-    if (withRawMd?.aiGuide?.rawMarkdown) {
-      setSopMarkdown(withRawMd.aiGuide.rawMarkdown);
-    } else {
-      setSopMarkdown('');
-    }
+    // 跨浏览器：本地缓存无 sopDocument，依次尝试云存储和后端 API
+    (async () => {
+      // 主通道：CloudBase 云存储（与 published game 文件同一通道）
+      const cloudMd = await loadSopFromCloudStorage(gameId);
+      if (cloudMd) {
+        setSopMarkdown(cloudMd);
+        return;
+      }
+      // 辅助通道：后端 API
+      const backendMd = await loadSopFromBackend(gameId);
+      if (backendMd) {
+        setSopMarkdown(backendMd);
+        return;
+      }
+      // 回退：从 schema rawMarkdown 读取（向后兼容，仅浏览器本地）
+      const schemas = ugcBridgeService.getAvailableSchemas(gameId);
+      const withRawMd = schemas.find(s => s.aiGuide?.rawMarkdown);
+      setSopMarkdown(withRawMd?.aiGuide?.rawMarkdown || '');
+    })();
   }, [gameId]);
 
   // 自动调整输入框高度
@@ -226,14 +237,16 @@ const AIDialog: React.FC<AIDialogProps> = ({
         }
 
         // ② 持久化到 sopDocument（独立顶级字段，完全不触碰 itemSop）
+        // waitForCloud=true：阻塞等待写入队列落云，确保切换浏览器/刷新后仍能读到
         setSopSaving(true);
         try {
           const game = getPublishedGame(gameId);
           if (game) {
-            await savePublishedGame({ ...game, sopDocument: md });
+            await savePublishedGame({ ...game, sopDocument: md }, { waitForCloud: true });
           }
         } catch (saveErr) {
           console.warn('[AIDialog] SOP 持久化失败:', saveErr);
+          toast.error('SOP 文档保存失败，请重试');
         } finally {
           setSopSaving(false);
         }

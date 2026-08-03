@@ -49,6 +49,7 @@ export interface WalletStats {
 // ==================== localStorage 回退 ====================
 
 const LOCAL_WALLETS_KEY = 'allinone_wallets';
+const LOCAL_TRANSACTIONS_KEY = 'allinone_wallet_transactions';
 
 function readLocalWallet(userId: string): WalletBalance | null {
   try {
@@ -67,6 +68,30 @@ function writeLocalWallet(userId: string, balance: WalletBalance): void {
     const wallets = raw ? (JSON.parse(raw) as Record<string, WalletBalance>) : {};
     wallets[userId] = balance;
     localStorage.setItem(LOCAL_WALLETS_KEY, JSON.stringify(wallets));
+  } catch { /* localStorage 不可用 */ }
+}
+
+function readLocalTransactions(userId: string): WalletTransaction[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_TRANSACTIONS_KEY);
+    if (!raw) return [];
+    const all = JSON.parse(raw) as Record<string, WalletTransaction[]>;
+    return all[userId] || [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalTransaction(userId: string, tx: WalletTransaction): void {
+  try {
+    const raw = localStorage.getItem(LOCAL_TRANSACTIONS_KEY);
+    const all = raw ? (JSON.parse(raw) as Record<string, WalletTransaction[]>) : {};
+    const list = all[userId] || [];
+    list.unshift(tx); // 新交易在前
+    // 最多保留 200 条，防止 localStorage 溢出
+    if (list.length > 200) list.splice(200);
+    all[userId] = list;
+    localStorage.setItem(LOCAL_TRANSACTIONS_KEY, JSON.stringify(all));
   } catch { /* localStorage 不可用 */ }
 }
 
@@ -227,7 +252,11 @@ export class WalletSkill extends BaseSkill {
   ): Promise<WalletTransaction[]> {
     const userId = context.userId;
     try {
-      if (!isCloudBaseReady()) return [];
+      if (!isCloudBaseReady()) {
+        // CloudBase 不可用 → 从本地 localStorage 读取
+        const localTxs = readLocalTransactions(userId);
+        return localTxs.slice(0, params.limit || 50);
+      }
       const app = getCloudBaseApp();
       const db = app.database();
       const res = await db.collection('transactions')
@@ -235,9 +264,13 @@ export class WalletSkill extends BaseSkill {
         .orderBy('timestamp', 'desc')
         .limit(params.limit || 50)
         .get();
-      return res.data as WalletTransaction[];
+      const cloudTxs = res.data as WalletTransaction[];
+      if (cloudTxs.length > 0) return cloudTxs;
+      // 云端无数据 → 回退到本地
+      return readLocalTransactions(userId).slice(0, params.limit || 50);
     } catch {
-      return [];
+      // 任何错误 → 回退到本地
+      return readLocalTransactions(userId).slice(0, params.limit || 50);
     }
   }
 
@@ -370,6 +403,9 @@ export class WalletSkill extends BaseSkill {
       balanceAfter: { ...balance },
       timestamp: Date.now(),
     };
+
+    // 🔑 本地持久化交易记录（保证 CloudBase 不可用时也能读取明细）
+    writeLocalTransaction(userId, tx);
 
     // 通过写入队列入队交易记录（upsert，保证重试 + 零丢失 + 不重复）
     writeQueue.enqueue({

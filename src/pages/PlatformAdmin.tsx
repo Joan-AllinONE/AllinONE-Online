@@ -771,7 +771,17 @@ export default function PlatformAdmin() {
               <p className="text-xs text-slate-500">管理员: {currentUser?.nickname}</p>
             </div>
           </div>
-          <TabBar active={activeTab} onChange={handleTabChange} />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate('/platform-data-center')}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/60 hover:bg-slate-600 rounded-lg text-sm font-medium text-slate-200 transition-colors"
+              title="前往平台数据中心"
+            >
+              <BarChart3 className="w-4 h-4 text-purple-400" />
+              数据中心
+            </button>
+            <TabBar active={activeTab} onChange={handleTabChange} />
+          </div>
         </div>
       </div>
 

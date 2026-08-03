@@ -81,6 +81,8 @@ export interface FileStructureInfo {
   hasPackageJson: boolean;
   hasBuildScript: boolean;
   estimatedSize: number; // bytes
+  /** 是否为模块化多文件游戏（RequireJS/AMD/动态 import/已知加载器），此类游戏必须用真实 URL 托管，srcDoc 内联会白屏 */
+  isModular: boolean;
 }
 
 export interface CodeMetrics {

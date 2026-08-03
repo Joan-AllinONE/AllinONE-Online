@@ -391,10 +391,15 @@ export class SkillGateway implements SkillGatewayInterface {
 
 // ==================== 单例导出 ====================
 
-let defaultGateway: SkillGateway | null = null;
-
 /**
- * 获取默认网关实例
+ * 获取默认网关实例（懒初始化）
+ *
+ * ⚠️ 不要从本文件导入 skillGateway 实例！
+ * skillGateway 单例在 skills/index.ts 中首次创建（带 debug 等配置）并导出。
+ * 所有需要 skillGateway 实例的代码应从 skills/index 导入：
+ *   import { skillGateway } from '@/skills/index';
+ *
+ * 本文件仅导出 SkillGateway 类、getDefaultGateway 函数和 resetDefaultGateway 函数。
  */
 export function getDefaultGateway(config?: SkillGatewayConfig): SkillGateway {
   if (!defaultGateway) {
@@ -403,12 +408,11 @@ export function getDefaultGateway(config?: SkillGatewayConfig): SkillGateway {
   return defaultGateway;
 }
 
+let defaultGateway: SkillGateway | null = null;
+
 /**
  * 重置默认网关（主要用于测试）
  */
 export function resetDefaultGateway(): void {
   defaultGateway = null;
 }
-
-// 导出默认网关实例（用于简化导入）
-export const skillGateway = getDefaultGateway();

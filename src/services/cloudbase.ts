@@ -22,6 +22,26 @@ let app: cloudbase.app.App | null = null;
 let initPromise: Promise<cloudbase.app.App> | null = null;
 
 /**
+ * 云同步总开关
+ *
+ * 默认：生产构建(prod)启用，开发环境(dev)禁用 —— dev 不写云，避免测试数据污染线上。
+ *
+ * 判定逻辑：
+ *   - VITE_CLOUD_SYNC_ENABLED=true  强制启用（dev 下也可联调云）
+ *   - VITE_CLOUDBASE_SYNC_ENABLED=false 强制禁用
+ *   - 未显式设置时：import.meta.env.DEV=false（prod 构建）→ 启用；=true（dev）→ 禁用
+ *
+ * ⚠️ 绝不能把 VITE_CLOUD_SYNC_ENABLED 写进 .env（.env 对 dev/prod 同时生效会误伤线上），
+ *    只能写在 .env.development 或命令行临时覆盖。
+ */
+export function isCloudSyncEnabled(): boolean {
+  const override = import.meta.env.VITE_CLOUD_SYNC_ENABLED;
+  if (override === 'true') return true;
+  if (override === 'false') return false;
+  return !import.meta.env.DEV; // dev=false → 禁用；prod=true → 启用
+}
+
+/**
  * 确保 localStorage 有足够空间存储 CloudBase 认证凭据
  *
  * CloudBase 匿名登录需要将 credentials 写入 localStorage，
@@ -86,6 +106,11 @@ export async function initCloudBase(): Promise<cloudbase.app.App> {
   }
 
   initPromise = (async () => {
+    if (!isCloudSyncEnabled()) {
+      console.warn('[CloudBase] 云同步已禁用（dev 模式或 VITE_CLOUD_SYNC_ENABLED=false），所有云读写将被跳过，仅使用本地缓存。');
+      throw new Error('Cloud sync disabled by config');
+    }
+
     if (!CLOUDBASE_ENV) {
       console.warn('⚠️ VITE_CLOUDBASE_ENV 未配置，AI 功能将不可用');
       throw new Error('CloudBase env not configured');

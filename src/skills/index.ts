@@ -27,14 +27,14 @@ export * from './game-connector/GameConnectorSkill';
 
 // ==================== 初始化 ====================
 
-import { SkillGateway } from './SkillGateway';
+import { SkillGateway, getDefaultGateway } from './SkillGateway';
 import { authSkill } from './auth/AuthSkill';
 import { walletSkill } from './wallet/WalletSkill';
 import { inventorySkill } from './inventory/InventorySkill';
 import { storeSkill } from './store/StoreSkill';
 import { gameConnectorSkill } from './game-connector/GameConnectorSkill';
 
-export const skillGateway = new SkillGateway({
+export const skillGateway = getDefaultGateway({
   debug: process.env.NODE_ENV === 'development',
 });
 

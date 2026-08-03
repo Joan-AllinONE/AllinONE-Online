@@ -244,8 +244,10 @@
     _redeemedIds[key] = true;
 
     var voucherData = detail.voucherData || {};
-    // 优先从 voucherData 读 effect，回退到 detail.itemId
-    var realEffect = voucherData.effect || null;
+    // ⚠️ 兑换码路径下 voucherData.effect 与 detail.effectType 常为占位 'custom'，
+    //    必须排除 'custom'，否则真实效果名会丢失。真实效果名在 detail.itemId。
+    var realEffect = (voucherData.effect && voucherData.effect !== 'custom')
+      ? voucherData.effect : null;
     if (!realEffect && detail.itemId && detail.itemId !== 'custom') {
       realEffect = detail.itemId;
     }
@@ -290,8 +292,9 @@
 >
 > **CustomEvent 的 detail 结构注意**：
 > - `detail.effectType` 固定为 `'custom'`（**不是**真正的效果名，不要用）
-> - `detail.itemId` 才是真正的效果名（如 `'become_big'`、`'add_score'`）
-> - `detail.voucherData` 可能不存在（兑换码路径不携带此字段）
+> - `detail.voucherData.effect` 在兑换码路径下**同样可能是占位 `'custom'`**，解析时务必排除
+> - `detail.itemId` 才是真正的效果名（如 `'reverse_chain'`、`'add_score'`）
+> - `detail.voucherData` 在兑换码路径下**通常存在**（但 `effect` 字段为 `'custom'` 占位），UGC 工坊路径下也可能存在
 >
 > 如果只监听了 `EXTENSION_VOUCHER`，通过兑换码兑换的道具将无法到达游戏。
 
@@ -370,7 +373,9 @@
 在游戏 HTML 的 </body> 前添加 AllinONE 集成代码：
 - UGC 道具栏（固定底部，显示已获得的道具）
 - Toast 通知系统（顶部弹出提示）
-- EXTENSION_VOUCHER 监听器（接收平台下发的道具）
+- EXTENSION_VOUCHER 监听器（通道1：UGC 道具工坊下发的道具）
+- allinone:item-redeemed CustomEvent 监听器（通道2：兑换码兑换下发的道具，**必须监听，否则兑换码道具无法到达游戏**）
+- 解析效果名时**必须排除占位 `'custom'`**：`voucherData.effect` 和 `detail.effectType` 可能为 `'custom'`，真正效果名在 `detail.itemId`
 - effectCode 沙箱引擎（安全编译 + 执行自定义效果函数）
 - EFFECT_HANDLERS 效果表（根据游戏逻辑实现 3-7 种内置效果）
 
@@ -500,7 +505,7 @@
 - [ ] 添加了 Toast 通知系统
 - [ ] 添加了 EXTENSION_VOUCHER 监听器（通道 1：UGC 道具）
 - [ ] 添加了 allinone-item-redeemed CustomEvent 监听器（通道 2：兑换码道具）
-- [ ] CustomEvent 中正确从 `detail.itemId` 读取效果名（而非 `detail.effectType`）
+- [ ] CustomEvent 中正确从 `detail.itemId` 读取效果名（排除 `voucherData.effect` / `detail.effectType` 的占位 `'custom'`）
 - [ ] 实现了 EFFECT_HANDLERS（至少 3 种效果）
 - [ ] 实现了 registerDynamicEffect 沙箱引擎
 - [ ] 沙箱变量正确注入游戏实例

@@ -17,6 +17,378 @@
 import { saveToDB, loadFromDB, deleteFromDB, trySaveLS, tryLoadLS, deleteLS } from './gameFileDb';
 import { gameDeveloperService } from './gameDeveloperService';
 import { writeQueue } from './writeQueue';
+import { isCloudSyncEnabled } from './cloudbase';
+import { globalEventBus } from '@/skills/EventBus';
+
+// ==================== SOP 跨浏览器持久化 ====================
+// 背景：CloudBase 数据库 auth 已损坏，published_games 元数据无法跨浏览器持久化。
+// 但 CloudBase 云存储（uploadFile + getTempFileURL）正常运行（与 published game 文件相同通道）。
+// 因此 SOP 文档复用云存储通道（games/{gameId}/sop/sop.md），同时保留后端 API 作为辅助通道。
+// 加载优先级：DB sopDocument 字段 → 后端 API → 云存储 → schema 回退。
+//
+// ⚠️ v3 修正（2026-07-16）：根因是 getTempFileURL 对匿名用户返回 STORAGE_EXCEED_AUTHORITY，
+// cloudFileID/cloudPath + getTempFileURL 对匿名用户不可用。
+// 而 published game HTML 跨浏览器工作的真正原因是 entryHtmlContent 直接存 DB 文档（匿名可读）。
+// 因此 SOP 复用此 proven pattern — sopDocument 直接存 DB 文档作为首要通道。
+
+const GAMES_API_BASE = '/api/v1/games';
+
+// ---------- SOP 跨浏览器加载通道 ----------
+// v3 修正后的通道优先级（按可靠性排序）：
+// ⓪ DB 文档 sopDocument 字段（proven pattern，匿名用户可读 DB，最可靠）
+// ① 后端 API GET /files/sop/sop.md（公开路由，无 JWT）
+// ② 云存储 cloudFileID + getTempFileURL（仅认证用户可用，匿名返回 STORAGE_EXCEED_AUTHORITY）
+// ③ 云存储 cloudPath + getTempFileURL（最后手段，匿名同样不可用）
+//
+// SOP 保存：
+//   1. 云存储 uploadFile → 捕获 cloudFileID
+//   2. DB 写入 cloudFileManifest + sopDocument（双重保障，匿名可读 sopDocument）
+//   3. 后端 API POST /upload（辅助通道）
+
+const SOP_FILE_NAME = 'sop/sop.md';
+
+interface SopUploadResult {
+  success: boolean;
+  cloudFileID?: string;  // 上传成功时包含 cloudFileID，用于后续跨浏览器加载
+}
+
+/**
+ * 将 SOP 文档上传到 CloudBase 云存储，并返回 cloudFileID 用于跨浏览器加载
+ */
+export async function saveSopToCloudStorage(gameId: string, md: string): Promise<SopUploadResult> {
+  try {
+    const { isCloudBaseReady } = await import('./cloudbase');
+    if (!isCloudBaseReady()) {
+      console.warn('[PublishedGame] SOP 云存储: CloudBase 未就绪');
+      return { success: false };
+    }
+
+    const { uploadGameFiles } = await import('./cloudbaseStorage');
+    const result = await uploadGameFiles(gameId, [{
+      name: 'sop.md',
+      path: SOP_FILE_NAME,
+      content: md,
+    }]);
+
+    if (result.success && result.uploaded > 0 && result.fileManifest.length > 0) {
+      const sopCloudFileID = result.fileManifest[0].cloudFileID;
+      console.log(`[PublishedGame] SOP 已上传到云存储: games/${gameId}/${SOP_FILE_NAME}, cloudFileID=${sopCloudFileID}`);
+      return { success: true, cloudFileID: sopCloudFileID };
+    }
+    console.warn('[PublishedGame] SOP 云存储上传失败:', result.errors);
+    return { success: false };
+  } catch (e) {
+    console.warn('[PublishedGame] SOP 云存储上传异常:', e);
+    return { success: false };
+  }
+}
+
+/**
+ * 从 CloudBase 跨浏览器加载 SOP 文档
+ *
+ * ⚠️ 2026-07-16 v3 根因修正：
+ * getTempFileURL 对匿名用户返回 STORAGE_EXCEED_AUTHORITY（云存储安全规则限制），
+ * 因此 cloudFileID/cloudPath + getTempFileURL 方式对匿名用户不可靠。
+ * 而 published game HTML 跨浏览器工作的真正原因是 entryHtmlContent 直接存 DB 文档，
+ * 匿名用户可读 DB（无鉴权限制）。
+ *
+ * SOP 应复用此 proven pattern — 优先从 DB 文档直接读 sopDocument 字段：
+ * ⓪ DB 文档 sopDocument 字段直接读取（proven pattern，匿名用户可读，最可靠）
+ * ① 后端 API GET /files/sop/sop.md（公开路由，无 JWT）
+ * ② 云存储 cloudFileID + getTempFileURL（仅认证用户可用，匿名用户会 STORAGE_EXCEED_AUTHORITY）
+ * ③ 云存储 cloudPath + getTempFileURL（最后手段，匿名用户同样不可用）
+ */
+export async function loadSopFromCloudStorage(gameId: string): Promise<string | null> {
+  console.log(`[PublishedGame] SOP 跨浏览器加载开始: gameId=${gameId}`);
+  try {
+    const { isCloudBaseReady, getCloudBaseApp } = await import('./cloudbase');
+
+    // ⓪ DB 文档直接读取 sopDocument（proven pattern，与 entryHtmlContent 一致）
+    // 匿名用户可读 published_games 集合，这是最可靠的跨浏览器通道
+    if (isCloudBaseReady()) {
+      try {
+        const db = getCloudBaseApp().database();
+        const res = await db.collection('published_games')
+          .where({ id: gameId })
+          .field({ sopDocument: true })
+          .limit(1)
+          .get();
+        if (res?.data?.length > 0 && res.data[0].sopDocument) {
+          console.log(`[PublishedGame] SOP 从 DB 文档直接加载成功: ${gameId} (${String(res.data[0].sopDocument).length} 字节)`);
+          return res.data[0].sopDocument as string;
+        }
+        console.log(`[PublishedGame] SOP DB 文档无 sopDocument 字段，继续尝试其他通道`);
+      } catch (e) {
+        console.warn('[PublishedGame] SOP DB 文档读取失败:', e);
+      }
+    }
+
+    // ① 后端 API（公开路由，无需 JWT）
+    const backendMd = await loadSopFromBackend(gameId);
+    if (backendMd) {
+      console.log(`[PublishedGame] SOP 从后端 API 加载成功: ${gameId} (${backendMd.length} 字节)`);
+      return backendMd;
+    }
+
+    // ② 云存储 cloudFileID + getTempFileURL（仅认证用户可用）
+    if (isCloudBaseReady()) {
+      const app = getCloudBaseApp() as any;
+      const db = app.database();
+      const sopCloudPath = `games/${gameId}/${SOP_FILE_NAME}`;
+
+      let sopCloudFileID: string | null = null;
+      try {
+        const res = await db.collection('published_games')
+          .where({ id: gameId })
+          .field({ cloudFileManifest: true })
+          .limit(1)
+          .get();
+        if (res?.data?.length > 0) {
+          const manifest = res.data[0].cloudFileManifest as Array<{ fileName: string; cloudFileID: string }> | undefined;
+          if (manifest && manifest.length > 0) {
+            const sopEntry = manifest.find((m: { fileName: string; cloudFileID: string }) => m.fileName === SOP_FILE_NAME);
+            if (sopEntry) {
+              sopCloudFileID = sopEntry.cloudFileID;
+              console.log(`[PublishedGame] SOP cloudFileID 从 manifest 找到: ${sopCloudFileID}`);
+            } else {
+              const existingID = manifest[0].cloudFileID;
+              const bucketPrefix = extractCloudBucketPrefix(existingID);
+              if (bucketPrefix) {
+                sopCloudFileID = `${bucketPrefix}/${sopCloudPath}`;
+                console.log(`[PublishedGame] SOP cloudFileID 从 bucket 前缀构造: ${sopCloudFileID}`);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[PublishedGame] SOP: 读取 cloudFileManifest 失败:', e);
+      }
+
+      if (sopCloudFileID) {
+        const text = await fetchSopByCloudFileID(app, sopCloudFileID, gameId);
+        if (text) return text;
+      }
+
+      // ③ 云存储 cloudPath + getTempFileURL（最后手段）
+      console.log(`[PublishedGame] SOP cloudFileID 方式失败，回退到 cloudPath 方式: ${sopCloudPath}`);
+      try {
+        const result = await app.getTempFileURL({ fileList: [sopCloudPath] });
+        console.log(`[PublishedGame] SOP cloudPath getTempFileURL 结果:`, JSON.stringify(result?.fileList?.map((f: any) => ({ code: f.code, status: f.status, tempFileURL: f.tempFileURL ? '(有URL)' : '(无URL)' }))));
+        if (!result?.fileList || result.fileList.length === 0) {
+          console.warn('[PublishedGame] SOP cloudPath getTempFileURL 返回空 fileList');
+          return null;
+        }
+
+        const item = result.fileList[0];
+        if (!item.tempFileURL) {
+          console.warn(`[PublishedGame] SOP cloudPath getTempFileURL 返回无 tempFileURL, code=${item.code}, status=${item.status}`);
+          return null;
+        }
+
+        const permanentUrl = stripUrlSignature(item.tempFileURL);
+        for (const url of [permanentUrl, item.tempFileURL]) {
+          try {
+            const resp = await fetch(url);
+            if (resp.ok) {
+              const text = await resp.text();
+              if (text && text.length > 0) {
+                console.log(`[PublishedGame] SOP 从云存储(cloudPath回退)加载成功: ${gameId} (${text.length} 字节)`);
+                return text;
+              }
+            }
+          } catch (fetchErr) {
+            console.warn(`[PublishedGame] SOP cloudPath fetch 异常: url=${url.substring(0, 80)}`);
+          }
+        }
+        return null;
+      } catch (e) {
+        console.warn('[PublishedGame] SOP cloudPath getTempFileURL 异常:', e);
+        return null;
+      }
+    }
+
+    console.warn(`[PublishedGame] SOP 所有通道均失败: ${gameId}`);
+    return null;
+  } catch (e) {
+    console.warn('[PublishedGame] SOP 跨浏览器加载异常:', e);
+    return null;
+  }
+}
+
+/** 从已有 cloudFileID 提取 cloud://envId.bucketId 前缀，用于构造其他文件的 cloudFileID */
+function extractCloudBucketPrefix(cloudFileID: string): string | null {
+  // cloudFileID 格式: cloud://envId.bucketId/cloudPath
+  // 例如: cloud://allinonegaming-d4gmsmrzz573264f6.616c-...-1303031594/games/game-xxx/index.html
+  // 提取 cloud://envId.bucketId 部分（不含 /cloudPath）
+  if (!cloudFileID.startsWith('cloud://')) return null;
+  const slashIdx = cloudFileID.indexOf('/', 8); // 8 = 'cloud://' 的长度
+  if (slashIdx < 0) return null;
+  return cloudFileID.substring(0, slashIdx);
+}
+
+/** 用 cloudFileID 获取下载 URL 并 fetch 内容 */
+async function fetchSopByCloudFileID(app: any, cloudFileID: string, gameId: string): Promise<string | null> {
+  try {
+    const result = await app.getTempFileURL({ fileList: [cloudFileID] });
+    console.log(`[PublishedGame] SOP cloudFileID getTempFileURL 结果:`, JSON.stringify(result?.fileList?.map((f: any) => ({ code: f.code, status: f.status, tempFileURL: f.tempFileURL ? '(有URL)' : '(无URL)' }))));
+    if (!result?.fileList || result.fileList.length === 0) {
+      console.warn('[PublishedGame] SOP cloudFileID getTempFileURL 返回空 fileList');
+      return null;
+    }
+
+    const item = result.fileList[0];
+    if (!item.tempFileURL) {
+      console.warn(`[PublishedGame] SOP cloudFileID getTempFileURL 返回无 tempFileURL, code=${item.code}, status=${item.status}`);
+      return null;
+    }
+
+    // 尝试永久公开 URL（stripUrlSignature）+ 临时 URL
+    const permanentUrl = stripUrlSignature(item.tempFileURL);
+    for (const url of [permanentUrl, item.tempFileURL]) {
+      try {
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const text = await resp.text();
+          if (text && text.length > 0) {
+            console.log(`[PublishedGame] SOP 从云存储(cloudFileID)加载成功: ${gameId} (${text.length} 字节)`);
+            return text;
+          }
+        }
+        console.warn(`[PublishedGame] SOP cloudFileID fetch 失败: status=${resp.status}`);
+      } catch (fetchErr) {
+        console.warn(`[PublishedGame] SOP cloudFileID fetch 异常:`, fetchErr);
+      }
+    }
+    return null;
+  } catch (e) {
+    console.warn('[PublishedGame] SOP cloudFileID getTempFileURL 异常:', e);
+    return null;
+  }
+}
+
+/** 将 SOP cloudFileID 添加到游戏的 cloudFileManifest 并写数据库（让其他浏览器可读取）
+ *  同时将 sopDocument 内容也写入 DB（proven pattern，与 entryHtmlContent 一致，匿名用户可读）
+ */
+function addSopToCloudManifest(gameId: string, sopCloudFileID: string, sopMd?: string): void {
+  // ① 读取当前缓存的游戏 manifest
+  let games = _publishedGamesCache || loadGamesFromCache();
+  const game = games.find(g => g.id === gameId);
+
+  let manifest: Array<{ fileName: string; cloudFileID: string }>;
+
+  if (game) {
+    // 游戏在缓存中 → 更新本地缓存
+    manifest = game.cloudFileManifest || [];
+    const existingIdx = manifest.findIndex((m: { fileName: string; cloudFileID: string }) => m.fileName === SOP_FILE_NAME);
+    if (existingIdx >= 0) {
+      manifest[existingIdx] = { fileName: SOP_FILE_NAME, cloudFileID: sopCloudFileID };
+    } else {
+      manifest.push({ fileName: SOP_FILE_NAME, cloudFileID: sopCloudFileID });
+    }
+    game.cloudFileManifest = manifest;
+    saveGamesToCache(games);
+  } else {
+    // ⚠️ 游戏不在缓存中（savePublishedGame 的 invalidateGamesCache 可能已清空）
+    // 不回退 — 直接构建 manifest 写入 DB
+    console.warn(`[PublishedGame] addSopToCloudManifest: 游戏 ${gameId} 不在缓存中，直接 DB 写入`);
+    manifest = [{ fileName: SOP_FILE_NAME, cloudFileID: sopCloudFileID }];
+  }
+
+  // ② 写数据库：cloudFileManifest + sopDocument（双重保障）
+  // sopDocument 直接存 DB 文档是匿名用户可读的 proven pattern（与 entryHtmlContent 一致）
+  const dbData: Record<string, any> = {
+    id: gameId,
+    cloudFileManifest: manifest,
+    _sopManifestUpdatedAt: Date.now(),
+  };
+  if (sopMd) {
+    dbData.sopDocument = sopMd;
+    dbData._sopDocumentUpdatedAt = Date.now();
+  }
+
+  writeQueue.enqueue({
+    collection: 'published_games',
+    operation: 'upsert',
+    where: { id: gameId },
+    data: dbData,
+  });
+  console.log(`[PublishedGame] SOP cloudFileID + sopDocument 已入队写 DB: ${sopCloudFileID}${sopMd ? ` (${sopMd.length} 字节)` : ''}`);
+
+  // ③ 同时保存 SOP 到后端 API（辅助通道，fire-and-forget）
+  if (sopMd) {
+    saveSopToBackend(gameId, sopMd).then(ok => {
+      if (ok) console.log(`[PublishedGame] SOP 后端 API 保存成功: ${gameId}`);
+      else console.warn(`[PublishedGame] SOP 后端 API 保存失败（后端可能未运行）`);
+    }).catch(() => {});
+  }
+}
+
+// ---------- 后端 API 通道（辅助通道，需后端运行） ----------
+
+let _backendSopToken: string | null = null;
+
+/** 获取后端 dev-token（无需登录，仅用于签名 JWT 以调用认证 API） */
+async function getBackendSopToken(): Promise<string | null> {
+  if (_backendSopToken) return _backendSopToken;
+  try {
+    const res = await fetch(`${GAMES_API_BASE}/dev-token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'platform-admin' }),
+    });
+    const json = await res.json();
+    if (json?.success && json?.data?.token) {
+      _backendSopToken = json.data.token;
+      return _backendSopToken;
+    }
+  } catch {
+    /* dev-token 不可用（如本地无后端）→ 回退云存储 */
+  }
+  return null;
+}
+
+/**
+ * 将 SOP 文档持久化到后端 API（作为游戏文件 sop/sop.md）
+ * 返回 true 表示成功，false 表示后端不可用
+ */
+export async function saveSopToBackend(gameId: string, md: string): Promise<boolean> {
+  try {
+    const token = await getBackendSopToken();
+    if (!token) return false;
+    const res = await fetch(`${GAMES_API_BASE}/${encodeURIComponent(gameId)}/upload`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        files: [
+          { path: 'sop/sop.md', name: 'sop.md', content: md, size: md.length },
+        ],
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 从后端 API 读取 SOP 文档（跨浏览器辅助通道）
+ * 返回 markdown 字符串，或 null（不存在/后端不可用）
+ */
+export async function loadSopFromBackend(gameId: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `${GAMES_API_BASE}/${encodeURIComponent(gameId)}/files/sop/sop.md`
+    );
+    if (!res.ok) return null;
+    const text = await res.text();
+    return text && text.length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * 效果类型 - 支持内置类型和自定义扩展
@@ -110,8 +482,12 @@ export interface PublishedGame {
   itemSop?: GameItemSop;
   /** 道具工坊上传的 SOP 原始文档（与 itemSop 完全独立，互不影响） */
   sopDocument?: string;
+  /** 云存储文件清单（fileName → cloudFileID），SOP 文件也存于此，跨浏览器加载用 cloudFileID 模式 */
+  cloudFileManifest?: Array<{ fileName: string; cloudFileID: string }>;
   hostingType?: 'server' | 'inline' | 'external';
   baseUrl?: string;
+  /** 是否为模块化多文件游戏（RequireJS/AMD/动态import）。模块化游戏必须用真实URL托管，srcDoc 内联会白屏 */
+  isModular?: boolean;
 }
 
 const CACHE_KEY = 'allinone_published_games';  // localStorage 缓存键名（仅缓存）
@@ -261,7 +637,10 @@ async function loadGameFromCloudBase(gameId: string): Promise<PublishedGame | nu
  * 保存发布的游戏
  * CloudBase 数据库为主存储，本地缓存为辅助
  */
-export async function savePublishedGame(game: Omit<PublishedGame, 'players' | 'status'>): Promise<PublishedGame> {
+export async function savePublishedGame(
+  game: Omit<PublishedGame, 'players' | 'status'>,
+  opts?: { waitForCloud?: boolean }
+): Promise<PublishedGame> {
   const newGame: PublishedGame = {
     ...game,
     players: game.players ?? 0,
@@ -272,11 +651,20 @@ export async function savePublishedGame(game: Omit<PublishedGame, 'players' | 's
   };
 
   // ① 写入 CloudBase 数据库（主存储，通过写入队列）
-  writeQueue.enqueue({
-    collection: 'published_games',
-    operation: 'upsert',
-    data: newGame as any,
-  });
+  // waitForCloud=true 时阻塞等待落云，用于 SOP 等关键字段，避免后台云刷新覆盖尚未落云的本地写入
+  if (opts?.waitForCloud) {
+    await writeQueue.enqueueAndWait({
+      collection: 'published_games',
+      operation: 'upsert',
+      data: newGame as any,
+    });
+  } else {
+    writeQueue.enqueue({
+      collection: 'published_games',
+      operation: 'upsert',
+      data: newGame as any,
+    });
+  }
 
   // ② 更新本地缓存
   let games = _publishedGamesCache || loadGamesFromCache();
@@ -287,6 +675,43 @@ export async function savePublishedGame(game: Omit<PublishedGame, 'players' | 's
     games.push(newGame);
   }
   saveGamesToCache(games);
+
+  // ②.5 若含 SOP 文档 → 同步持久化到跨浏览器通道
+  // v3 修正：SOP 跨浏览器持久化优先用 DB 文档 sopDocument 字段（proven pattern），
+  // 云存储 + 后端 API 作为辅助通道
+  if (newGame.sopDocument) {
+    const sopMd = newGame.sopDocument;
+
+    // 主通道：云存储上传（捕获 cloudFileID → 写 DB manifest + sopDocument）
+    saveSopToCloudStorage(game.id, sopMd).then(uploadResult => {
+      if (uploadResult.success && uploadResult.cloudFileID) {
+        // v3 修正：传入 sopMd 确保 sopDocument 也写入 DB（匿名用户可读的 proven pattern）
+        addSopToCloudManifest(game.id, uploadResult.cloudFileID, sopMd);
+      } else if (!uploadResult.success) {
+        console.warn('[PublishedGame] SOP 云存储保存失败，尝试后端 API 辅助通道');
+        // 后端 API 作为辅助通道
+        saveSopToBackend(game.id, sopMd).then(ok2 => {
+          if (!ok2) console.warn('[PublishedGame] SOP 后端保存也失败，已保留本地缓存兜底');
+        }).catch(() => {});
+        // 同时尝试单独写 sopDocument 到 DB（兜底）
+        writeQueue.enqueue({
+          collection: 'published_games',
+          operation: 'upsert',
+          where: { id: game.id },
+          data: { id: game.id, sopDocument: sopMd, _sopDocumentUpdatedAt: Date.now() },
+        });
+      }
+    }).catch(() => {
+      saveSopToBackend(game.id, sopMd).catch(() => {});
+      // 兜底：写 sopDocument 到 DB
+      writeQueue.enqueue({
+        collection: 'published_games',
+        operation: 'upsert',
+        where: { id: game.id },
+        data: { id: game.id, sopDocument: sopMd, _sopDocumentUpdatedAt: Date.now() },
+      });
+    });
+  }
 
   // ③ 自动创建/更新游戏开发者账户（fire-and-forget）
   if (game.publisherId || game.publisherName) {
@@ -303,6 +728,9 @@ export async function savePublishedGame(game: Omit<PublishedGame, 'players' | 's
   window.dispatchEvent(new CustomEvent('game-published', { detail: { game: newGame } }));
   invalidateGamesCache();
   console.log('[PublishedGame] 游戏已保存到 CloudBase + 缓存:', newGame.name);
+
+  // 活动中心埋点：游戏发布
+  try { globalEventBus.emit('game.published', { gameId: newGame.id, title: newGame.name }, { userId: newGame.publisherId || 'anonymous', sessionId: 'web' }); } catch { /* ignore */ }
 
   return newGame;
 }
@@ -346,6 +774,8 @@ export function getPublishedGames(): PublishedGame[] {
  * 指数退避：1s → 2s → 4s，最多 3 次
  */
 function scheduleCloudRefresh(): void {
+  if (!isCloudSyncEnabled()) return; // dev 不写云：禁止后台拉取线上数据覆盖本地视图
+
   refreshGamesFromCloudBase()
     .then((count) => {
       _cloudRefreshRetries = 0; // 成功，重置计数器
@@ -370,14 +800,62 @@ function scheduleCloudRefresh(): void {
  * 数据库是权威数据源，本地缓存仅用于加速
  */
 export async function refreshGamesFromCloudBase(): Promise<number> {
+  if (!isCloudSyncEnabled()) return 0; // dev 不写云：不触达云端
+
   const cloudGames = await loadGamesFromCloudBase();
+
+  // 🆕 合并本地缓存中尚存的 SOP 字段，避免云刷新覆盖尚未落云的本地写入
+  // 场景：道具工坊上传 SOP 文档后触发的后台云刷新，可能先于 writeQueue 落云，
+  // 此时云端还没有 sopDocument / itemSop，若直接覆盖本地缓存，SOP 会在刷新后丢失。
+  // 策略：以云端为权威，但云端缺失的 SOP 字段用本地值补齐（仅补齐，不反向覆盖云端）。
+  let mergedGames = cloudGames;
+  try {
+    const localGames = _publishedGamesCache || loadGamesFromCache();
+    if (localGames.length > 0) {
+      const localMap = new Map(localGames.map(g => [g.id, g]));
+      mergedGames = cloudGames.map(cg => {
+        const lg = localMap.get(cg.id);
+        if (!lg) return cg;
+        return {
+          ...cg,
+          sopDocument: cg.sopDocument ?? lg.sopDocument,
+          itemSop: cg.itemSop ?? lg.itemSop,
+        };
+      });
+    }
+  } catch {
+    // 合并失败不影响主流程，退化为直接使用云端数据
+  }
+
+  // 🆕 SOP 跨浏览器补齐（云存储为主 + 后端 API 为辅）
+  // 对云端/本地都缺失 sopDocument 的游戏，从跨浏览器通道加载补齐。
+  // 优先云存储（与 published game 文件同一通道，正常运行），后端 API 作为辅助。
+  try {
+    const needSop = mergedGames.filter(g => !g.sopDocument);
+    if (needSop.length > 0) {
+      await Promise.all(needSop.map(async (g) => {
+        // 主通道：云存储
+        const md = await loadSopFromCloudStorage(g.id);
+        if (md) {
+          g.sopDocument = md;
+          return;
+        }
+        // 辅助通道：后端 API
+        const md2 = await loadSopFromBackend(g.id);
+        if (md2) g.sopDocument = md2;
+      }));
+    }
+  } catch {
+    // 跨浏览器通道不可用不影响主流程
+  }
+
   // 无论是否为空都更新缓存 + 派发事件（空也表示已同步过）
-  saveGamesToCache(cloudGames);
+  saveGamesToCache(mergedGames);
   window.dispatchEvent(new CustomEvent('games-list-updated', {
-    detail: { count: cloudGames.length }
+    detail: { count: mergedGames.length }
   }));
-  console.log(`[PublishedGame] 从 CloudBase 刷新缓存，${cloudGames.length} 个游戏`);
-  return cloudGames.length;
+  console.log(`[PublishedGame] 从 CloudBase 刷新缓存，${mergedGames.length} 个游戏`);
+  return mergedGames.length;
 }
 
 /**
@@ -507,69 +985,99 @@ export async function saveGameFiles(
   }
 
   // ① 上传到 CloudBase 云存储（主存储）
-  import('./cloudbaseStorage').then(({ uploadGameFiles }) => {
-    const uploadFiles = files.map(f => ({
-      name: f.name,
-      path: f.path,
-      content: typeof f.content === 'string' ? f.content : String(f.content),
-    }));
-    
-    uploadGameFiles(gameId, uploadFiles).then(result => {
-      if (result.success) {
-        console.log(`[PublishedGame] 游戏文件已上传到云存储: ${gameId}, ${result.uploaded} 个文件`);
-        // 将 cloudFileID 清单写入 published_games 文档，使跨浏览器可下载
-        if (result.fileManifest.length > 0) {
-          writeQueue.enqueue({
-            collection: 'published_games',
-            operation: 'upsert',
-            where: { id: gameId },
-            data: { id: gameId, cloudFileManifest: result.fileManifest, _cloudFilesUpdatedAt: Date.now() },
-          });
+  // dev 不写云：跳过云端上传与文档写入，仅保留本地缓存（见下方 ②）
+  if (isCloudSyncEnabled()) {
+    import('./cloudbaseStorage').then(({ uploadGameFiles }) => {
+      // 将文件内容统一转换为正确的格式：
+      // - string：直接使用（文本文件）
+      // - Uint8Array/ArrayBuffer：文本文件用 TextDecoder 解码，二进制文件传原始 bytes
+      //   ⚠️ 绝不能用 String(uint8Array)——会返回 "47,42,10,..." 逗号分隔字节值
+      const uploadFiles = files.map(f => {
+        const filePath = f.path || f.name;
+        let content: string | Uint8Array;
+
+        if (typeof f.content === 'string') {
+          content = f.content;
+        } else if (f.content instanceof Uint8Array || f.content instanceof ArrayBuffer) {
+          const bytes = f.content instanceof Uint8Array ? f.content : new Uint8Array(f.content);
+          // 判断是否为文本文件（JS/HTML/CSS/JSON/XML/TXT/MD 等）
+          const isText = /\.(html?|js|mjs|ts|css|json|xml|txt|md|csv|svg|con|cfg|ini)$/i.test(filePath);
+          if (isText) {
+            content = new TextDecoder('utf-8').decode(bytes);
+          } else {
+            // 二进制文件：传原始 Uint8Array，由 uploadGameFiles 处理
+            content = bytes;
+          }
+        } else {
+          content = String(f.content);
         }
-      } else {
-        console.warn(`[PublishedGame] 云存储上传部分失败: ${result.errors.join(', ')}`);
+
+        return {
+          name: f.name,
+          path: filePath,
+          content,
+        };
+      });
+
+      uploadGameFiles(gameId, uploadFiles as Array<{ name: string; content: string | Uint8Array; path: string }>).then(result => {
+        if (result.success) {
+          console.log(`[PublishedGame] 游戏文件已上传到云存储: ${gameId}, ${result.uploaded} 个文件`);
+          // 将 cloudFileID 清单写入 published_games 文档，使跨浏览器可下载
+          if (result.fileManifest.length > 0) {
+            writeQueue.enqueue({
+              collection: 'published_games',
+              operation: 'upsert',
+              where: { id: gameId },
+              data: { id: gameId, cloudFileManifest: result.fileManifest, _cloudFilesUpdatedAt: Date.now() },
+            });
+          }
+        } else {
+          console.warn(`[PublishedGame] 云存储上传部分失败: ${result.errors.join(', ')}`);
+        }
+      }).catch(() => {});
+
+      // ② 同时存储入口 HTML 内容到文档（跨浏览器立即可用，无需云存储下载）
+      // 找到第一个 HTML 文件作为入口内容
+      const htmlFile = uploadFiles.find(f => {
+        const name = (f.path || f.name).toLowerCase();
+        return name.endsWith('.html') || name.endsWith('.htm');
+      });
+      if (htmlFile) {
+        writeQueue.enqueue({
+          collection: 'published_games',
+          operation: 'upsert',
+          where: { id: gameId },
+          data: {
+            id: gameId,
+            entryHtmlContent: typeof htmlFile.content === 'string' ? htmlFile.content : String(htmlFile.content),
+            _entryHtmlUpdatedAt: Date.now(),
+          },
+        });
       }
     }).catch(() => {});
-
-    // ② 同时存储入口 HTML 内容到文档（跨浏览器立即可用，无需云存储下载）
-    // 找到第一个 HTML 文件作为入口内容
-    const htmlFile = uploadFiles.find(f => {
-      const name = (f.path || f.name).toLowerCase();
-      return name.endsWith('.html') || name.endsWith('.htm');
-    });
-    if (htmlFile) {
-      writeQueue.enqueue({
-        collection: 'published_games',
-        operation: 'upsert',
-        where: { id: gameId },
-        data: {
-          id: gameId,
-          entryHtmlContent: typeof htmlFile.content === 'string' ? htmlFile.content : String(htmlFile.content),
-          _entryHtmlUpdatedAt: Date.now(),
-        },
-      });
-    }
-  }).catch(() => {});
-
-  // ② 同时保存本地缓存（加速后续读取）
-  const json = JSON.stringify(storableFiles);
-  if (trySaveLS(gameId, json)) {
-    deleteFromDB(gameId).catch(() => {}); // 清理 IndexedDB 残留避免双写
-    console.log(`[PublishedGame] 游戏文件已缓存到 localStorage: ${gameId}, ${storableFiles.length} 个文件`);
-    return { saved: storableFiles.length, skipped: 0, warnings };
   }
 
-  // ③ localStorage 缓存空间不足 → IndexedDB 缓存
+  // ② 同时保存本地缓存（加速页面内同步读取）
+  const json = JSON.stringify(storableFiles);
+  // 始终写入 IndexedDB：Service Worker 离线兜底只读 IndexedDB，
+  // 之前小游戏(<4.5MB)只写 localStorage 且会 deleteFromDB，导致 SW 无法离线/跨 origin 回放。
   try {
     await saveToDB(gameId, json);
-    console.log(`[PublishedGame] 游戏文件已缓存到 IndexedDB: ${gameId}, ${storableFiles.length} 个文件`);
-    return { saved: storableFiles.length, skipped: 0, warnings };
   } catch (e) {
-    const msg = `IndexedDB 缓存写入也失败: ${e instanceof Error ? e.message : String(e)}`;
-    console.error(`[PublishedGame] ${msg}`);
-    warnings.push(msg);
-    return { saved: 0, skipped: 0, warnings };
+    console.warn(
+      `[PublishedGame] IndexedDB 写入失败（降级仅 localStorage）: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
+  if (trySaveLS(gameId, json)) {
+    console.log(
+      `[PublishedGame] 游戏文件已缓存到 localStorage + IndexedDB: ${gameId}, ${storableFiles.length} 个文件`,
+    );
+  } else {
+    console.log(
+      `[PublishedGame] 游戏文件已缓存到 IndexedDB: ${gameId}, ${storableFiles.length} 个文件`,
+    );
+  }
+  return { saved: storableFiles.length, skipped: 0, warnings };
 }
 
 /**
@@ -1073,10 +1581,12 @@ export async function deleteGameFiles(gameId: string): Promise<void> {
     console.error('[PublishedGame] 删除 IndexedDB 缓存失败:', e);
   }
 
-  // ② 清除云存储
-  import('./cloudbaseStorage').then(({ deleteCloudGameFiles }) => {
-    deleteCloudGameFiles(gameId).catch(() => {});
-  }).catch(() => {});
+  // ② 清除云存储（dev 不写云：跳过）
+  if (isCloudSyncEnabled()) {
+    import('./cloudbaseStorage').then(({ deleteCloudGameFiles }) => {
+      deleteCloudGameFiles(gameId).catch(() => {});
+    }).catch(() => {});
+  }
 
   console.log(`[PublishedGame] 游戏文件缓存已清除: ${gameId}`);
 }

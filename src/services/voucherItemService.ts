@@ -48,7 +48,7 @@ import { gameProposalService } from './gameProposalService';
 import { getDefaultRegistry } from '@/publishing-center/protocol/SchemaRegistry';
 import { ExtensionVoucherService } from '@/publishing-center/protocol/ExtensionVoucher';
 import { getDefaultEngine } from '@/publishing-center/protocol/ProtocolEngine';
-import { writeQueue } from './writeQueue';
+import { saveVoucherToBackend, loadCollectionFromBackend } from './voucherBackend';
 
 // ==================== 常量定义 ====================
 
@@ -109,19 +109,17 @@ function loadTemplates(): ItemVoucherTemplate[] {
     const data = raw ? JSON.parse(raw) : [];
     if (!_templatesCloudSyncInitiated) {
       _templatesCloudSyncInitiated = true;
-      import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-        if (!isCloudBaseReady()) return;
-        getCloudBaseApp().database().collection('voucher_templates').limit(500).get().then(res => {
-          if (res.data.length === 0) return;
-          const freshRaw = localStorage.getItem(ITEM_TEMPLATE_STORAGE_KEY);
-          const fresh: ItemVoucherTemplate[] = freshRaw ? JSON.parse(freshRaw) : [];
-          // ✅ CloudBase 数据覆盖本地同名 ID（云端为准）
-          const cloudMap = new Map(res.data.map(d => [d.id, d]));
-          const localOnly = fresh.filter(t => !cloudMap.has(t.id));
-          const merged = [...res.data as ItemVoucherTemplate[], ...localOnly];
-          localStorage.setItem(ITEM_TEMPLATE_STORAGE_KEY, JSON.stringify(merged));
-          window.dispatchEvent(new CustomEvent('templates-list-updated'));
-        }).catch(() => {});
+      // Bug 013 修复：读取改分页 + 后端 API 兜底，绝不保留 limit(500) 硬截断
+      loadCollectionFromBackend<ItemVoucherTemplate>('voucher_templates').then(cloud => {
+        if (cloud.length === 0) return;
+        const freshRaw = localStorage.getItem(ITEM_TEMPLATE_STORAGE_KEY);
+        const fresh: ItemVoucherTemplate[] = freshRaw ? JSON.parse(freshRaw) : [];
+        // ✅ 后端数据覆盖本地同名 ID（云端为准）
+        const cloudMap = new Map(cloud.map(d => [d.id, d]));
+        const localOnly = fresh.filter(t => !cloudMap.has(t.id));
+        const merged = [...cloud, ...localOnly];
+        localStorage.setItem(ITEM_TEMPLATE_STORAGE_KEY, JSON.stringify(merged));
+        window.dispatchEvent(new CustomEvent('templates-list-updated'));
       }).catch(() => {});
     }
     return data;
@@ -138,13 +136,9 @@ function saveTemplates(templates: ItemVoucherTemplate[]): void {
 }
 
 function syncTemplatesToCloud(templates: ItemVoucherTemplate[]): void {
-  // 通过写入队列，全量入队不再截断
+  // Bug 013 修复：写入改走 gamesApi 云函数（写入路径弃用 writeQueue）
   for (const t of templates) {
-    writeQueue.enqueue({
-      collection: 'voucher_templates',
-      operation: 'upsert',
-      data: t as any,
-    });
+    saveVoucherToBackend('voucher_templates', t as any).catch(() => {});
   }
 }
 
@@ -154,19 +148,17 @@ function loadPurchases(): ItemVoucherPurchase[] {
     const data = raw ? JSON.parse(raw) : [];
     if (!_purchasesCloudSyncInitiated) {
       _purchasesCloudSyncInitiated = true;
-      import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-        if (!isCloudBaseReady()) return;
-        getCloudBaseApp().database().collection('purchases').limit(500).get().then(res => {
-          if (res.data.length === 0) return;
-          const freshRaw = localStorage.getItem(ITEM_PURCHASE_STORAGE_KEY);
-          const fresh: ItemVoucherPurchase[] = freshRaw ? JSON.parse(freshRaw) : [];
-          // ✅ CloudBase 数据覆盖本地同名 ID（云端为准）
-          const cloudMap = new Map(res.data.map(d => [d.id, d]));
-          const localOnly = fresh.filter(p => !cloudMap.has(p.id));
-          const merged = [...res.data as ItemVoucherPurchase[], ...localOnly];
-          localStorage.setItem(ITEM_PURCHASE_STORAGE_KEY, JSON.stringify(merged));
-          window.dispatchEvent(new CustomEvent('purchases-list-updated'));
-        }).catch(() => {});
+      // Bug 013 修复：读取改分页 + 后端 API 兜底，绝不保留 limit(500) 硬截断
+      loadCollectionFromBackend<ItemVoucherPurchase>('purchases').then(cloud => {
+        if (cloud.length === 0) return;
+        const freshRaw = localStorage.getItem(ITEM_PURCHASE_STORAGE_KEY);
+        const fresh: ItemVoucherPurchase[] = freshRaw ? JSON.parse(freshRaw) : [];
+        // ✅ 后端数据覆盖本地同名 ID（云端为准）
+        const cloudMap = new Map(cloud.map(d => [d.id, d]));
+        const localOnly = fresh.filter(p => !cloudMap.has(p.id));
+        const merged = [...cloud, ...localOnly];
+        localStorage.setItem(ITEM_PURCHASE_STORAGE_KEY, JSON.stringify(merged));
+        window.dispatchEvent(new CustomEvent('purchases-list-updated'));
       }).catch(() => {});
     }
     return data;
@@ -183,13 +175,9 @@ function savePurchases(purchases: ItemVoucherPurchase[]): void {
 }
 
 function syncPurchasesToCloud(purchases: ItemVoucherPurchase[]): void {
-  // 通过写入队列，全量入队不再截断
+  // Bug 013 修复：写入改走 gamesApi 云函数（写入路径弃用 writeQueue）
   for (const p of purchases) {
-    writeQueue.enqueue({
-      collection: 'purchases',
-      operation: 'upsert',
-      data: p as any,
-    });
+    saveVoucherToBackend('purchases', p as any).catch(() => {});
   }
 }
 

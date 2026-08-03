@@ -7,6 +7,8 @@ import { createContext, useState, useEffect, ReactNode, useCallback } from 'reac
 import { useContext } from 'react';
 import { authSkill, UserProfile } from '@/skills/auth/AuthSkill';
 import { initCloudBase, isCloudBaseReady } from '@/services/cloudbase';
+import { track } from '@/services/analytics';
+import { globalEventBus } from '@/skills/EventBus';
 
 export interface AuthUser {
   id: string;
@@ -112,19 +114,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const r = await authSkill.login({ email, password }, {} as any);
+    if (r.success) {
+      try {
+        const saved = localStorage.getItem('allinone_user');
+        const u = saved ? JSON.parse(saved) : null;
+        track({ type: 'login', userId: u?.uid, payload: { role: u?.role || 'player' } });
+        globalEventBus.emit('daily.login', { userId: u?.uid, at: Date.now() }, { userId: u?.uid || 'anonymous', sessionId: 'web' });
+      } catch { /* ignore */ }
+    }
     return { success: r.success, error: r.error };
   }, []);
 
   const register = useCallback(async (email: string, password: string, nickname: string) => {
     const r = await authSkill.register({ email, password, nickname }, {} as any);
+    if (r.success) {
+      try {
+        const saved = localStorage.getItem('allinone_user');
+        const u = saved ? JSON.parse(saved) : null;
+        track({ type: 'register', userId: u?.uid, payload: { role: u?.role || 'player' } });
+        globalEventBus.emit('user.registered', { userId: u?.uid, nickname, at: Date.now() }, { userId: u?.uid || 'anonymous', sessionId: 'web' });
+      } catch { /* ignore */ }
+    }
     return { success: r.success, error: r.error };
   }, []);
 
   const logout = useCallback(async () => {
+    try {
+      track({ type: 'logout', userId: currentUser?.uid || currentUser?.id });
+    } catch { /* ignore */ }
     await authSkill.logout({} as never, {} as any);
     setCurrentUser(null);
     setIsAuthenticated(false);
-  }, []);
+  }, [currentUser]);
 
   return (
     <AuthContext.Provider value={{ isAuthenticated, currentUser, isLoading, login, register, logout, setIsAuthenticated, setCurrentUser }}>

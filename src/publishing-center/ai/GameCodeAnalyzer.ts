@@ -639,6 +639,36 @@ export class GameCodeAnalyzer {
       console.log('[GameCodeAnalyzer] 使用第一个文件作为入口:', firstFile);
     }
 
+    // 模块化检测：依赖运行时模块加载器（RequireJS/AMD/动态 import）的多文件游戏
+    // 此类游戏无法用 srcDoc 内联方式渲染（运行时 XHR 子资源会 404 → 白屏），必须用真实 URL 托管
+    let isModular = false;
+    const modularSignatures = [
+      'requirejs', 'requirejs.config', 'data-main', 'define(', 'require(',
+      'import(', 'import.meta', 'systemjs', 'head.js', 'labjs', 'curl.js',
+      'module.exports', 'exports.', "type=\"module\"", "type='module'",
+      'LF/loader', 'async!', 'css!', 'text!', 'exports:' // RequireJS 插件前缀
+    ];
+    for (const [path, content] of this.fileContents) {
+      const lower = content.toLowerCase();
+      if (modularSignatures.some(sig => lower.includes(sig.toLowerCase()))) {
+        isModular = true;
+        console.log('[GameCodeAnalyzer] 检测到模块化特征:', path);
+        break;
+      }
+    }
+    // HTML 入口通过 data-main 指定加载器入口，也属于模块化
+    if (!isModular) {
+      for (const htmlPath of htmlFiles) {
+        const c = (this.fileContents.get(htmlPath) || '').toLowerCase();
+        if (c.includes('data-main') || /<script[^>]+src=[^>]+require[^>]*>/i.test(c)) {
+          isModular = true;
+          console.log('[GameCodeAnalyzer] HTML 入口使用模块加载器:', htmlPath);
+          break;
+        }
+      }
+    }
+    console.log('[GameCodeAnalyzer] isModular:', isModular);
+
     const result = {
       totalFiles,
       entryPoints: [...new Set(entryPoints)],
@@ -649,6 +679,7 @@ export class GameCodeAnalyzer {
       hasPackageJson: this.files.has('package.json') || Array.from(this.files.keys()).some(k => k.endsWith('package.json')),
       hasBuildScript: false,
       estimatedSize,
+      isModular,
     };
 
     console.log('[GameCodeAnalyzer] 文件结构分析结果:', {

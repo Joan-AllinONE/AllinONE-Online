@@ -40,15 +40,16 @@ src/contexts/authContext.tsx(9,25): error TS6133: 'isCloudBaseReady' is declared
 src/data/simulatedPlayers.ts(222,11): error TS6133: 'isDev' is declared but its value is never read.
 src/pages/GameCenter.tsx(4,34): error TS6133: 'PublishedGame' is declared but its value is never read.
 src/pages/GameCenter.tsx(5,49): error TS6133: 'PlatformBindingConfig' is declared but its value is never read.
-src/pages/GameCenter.tsx(7,17): error TS6133: 'CheckCircle' is declared but its value is never read.
-src/pages/GameCenter.tsx(96,10): error TS6133: 'isLoading' is declared but its value is never read.
-src/pages/GamePlay.tsx(17,26): error TS6133: 'schemaRegistry' is declared but its value is never read.
+src/pages/GameCenter.tsx(9,17): error TS6133: 'CheckCircle' is declared but its value is never read.
+src/pages/GameCenter.tsx(98,10): error TS6133: 'isLoading' is declared but its value is never read.
+src/pages/GameCenter.tsx(697,56): error TS6133: 'count' is declared but its value is never read.
+src/pages/GamePlay.tsx(16,26): error TS6133: 'schemaRegistry' is declared but its value is never read.
 src/pages/GameStore.tsx(26,15): error TS6133: 'Users' is declared but its value is never read.
 src/pages/GameStore.tsx(26,29): error TS6133: 'ChevronRight' is declared but its value is never read.
 src/pages/GameStore.tsx(28,9): error TS6133: 'CheckCircle' is declared but its value is never read.
 src/pages/GameStore.tsx(193,17): error TS6133: 'storeConfig' is declared but its value is never read.
-src/pages/GameStore.tsx(503,9): error TS6133: 'addToCart' is declared but its value is never read.
-src/pages/GameStore.tsx(517,9): error TS6133: 'handleUseRedeemCode' is declared but its value is never read.
+src/pages/GameStore.tsx(586,9): error TS6133: 'addToCart' is declared but its value is never read.
+src/pages/GameStore.tsx(600,9): error TS6133: 'handleUseRedeemCode' is declared but its value is never read.
 src/pages/ItemMarket.tsx(13,12): error TS6133: 'Star' is declared but its value is never read.
 src/pages/ItemMarket.tsx(13,25): error TS6133: 'Tag' is declared but its value is never read.
 src/pages/ItemMarket.tsx(13,30): error TS6133: 'TrendingUp' is declared but its value is never read.
@@ -64,7 +65,7 @@ src/pages/ItemWorkshop.tsx(16,33): error TS6133: 'Info' is declared but its valu
 src/pages/ItemWorkshop.tsx(22,1): error TS6133: 'ItemSupplyPolicy' is declared but its value is never read.
 src/pages/ItemWorkshop.tsx(23,1): error TS6133: 'ItemVoucherTemplate' is declared but its value is never read.
 src/pages/ItemWorkshop.tsx(27,1): error TS6133: 'schemaRegistry' is declared but its value is never read.
-src/pages/ItemWorkshop.tsx(197,13): error TS6133: 'proposal' is declared but its value is never read.
+src/pages/ItemWorkshop.tsx(207,13): error TS6133: 'proposal' is declared but its value is never read.
 src/pages/PersonalCenter.tsx(236,51): error TS2352: Conversion of type '{ id: any; serialNumber: any; denomination: number; currentHolderId: string; currentHolderName: string; status: VoucherStatus.ACTIVE; createdAt: any; createdBy: string; createdByName: string; transferCount: number; metadata: { ...; }; }' to type 'Voucher' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
   Property 'sourceType' is missing in type '{ id: any; serialNumber: any; denomination: number; currentHolderId: string; currentHolderName: string; status: VoucherStatus.ACTIVE; createdAt: any; createdBy: string; createdByName: string; transferCount: number; metadata: { ...; }; }' but required in type 'Voucher'.
 src/pages/PersonalCenter.tsx(280,40): error TS2339: Property 'itemId' does not exist on type 'VoucherMetadata'.
@@ -88,7 +89,7 @@ src/publishing-center/components/SkillConfigWizard.tsx(82,3): error TS6133: 'onC
 src/publishing-center/components/SkillConfigWizard.tsx(486,27): error TS6133: 'index' is declared but its value is never read.
 src/publishing-center/core/PublishingPipeline.ts(26,1): error TS6133: 'gameDeveloperService' is declared but its value is never read.
 src/publishing-center/core/PublishingPipeline.ts(173,13): error TS6133: 'savedGame' is declared but its value is never read.
-src/publishing-center/core/PublishingPipeline.ts(750,11): error TS6133: 'gameConfig' is declared but its value is never read.
+src/publishing-center/core/PublishingPipeline.ts(751,11): error TS6133: 'gameConfig' is declared but its value is never read.
 src/publishing-center/core/SkillInitializer.ts(17,22): error TS2724: '"@/skills/types"' has no exported member named 'SkillConfig'. Did you mean 'SkillSDKConfig'?
 src/publishing-center/core/SkillInitializer.ts(17,22): error TS6196: 'SkillConfig' is declared but never used.
 src/publishing-center/core/SkillInitializer.ts(18,15): error TS6196: 'PublishingConfig' is declared but never used.
@@ -131,6 +132,7 @@ src/publishing-center/protocol/ProtocolEngine.ts(116,7): error TS2322: Type 'Win
     Type 'HTMLIFrameElement' is missing the following properties from type 'Window': clientInformation, closed, customElements, devicePixelRatio, and 101 more.
 src/publishing-center/protocol/ProtocolEngine.ts(193,19): error TS6133: 'id' is declared but its value is never read.
 src/publishing-center/protocol/SchemaRegistry.ts(13,44): error TS6196: 'CreationTiers' is declared but never used.
+src/publishing-center/protocol/SchemaRegistry.ts(411,72): error TS2339: Property 'effectCodeSandbox' does not exist on type '{ effectScriptEnabled: boolean; customEffectAllowed: boolean; effectCodeEnabled?: boolean | undefined; allowedOperators?: string[] | undefined; maxScriptDepth?: number | undefined; }'.
 src/publishing-center/runtime/PublishedGameRuntime.ts(16,1): error TS6192: All imports in import declaration are unused.
 src/publishing-center/runtime/PublishedGameRuntime.ts(530,3): error TS6133: 'container' is declared but its value is never read.
 src/publishing-center/standard-sdk/apis/AchievementAPI.ts(6,1): error TS6133: 'getCachedToken' is declared but its value is never read.
@@ -165,30 +167,29 @@ src/publishing-center/ui/PublishingCenter.tsx(384,24): error TS2339: Property 's
 src/publishing-center/ui/PublishingCenter.tsx(440,24): error TS2339: Property 'autoEnable' does not exist on type 'SkillRecommendation'.
 src/publishing-center/ui/PublishingCenter.tsx(448,28): error TS2345: Argument of type 'boolean | undefined' is not assignable to parameter of type 'SetStateAction<boolean>'.
   Type 'undefined' is not assignable to type 'SetStateAction<boolean>'.
-src/publishing-center/ui/PublishingCenter.tsx(553,24): error TS2339: Property 'autoEnable' does not exist on type 'SkillRecommendation'.
-src/publishing-center/ui/PublishingCenter.tsx(601,9): error TS2739: Type 'string[]' is missing the following properties from type '{ auth: boolean; wallet: boolean; inventory: boolean; store: boolean; leaderboard?: boolean | undefined; achievements?: boolean | undefined; multiplayer?: boolean | undefined; analytics?: boolean | undefined; }': auth, wallet, inventory, store
-src/publishing-center/ui/PublishingCenter.tsx(607,24): error TS2551: Property 'gameId' does not exist on type 'StandardGameConfig'. Did you mean 'game'?
-src/publishing-center/ui/PublishingCenter.tsx(610,62): error TS2339: Property 'nickname' does not exist on type '{ id: string; username: string; }'.
-src/publishing-center/ui/PublishingCenter.tsx(657,17): error TS2353: Object literal may only specify known properties, and 'effect' does not exist in type 'Omit<ItemVoucherTemplate, "createdAt" | "updatedAt" | "id" | "mintedCount">'.
-src/publishing-center/ui/PublishingCenter.tsx(678,26): error TS2551: Property 'gameId' does not exist on type 'StandardGameConfig'. Did you mean 'game'?
-src/publishing-center/ui/PublishingCenter.tsx(680,28): error TS2339: Property 'gameName' does not exist on type 'StandardGameConfig'.
-src/publishing-center/ui/PublishingCenter.tsx(681,29): error TS2339: Property 'framework' does not exist on type 'StandardGameConfig'.
-src/publishing-center/ui/PublishingCenter.tsx(689,32): error TS2551: Property 'error' does not exist on type 'PublishResult'. Did you mean 'errors'?
-src/publishing-center/ui/PublishingCenter.tsx(1080,43): error TS2339: Property 'matchScore' does not exist on type 'SkillRecommendation'.
-src/publishing-center/ui/PublishingCenter.tsx(1080,78): error TS2339: Property 'matchScore' does not exist on type 'SkillRecommendation'.
-src/publishing-center/ui/PublishingCenter.tsx(1081,31): error TS2339: Property 'matchScore' does not exist on type 'SkillRecommendation'.
-src/publishing-center/ui/PublishingCenter.tsx(1083,28): error TS2339: Property 'autoEnable' does not exist on type 'SkillRecommendation'.
-src/publishing-center/ui/PublishingCenter.tsx(1084,50): error TS2322: Type '{ children: string; variant: "success"; className: string; }' is not assignable to type 'IntrinsicAttributes & { children: ReactNode; variant?: "default" | "success" | "error" | "warning" | undefined; }'.
+src/publishing-center/ui/PublishingCenter.tsx(587,24): error TS2339: Property 'autoEnable' does not exist on type 'SkillRecommendation'.
+src/publishing-center/ui/PublishingCenter.tsx(635,9): error TS2739: Type 'string[]' is missing the following properties from type '{ auth: boolean; wallet: boolean; inventory: boolean; store: boolean; leaderboard?: boolean | undefined; achievements?: boolean | undefined; multiplayer?: boolean | undefined; analytics?: boolean | undefined; }': auth, wallet, inventory, store
+src/publishing-center/ui/PublishingCenter.tsx(641,24): error TS2551: Property 'gameId' does not exist on type 'StandardGameConfig'. Did you mean 'game'?
+src/publishing-center/ui/PublishingCenter.tsx(644,62): error TS2339: Property 'nickname' does not exist on type '{ id: string; username: string; }'.
+src/publishing-center/ui/PublishingCenter.tsx(728,26): error TS2551: Property 'gameId' does not exist on type 'StandardGameConfig'. Did you mean 'game'?
+src/publishing-center/ui/PublishingCenter.tsx(730,28): error TS2339: Property 'gameName' does not exist on type 'StandardGameConfig'.
+src/publishing-center/ui/PublishingCenter.tsx(731,29): error TS2339: Property 'framework' does not exist on type 'StandardGameConfig'.
+src/publishing-center/ui/PublishingCenter.tsx(743,32): error TS2551: Property 'error' does not exist on type 'PublishResult'. Did you mean 'errors'?
+src/publishing-center/ui/PublishingCenter.tsx(1134,43): error TS2339: Property 'matchScore' does not exist on type 'SkillRecommendation'.
+src/publishing-center/ui/PublishingCenter.tsx(1134,78): error TS2339: Property 'matchScore' does not exist on type 'SkillRecommendation'.
+src/publishing-center/ui/PublishingCenter.tsx(1135,31): error TS2339: Property 'matchScore' does not exist on type 'SkillRecommendation'.
+src/publishing-center/ui/PublishingCenter.tsx(1137,28): error TS2339: Property 'autoEnable' does not exist on type 'SkillRecommendation'.
+src/publishing-center/ui/PublishingCenter.tsx(1138,50): error TS2322: Type '{ children: string; variant: "success"; className: string; }' is not assignable to type 'IntrinsicAttributes & { children: ReactNode; variant?: "default" | "success" | "error" | "warning" | undefined; }'.
   Property 'className' does not exist on type 'IntrinsicAttributes & { children: ReactNode; variant?: "default" | "success" | "error" | "warning" | undefined; }'.
-src/publishing-center/ui/PublishingCenter.tsx(1132,69): error TS2322: Type '{ children: (string | Element)[]; onClick: () => void; size: string; }' is not assignable to type 'IntrinsicAttributes & ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "outline" | "primary" | "secondary" | "ghost" | undefined; }'.
+src/publishing-center/ui/PublishingCenter.tsx(1186,69): error TS2322: Type '{ children: (string | Element)[]; onClick: () => void; size: string; }' is not assignable to type 'IntrinsicAttributes & ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "outline" | "primary" | "secondary" | "ghost" | undefined; }'.
   Property 'size' does not exist on type 'IntrinsicAttributes & ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "outline" | "primary" | "secondary" | "ghost" | undefined; }'.
-src/publishing-center/ui/PublishingCenter.tsx(1565,14): error TS2367: This comparison appears to be unintentional because the types 'PublishStatus' and '"completed"' have no overlap.
-src/publishing-center/ui/PublishingCenter.tsx(1618,12): error TS2367: This comparison appears to be unintentional because the types 'PublishStatus' and '"completed"' have no overlap.
-src/publishing-center/ui/PublishingCenter.tsx(1619,38): error TS2322: Type '{ children: Element[]; variant: "success"; className: string; }' is not assignable to type 'IntrinsicAttributes & { children: ReactNode; variant?: "success" | "error" | "info" | "warning" | undefined; }'.
+src/publishing-center/ui/PublishingCenter.tsx(1523,14): error TS2367: This comparison appears to be unintentional because the types 'PublishStatus' and '"completed"' have no overlap.
+src/publishing-center/ui/PublishingCenter.tsx(1576,12): error TS2367: This comparison appears to be unintentional because the types 'PublishStatus' and '"completed"' have no overlap.
+src/publishing-center/ui/PublishingCenter.tsx(1577,38): error TS2322: Type '{ children: Element[]; variant: "success"; className: string; }' is not assignable to type 'IntrinsicAttributes & { children: ReactNode; variant?: "success" | "error" | "info" | "warning" | undefined; }'.
   Property 'className' does not exist on type 'IntrinsicAttributes & { children: ReactNode; variant?: "success" | "error" | "info" | "warning" | undefined; }'.
-src/publishing-center/ui/PublishingCenter.tsx(1634,36): error TS2322: Type '{ children: Element[]; variant: "error"; className: string; }' is not assignable to type 'IntrinsicAttributes & { children: ReactNode; variant?: "success" | "error" | "info" | "warning" | undefined; }'.
+src/publishing-center/ui/PublishingCenter.tsx(1592,36): error TS2322: Type '{ children: Element[]; variant: "error"; className: string; }' is not assignable to type 'IntrinsicAttributes & { children: ReactNode; variant?: "success" | "error" | "info" | "warning" | undefined; }'.
   Property 'className' does not exist on type 'IntrinsicAttributes & { children: ReactNode; variant?: "success" | "error" | "info" | "warning" | undefined; }'.
-src/publishing-center/ui/PublishingCenter.tsx(2129,32): error TS2322: Type '{ children: Element; variant: "error"; className: string; }' is not assignable to type 'IntrinsicAttributes & { children: ReactNode; variant?: "success" | "error" | "info" | "warning" | undefined; }'.
+src/publishing-center/ui/PublishingCenter.tsx(2132,32): error TS2322: Type '{ children: Element; variant: "error"; className: string; }' is not assignable to type 'IntrinsicAttributes & { children: ReactNode; variant?: "success" | "error" | "info" | "warning" | undefined; }'.
   Property 'className' does not exist on type 'IntrinsicAttributes & { children: ReactNode; variant?: "success" | "error" | "info" | "warning" | undefined; }'.
 src/publishing-center/validator/StandardGameValidator.ts(33,7): error TS6133: 'REQUIRED_FILES' is declared but its value is never read.
 src/publishing-center/validator/StandardGameValidator.ts(183,5): error TS6133: 'analysis' is declared but its value is never read.
@@ -230,7 +231,7 @@ src/server/api/inventory.ts(509,69): error TS2345: Argument of type 'null' is no
 src/server/api/inventory.ts(531,58): error TS2345: Argument of type 'null' is not assignable to parameter of type 'string | undefined'.
 src/server/routes/games.ts(86,10): error TS6133: 'isBase64Encoded' is declared but its value is never read.
 src/services/aiChatService.ts(240,31): error TS6133: 'message' is declared but its value is never read.
-src/services/cloudbase.ts(51,43): error TS2339: Property 'is_anonymous' does not exist on type 'IUser'.
+src/services/cloudbase.ts(106,43): error TS2339: Property 'is_anonymous' does not exist on type 'IUser'.
 src/services/cloudbaseItemSync.ts(11,1): error TS6133: 'ExtensionVoucherService' is declared but its value is never read.
 src/services/cloudbaseItemSync.ts(161,23): error TS2339: Property 'where' does not exist on type 'ExcludeOf<IQuery, "where">'.
 src/services/cloudbaseItemSync.ts(164,23): error TS2339: Property 'where' does not exist on type 'ExcludeOf<IQuery, "where">'.
@@ -249,25 +250,28 @@ src/services/gameActivityService.ts(284,73): error TS2339: Property 'totalPlayTi
 src/services/gameProposalService.ts(18,3): error TS6196: 'PenaltyConfig' is declared but never used.
 src/services/gameProposalService.ts(21,3): error TS6196: 'PlayerMetrics' is declared but never used.
 src/services/gameProposalService.ts(26,1): error TS6133: 'VoteSettlementStatus' is declared but its value is never read.
-src/services/gameProposalService.ts(306,13): error TS6133: 'player' is declared but its value is never read.
-src/services/gameProposalService.ts(417,11): error TS6133: 'proposal' is declared but its value is never read.
-src/services/gameProposalService.ts(480,13): error TS6133: 'allEligible' is declared but its value is never read.
+src/services/gameProposalService.ts(382,13): error TS6133: 'player' is declared but its value is never read.
+src/services/gameProposalService.ts(493,11): error TS6133: 'proposal' is declared but its value is never read.
+src/services/gameProposalService.ts(556,13): error TS6133: 'allEligible' is declared but its value is never read.
 src/services/gameProposalTestData.ts(15,34): error TS6133: 'PublishedGame' is declared but its value is never read.
 src/services/marketplaceService.ts(25,3): error TS6196: 'ListingStatus' is declared but never used.
-src/services/marketplaceService.ts(129,21): error TS2339: Property 'gameId' does not exist on type 'VoucherMetadata'.
-src/services/marketplaceService.ts(129,36): error TS2339: Property 'gameSource' does not exist on type 'VoucherMetadata'.
-src/services/marketplaceService.ts(130,22): error TS2339: Property 'gameName' does not exist on type 'VoucherMetadata'.
-src/services/marketplaceService.ts(484,9): error TS2367: This comparison appears to be unintentional because the types 'VoucherStatus.ACTIVE' and 'VoucherStatus.DESTROYED' have no overlap.
+src/services/marketplaceService.ts(165,21): error TS2339: Property 'gameId' does not exist on type 'VoucherMetadata'.
+src/services/marketplaceService.ts(165,36): error TS2339: Property 'gameSource' does not exist on type 'VoucherMetadata'.
+src/services/marketplaceService.ts(166,22): error TS2339: Property 'gameName' does not exist on type 'VoucherMetadata'.
+src/services/marketplaceService.ts(520,9): error TS2367: This comparison appears to be unintentional because the types 'VoucherStatus.ACTIVE' and 'VoucherStatus.DESTROYED' have no overlap.
 src/services/platformConfigService.ts(1,1): error TS6133: 'PlatformParameter' is declared but its value is never read.
 src/services/platformGameStoreService.ts(13,3): error TS6133: 'StoreSortBy' is declared but its value is never read.
 src/services/platformGameStoreService.ts(14,3): error TS6133: 'StoreFilterCategory' is declared but its value is never read.
 src/services/platformGameStoreService.ts(17,1): error TS6133: 'skillGateway' is declared but its value is never read.
-src/services/platformGameStoreService.ts(101,11): error TS6133: 'gameMap' is declared but its value is never read.
+src/services/platformGameStoreService.ts(119,11): error TS6133: 'gameMap' is declared but its value is never read.
 src/services/platformTreasuryService.ts(21,1): error TS6133: 'PlatformTreasury' is declared but its value is never read.
-src/services/platformTreasuryService.ts(27,7): error TS6133: 'PLATFORM_ACCOUNT_NAME' is declared but its value is never read.
-src/services/platformTreasuryService.ts(319,51): error TS6133: 'accountName' is declared but its value is never read.
-src/services/platformTreasuryService.ts(319,72): error TS6133: 'description' is declared but its value is never read.
-src/services/publishedGameService.ts(9,46): error TS6133: 'migrateGameFromLS' is declared but its value is never read.
+src/services/platformTreasuryService.ts(28,7): error TS6133: 'PLATFORM_ACCOUNT_NAME' is declared but its value is never read.
+src/services/platformTreasuryService.ts(320,51): error TS6133: 'accountName' is declared but its value is never read.
+src/services/platformTreasuryService.ts(320,72): error TS6133: 'description' is declared but its value is never read.
+src/services/publishedGameService.ts(388,16): error TS6133: 'loadGameFromCloudBase' is declared but its value is never read.
+src/services/publishedGameService.ts(418,19): error TS2339: Property 'players' does not exist on type 'Omit<PublishedGame, "status" | "players">'.
+src/services/publishedGameService.ts(419,18): error TS2339: Property 'status' does not exist on type 'Omit<PublishedGame, "status" | "players">'.
+src/services/publishedGameService.ts(534,13): error TS6133: 'err' is declared but its value is never read.
 src/services/redeemCodeService.ts(11,3): error TS6133: 'ItemType' is declared but its value is never read.
 src/services/ugcBridgeService.ts(15,1): error TS6133: 'ExtensionVoucherService' is declared but its value is never read.
 src/services/ugcBridgeService.ts(17,28): error TS6133: 'VoucherSourceType' is declared but its value is never read.
@@ -276,17 +280,17 @@ src/services/ugcBridgeService.ts(98,56): error TS2339: Property 'is_anonymous' d
 src/services/ugcBridgeService.ts(165,79): error TS2345: Argument of type 'UGCIntent' is not assignable to parameter of type '{ gameId: string; gameName: string; userId: string; userName: string; }'.
   Property 'gameId' is missing in type 'UGCIntent' but required in type '{ gameId: string; gameName: string; userId: string; userName: string; }'.
 src/services/ugcBridgeService.ts(287,7): error TS2322: Type 'string' is not assignable to type '"developer" | "player_ugc" | "ai_generated" | undefined'.
+src/services/ugcBridgeService.ts(574,17): error TS2353: Object literal may only specify known properties, and 'effectCodeSandbox' does not exist in type '{ effectScriptEnabled: boolean; customEffectAllowed: boolean; effectCodeEnabled?: boolean | undefined; allowedOperators?: string[] | undefined; maxScriptDepth?: number | undefined; }'.
+src/services/ugcBridgeService.ts(655,15): error TS2353: Object literal may only specify known properties, and 'effectCodeSandbox' does not exist in type '{ effectScriptEnabled: boolean; customEffectAllowed: boolean; effectCodeEnabled?: boolean | undefined; allowedOperators?: string[] | undefined; maxScriptDepth?: number | undefined; }'.
 src/services/voucherPaymentService.test.ts(9,1): error TS6133: 'VoucherStatus' is declared but its value is never read.
 src/services/voucherPaymentService.ts(11,47): error TS6133: 'VoucherSourceType' is declared but its value is never read.
-src/skills/auth/AuthSkill.ts(43,11): error TS2345: Argument of type '{ name: string; version: string; displayName: string; description: string; }' is not assignable to parameter of type 'SkillDefinition'.
+src/services/writeQueue.ts(85,11): error TS6133: 'authRecoveryTimer' is declared but its value is never read.
+src/skills/auth/AuthSkill.ts(42,11): error TS2345: Argument of type '{ name: string; version: string; displayName: string; description: string; }' is not assignable to parameter of type 'SkillDefinition'.
   Type '{ name: string; version: string; displayName: string; description: string; }' is missing the following properties from type 'SkillDefinition': requiredPermissions, actions
-src/skills/auth/AuthSkill.ts(63,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
 src/skills/auth/AuthSkill.ts(75,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/auth/AuthSkill.ts(120,41): error TS2353: Object literal may only specify known properties, and 'aCoins' does not exist in type 'UserProfile'.
-src/skills/auth/AuthSkill.ts(215,7): error TS2353: Object literal may only specify known properties, and 'aCoins' does not exist in type 'UserProfile'.
-src/skills/auth/AuthSkill.ts(241,24): error TS2345: Argument of type '{ email: string; password: string; nickname: string; }' is not assignable to parameter of type '{ username: string; email: string; password: string; }'.
+src/skills/auth/AuthSkill.ts(87,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/auth/AuthSkill.ts(269,24): error TS2345: Argument of type '{ email: string; password: string; nickname: string; }' is not assignable to parameter of type '{ username: string; email: string; password: string; }'.
   Property 'username' is missing in type '{ email: string; password: string; nickname: string; }' but required in type '{ username: string; email: string; password: string; }'.
-src/skills/auth/AuthSkill.ts(256,7): error TS2353: Object literal may only specify known properties, and 'aCoins' does not exist in type 'UserProfile'.
 src/skills/BaseSkill.ts(14,3): error TS6133: 'JSONSchema' is declared but its value is never read.
 src/skills/BaseSkill.ts(32,23): error TS2420: Class 'BaseSkill' incorrectly implements interface 'Skill'.
   Property 'config' is protected in type 'BaseSkill' but public in type 'Skill'.
@@ -322,16 +326,16 @@ src/skills/examples/basic-usage.ts(120,53): error TS6133: 'context' is declared 
 src/skills/examples/game-integration.ts(239,35): error TS2341: Property 'sdk' is private and only accessible within class 'AllinONEGameSDK'.
 src/skills/examples/game-integration.ts(283,40): error TS2341: Property 'sdk' is private and only accessible within class 'AllinONEGameSDK'.
 src/skills/examples/game-integration.ts(292,38): error TS2341: Property 'sdk' is private and only accessible within class 'AllinONEGameSDK'.
-src/skills/game-connector/GameConnectorSkill.ts(40,11): error TS2345: Argument of type '{ name: string; version: string; displayName: string; description: string; }' is not assignable to parameter of type 'SkillDefinition'.
+src/skills/game-connector/GameConnectorSkill.ts(41,11): error TS2345: Argument of type '{ name: string; version: string; displayName: string; description: string; }' is not assignable to parameter of type 'SkillDefinition'.
   Type '{ name: string; version: string; displayName: string; description: string; }' is missing the following properties from type 'SkillDefinition': requiredPermissions, actions
-src/skills/game-connector/GameConnectorSkill.ts(51,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/game-connector/GameConnectorSkill.ts(73,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/game-connector/GameConnectorSkill.ts(93,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/game-connector/GameConnectorSkill.ts(99,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/game-connector/GameConnectorSkill.ts(187,5): error TS6133: 'context' is declared but its value is never read.
-src/skills/game-connector/GameConnectorSkill.ts(236,5): error TS6133: 'params' is declared but its value is never read.
-src/skills/game-connector/GameConnectorSkill.ts(237,5): error TS6133: 'context' is declared but its value is never read.
+src/skills/game-connector/GameConnectorSkill.ts(52,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/game-connector/GameConnectorSkill.ts(74,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/game-connector/GameConnectorSkill.ts(94,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/game-connector/GameConnectorSkill.ts(100,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/game-connector/GameConnectorSkill.ts(197,5): error TS6133: 'context' is declared but its value is never read.
+src/skills/game-connector/GameConnectorSkill.ts(247,5): error TS6133: 'params' is declared but its value is never read.
 src/skills/game-connector/GameConnectorSkill.ts(248,5): error TS6133: 'context' is declared but its value is never read.
+src/skills/game-connector/GameConnectorSkill.ts(260,5): error TS6133: 'context' is declared but its value is never read.
 src/skills/generator/__tests__/ConfigValidator.test.ts(7,28): error TS6196: 'CurrencyConfig' is declared but never used.
 src/skills/generator/__tests__/ConfigValidator.test.ts(7,44): error TS6196: 'ProductConfig' is declared but never used.
 src/skills/generator/__tests__/e2e.test.ts(10,1): error TS6133: 'BaseSkill' is declared but its value is never read.
@@ -363,28 +367,28 @@ src/skills/index.ts(51,40): error TS2345: Argument of type 'VoucherSkill' is not
 src/skills/index.ts(55,40): error TS2345: Argument of type 'ProposalSkill' is not assignable to parameter of type 'Skill'.
   Property 'config' is protected in type 'ProposalSkill' but public in type 'Skill'.
 src/skills/inventory/InventorySkill.ts(10,3): error TS6133: 'JSONSchema' is declared but its value is never read.
-src/skills/inventory/InventorySkill.ts(136,11): error TS6133: 'apiBaseUrl' is declared but its value is never read.
-src/skills/inventory/InventorySkill.ts(405,47): error TS6133: 'context' is declared but its value is never read.
-src/skills/inventory/InventorySkill.ts(650,5): error TS6133: 'context' is declared but its value is never read.
-src/skills/proposal/ProposalSkill.ts(70,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/proposal/ProposalSkill.ts(75,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/proposal/ProposalSkill.ts(80,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/proposal/ProposalSkill.ts(85,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/proposal/ProposalSkill.ts(90,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/proposal/ProposalSkill.ts(146,76): error TS6133: 'context' is declared but its value is never read.
-src/skills/proposal/ProposalSkill.ts(162,53): error TS6133: 'context' is declared but its value is never read.
-src/skills/proposal/ProposalSkill.ts(171,57): error TS6133: 'context' is declared but its value is never read.
+src/skills/inventory/InventorySkill.ts(137,11): error TS6133: 'apiBaseUrl' is declared but its value is never read.
+src/skills/inventory/InventorySkill.ts(406,47): error TS6133: 'context' is declared but its value is never read.
+src/skills/inventory/InventorySkill.ts(651,5): error TS6133: 'context' is declared but its value is never read.
+src/skills/proposal/ProposalSkill.ts(71,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/proposal/ProposalSkill.ts(76,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/proposal/ProposalSkill.ts(81,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/proposal/ProposalSkill.ts(86,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/proposal/ProposalSkill.ts(91,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/proposal/ProposalSkill.ts(147,76): error TS6133: 'context' is declared but its value is never read.
+src/skills/proposal/ProposalSkill.ts(163,53): error TS6133: 'context' is declared but its value is never read.
+src/skills/proposal/ProposalSkill.ts(172,57): error TS6133: 'context' is declared but its value is never read.
 src/skills/sdk/SkillSDK.ts(11,3): error TS6133: 'SkillContext' is declared but its value is never read.
 src/skills/SkillGateway.ts(348,17): error TS6133: 'name' is declared but its value is never read.
 src/skills/store/StoreSkill.ts(10,3): error TS6133: 'JSONSchema' is declared but its value is never read.
-src/skills/store/StoreSkill.ts(409,38): error TS6133: 'paymentMethod' is declared but its value is never read.
-src/skills/store/StoreSkill.ts(537,20): error TS2339: Property 'icon' does not exist on type 'ListProductParams'.
-src/skills/store/StoreSkill.ts(540,34): error TS2339: Property 'maxPurchasePerUser' does not exist on type 'ListProductParams'.
-src/skills/store/StoreSkill.ts(541,32): error TS2339: Property 'maxPurchaseTotal' does not exist on type 'ListProductParams'.
-src/skills/store/StoreSkill.ts(577,81): error TS6133: 'context' is declared but its value is never read.
-src/skills/store/StoreSkill.ts(579,15): error TS6133: 'order' is declared but its value is never read.
-src/skills/store/StoreSkill.ts(749,9): error TS2741: Property 'isLimited' is missing in type '{ name: string; description: string; category: "currency"; price: { amount: number; currency: string; }; quantity: number; status: "active"; rewards: { type: "currency"; itemId: string; quantity: number; }[]; tags: string[]; }' but required in type 'Omit<StoreProduct, "createdAt" | "updatedAt" | "id" | "purchasedCount">'.
-src/skills/store/StoreSkill.ts(761,9): error TS2741: Property 'isLimited' is missing in type '{ name: string; description: string; category: "currency"; price: { amount: number; currency: string; }; originalPrice: { amount: number; currency: string; }; quantity: number; status: "active"; rewards: { ...; }[]; tags: string[]; }' but required in type 'Omit<StoreProduct, "createdAt" | "updatedAt" | "id" | "purchasedCount">'.
+src/skills/store/StoreSkill.ts(410,38): error TS6133: 'paymentMethod' is declared but its value is never read.
+src/skills/store/StoreSkill.ts(538,20): error TS2339: Property 'icon' does not exist on type 'ListProductParams'.
+src/skills/store/StoreSkill.ts(541,34): error TS2339: Property 'maxPurchasePerUser' does not exist on type 'ListProductParams'.
+src/skills/store/StoreSkill.ts(542,32): error TS2339: Property 'maxPurchaseTotal' does not exist on type 'ListProductParams'.
+src/skills/store/StoreSkill.ts(578,81): error TS6133: 'context' is declared but its value is never read.
+src/skills/store/StoreSkill.ts(580,15): error TS6133: 'order' is declared but its value is never read.
+src/skills/store/StoreSkill.ts(744,9): error TS2741: Property 'isLimited' is missing in type '{ name: string; description: string; category: "currency"; price: { amount: number; currency: string; }; quantity: number; status: "active"; rewards: { type: "currency"; itemId: string; quantity: number; }[]; tags: string[]; }' but required in type 'Omit<StoreProduct, "createdAt" | "updatedAt" | "id" | "purchasedCount">'.
+src/skills/store/StoreSkill.ts(756,9): error TS2741: Property 'isLimited' is missing in type '{ name: string; description: string; category: "currency"; price: { amount: number; currency: string; }; originalPrice: { amount: number; currency: string; }; quantity: number; status: "active"; rewards: { ...; }[]; tags: string[]; }' but required in type 'Omit<StoreProduct, "createdAt" | "updatedAt" | "id" | "purchasedCount">'.
 src/skills/voucher/VoucherSkill.ts(75,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
 src/skills/voucher/VoucherSkill.ts(80,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
 src/skills/voucher/VoucherSkill.ts(85,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
@@ -398,12 +402,12 @@ src/skills/voucher/VoucherSkill.ts(145,42): error TS2739: Type 'ExcludeOf<IQuery
 src/skills/voucher/VoucherSkill.ts(233,33): error TS18048: 'mintResult.data' is possibly 'undefined'.
 src/skills/voucher/VoucherSkill.ts(237,21): error TS18048: 'mintResult.data' is possibly 'undefined'.
 src/skills/voucher/VoucherSkill.ts(274,65): error TS6133: 'context' is declared but its value is never read.
-src/skills/wallet/WalletSkill.ts(64,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/wallet/WalletSkill.ts(69,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/wallet/WalletSkill.ts(81,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/wallet/WalletSkill.ts(93,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/wallet/WalletSkill.ts(101,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
-src/skills/wallet/WalletSkill.ts(187,11): error TS6133: 'userId' is declared but its value is never read.
+src/skills/wallet/WalletSkill.ts(92,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/wallet/WalletSkill.ts(97,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/wallet/WalletSkill.ts(109,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/wallet/WalletSkill.ts(121,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/wallet/WalletSkill.ts(129,7): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'Partial<Omit<ActionDefinition, "name" | "handler">>'.
+src/skills/wallet/WalletSkill.ts(245,11): error TS6133: 'userId' is declared but its value is never read.
 src/utils/cleanupDuplicateTransactions.ts(54,64): error TS7006: Parameter 'tx' implicitly has an 'any' type.
 src/utils/cleanupDuplicateTransactions.ts(118,55): error TS7006: Parameter 't' implicitly has an 'any' type.
 src/voucher-system/components/AlgorithmVoucherManager.tsx(9,3): error TS6133: 'settlementScheduler' is declared but its value is never read.
@@ -461,16 +465,16 @@ src/voucher-system/components/VoucherManagementDashboard.tsx(13,3): error TS6133
 src/voucher-system/components/VoucherManagementDashboard.tsx(13,16): error TS6133: 'ChevronUp' is declared but its value is never read.
 src/voucher-system/components/VoucherManagementDashboard.tsx(13,27): error TS6133: 'Copy' is declared but its value is never read.
 src/voucher-system/components/VoucherManagementDashboard.tsx(13,33): error TS6133: 'Maximize2' is declared but its value is never read.
-src/voucher-system/components/VoucherManagementDashboard.tsx(37,7): error TS2741: Property '[VoucherStatus.REDEEMED]' is missing in type '{ active: { label: string; color: string; bg: string; }; frozen: { label: string; color: string; bg: string; }; expired: { label: string; color: string; bg: string; }; destroyed: { label: string; color: string; bg: string; }; }' but required in type 'Record<VoucherStatus, { label: string; color: string; bg: string; }>'.
+src/voucher-system/components/VoucherManagementDashboard.tsx(38,7): error TS2741: Property '[VoucherStatus.REDEEMED]' is missing in type '{ active: { label: string; color: string; bg: string; }; frozen: { label: string; color: string; bg: string; }; expired: { label: string; color: string; bg: string; }; destroyed: { label: string; color: string; bg: string; }; }' but required in type 'Record<VoucherStatus, { label: string; color: string; bg: string; }>'.
 src/voucher-system/components/VoucherManager.tsx(9,3): error TS6133: 'Filter' is declared but its value is never read.
 src/voucher-system/components/VoucherManager.tsx(10,3): error TS6133: 'ChevronDown' is declared but its value is never read.
 src/voucher-system/components/VoucherManager.tsx(11,3): error TS6133: 'ChevronUp' is declared but its value is never read.
 src/voucher-system/components/VoucherManager.tsx(14,3): error TS6133: 'Hash' is declared but its value is never read.
 src/voucher-system/components/VoucherManager.tsx(28,1): error TS6133: 'algorithmVoucherService' is declared but its value is never read.
 src/voucher-system/components/VoucherManager.tsx(30,47): error TS6133: 'TransactionType' is declared but its value is never read.
-src/voucher-system/components/VoucherManager.tsx(867,53): error TS6133: 'index' is declared but its value is never read.
-src/voucher-system/components/VoucherManager.tsx(1200,9): error TS2741: Property '[VoucherStatus.REDEEMED]' is missing in type '{ active: { bg: string; text: string; label: string; }; frozen: { bg: string; text: string; label: string; }; expired: { bg: string; text: string; label: string; }; destroyed: { bg: string; text: string; label: string; }; }' but required in type 'Record<VoucherStatus, { bg: string; text: string; label: string; }>'.
-src/voucher-system/components/VoucherManager.tsx(1218,9): error TS6133: 'isInstant' is declared but its value is never read.
+src/voucher-system/components/VoucherManager.tsx(849,53): error TS6133: 'index' is declared but its value is never read.
+src/voucher-system/components/VoucherManager.tsx(1182,9): error TS2741: Property '[VoucherStatus.REDEEMED]' is missing in type '{ active: { bg: string; text: string; label: string; }; frozen: { bg: string; text: string; label: string; }; expired: { bg: string; text: string; label: string; }; destroyed: { bg: string; text: string; label: string; }; }' but required in type 'Record<VoucherStatus, { bg: string; text: string; label: string; }>'.
+src/voucher-system/components/VoucherManager.tsx(1200,9): error TS6133: 'isInstant' is declared but its value is never read.
 src/voucher-system/engine/RuleEngine.ts(8,3): error TS6133: 'Voucher' is declared but its value is never read.
 src/voucher-system/engine/RuleEngine.ts(9,3): error TS6133: 'VoucherRules' is declared but its value is never read.
 src/voucher-system/engine/RuleEngine.ts(15,3): error TS6133: 'TransactionType' is declared but its value is never read.
@@ -497,50 +501,55 @@ src/voucher-system/services/AlgorithmVoucherService.ts(13,3): error TS6196: 'Vou
 src/voucher-system/services/AlgorithmVoucherService.ts(14,3): error TS6196: 'Transaction' is declared but never used.
 src/voucher-system/services/AlgorithmVoucherService.ts(29,3): error TS6196: 'SettlementHistoryQuery' is declared but never used.
 src/voucher-system/services/AlgorithmVoucherService.ts(30,3): error TS6196: 'SettlementHistoryResult' is declared but never used.
-src/voucher-system/services/AlgorithmVoucherService.ts(46,7): error TS6133: 'SETTLEMENT_RESULTS_KEY' is declared but its value is never read.
-src/voucher-system/services/AlgorithmVoucherService.ts(63,10): error TS6133: 'generateSerialNumber' is declared but its value is never read.
-src/voucher-system/services/AlgorithmVoucherService.ts(130,39): error TS6133: 'startDate' is declared but its value is never read.
-src/voucher-system/services/AlgorithmVoucherService.ts(130,58): error TS6133: 'endDate' is declared but its value is never read.
-src/voucher-system/services/AlgorithmVoucherService.ts(135,34): error TS6133: 'startDate' is declared but its value is never read.
-src/voucher-system/services/AlgorithmVoucherService.ts(135,53): error TS6133: 'endDate' is declared but its value is never read.
-src/voucher-system/services/AlgorithmVoucherService.ts(140,28): error TS6133: 'startDate' is declared but its value is never read.
-src/voucher-system/services/AlgorithmVoucherService.ts(140,47): error TS6133: 'endDate' is declared but its value is never read.
-src/voucher-system/services/AlgorithmVoucherService.ts(167,27): error TS2673: Constructor of class 'VoucherService' is private and only accessible within the class declaration.
-src/voucher-system/services/AlgorithmVoucherService.ts(242,19): error TS2554: Expected 2 arguments, but got 1.
-src/voucher-system/services/AlgorithmVoucherService.ts(281,19): error TS2554: Expected 2 arguments, but got 1.
-src/voucher-system/services/AlgorithmVoucherService.ts(312,19): error TS2554: Expected 2 arguments, but got 1.
-src/voucher-system/services/AlgorithmVoucherService.ts(505,19): error TS2554: Expected 2 arguments, but got 1.
-src/voucher-system/services/AlgorithmVoucherService.ts(1169,11): error TS6133: 'now' is declared but its value is never read.
+src/voucher-system/services/AlgorithmVoucherService.ts(47,7): error TS6133: 'SETTLEMENT_RESULTS_KEY' is declared but its value is never read.
+src/voucher-system/services/AlgorithmVoucherService.ts(69,10): error TS6133: 'generateSerialNumber' is declared but its value is never read.
+src/voucher-system/services/AlgorithmVoucherService.ts(136,39): error TS6133: 'startDate' is declared but its value is never read.
+src/voucher-system/services/AlgorithmVoucherService.ts(136,58): error TS6133: 'endDate' is declared but its value is never read.
+src/voucher-system/services/AlgorithmVoucherService.ts(141,34): error TS6133: 'startDate' is declared but its value is never read.
+src/voucher-system/services/AlgorithmVoucherService.ts(141,53): error TS6133: 'endDate' is declared but its value is never read.
+src/voucher-system/services/AlgorithmVoucherService.ts(146,28): error TS6133: 'startDate' is declared but its value is never read.
+src/voucher-system/services/AlgorithmVoucherService.ts(146,47): error TS6133: 'endDate' is declared but its value is never read.
+src/voucher-system/services/AlgorithmVoucherService.ts(173,27): error TS2673: Constructor of class 'VoucherService' is private and only accessible within the class declaration.
+src/voucher-system/services/AlgorithmVoucherService.ts(248,19): error TS2554: Expected 2 arguments, but got 1.
+src/voucher-system/services/AlgorithmVoucherService.ts(287,19): error TS2554: Expected 2 arguments, but got 1.
+src/voucher-system/services/AlgorithmVoucherService.ts(318,19): error TS2554: Expected 2 arguments, but got 1.
+src/voucher-system/services/AlgorithmVoucherService.ts(511,19): error TS2554: Expected 2 arguments, but got 1.
+src/voucher-system/services/AlgorithmVoucherService.ts(1175,11): error TS6133: 'now' is declared but its value is never read.
 src/voucher-system/services/PlatformBindingService.ts(21,60): error TS6196: 'VoucherRules' is declared but never used.
-src/voucher-system/services/PlatformBindingService.ts(72,11): error TS6133: 'initialized' is declared but its value is never read.
-src/voucher-system/services/PlatformBindingService.ts(421,59): error TS2345: Argument of type 'string' is not assignable to parameter of type 'VoucherEventType'.
-src/voucher-system/services/PlatformBindingService.ts(429,19): error TS2339: Property 'success' does not exist on type 'void'.
-src/voucher-system/services/PlatformBindingService.ts(429,37): error TS2339: Property 'vouchers' does not exist on type 'void'.
-src/voucher-system/services/PlatformBindingService.ts(430,48): error TS2339: Property 'message' does not exist on type 'void'.
-src/voucher-system/services/PlatformBindingService.ts(444,27): error TS2339: Property 'vouchers' does not exist on type 'void'.
-src/voucher-system/services/PlatformBindingService.ts(445,24): error TS2339: Property 'vouchers' does not exist on type 'void'.
-src/voucher-system/services/PlatformBindingService.ts(447,9): error TS2741: Property 'event' is missing in type 'Record<string, any>' but required in type '{ [key: string]: any; event: string; score?: number | undefined; difficulty?: string | undefined; level?: number | undefined; duration?: number | undefined; }'.
-src/voucher-system/services/PlatformBindingService.ts(448,24): error TS2339: Property 'source' does not exist on type 'void'.
-src/voucher-system/services/PlatformBindingService.ts(506,11): error TS6133: 'allocationMode' is declared but its value is never read.
-src/voucher-system/services/PlatformBindingService.ts(520,18): error TS7006: Parameter 'a' implicitly has an 'any' type.
-src/voucher-system/services/PlatformBindingService.ts(520,21): error TS7006: Parameter 'b' implicitly has an 'any' type.
-src/voucher-system/services/PlatformBindingService.ts(521,17): error TS7006: Parameter 't' implicitly has an 'any' type.
-src/voucher-system/services/PlatformBindingService.ts(612,115): error TS2345: Argument of type 'Voucher' is not assignable to parameter of type 'string'.
-src/voucher-system/services/PlatformBindingService.ts(658,9): error TS2741: Property 'event' is missing in type 'Record<string, any>' but required in type '{ [key: string]: any; event: string; score?: number | undefined; difficulty?: string | undefined; level?: number | undefined; duration?: number | undefined; }'.
-src/voucher-system/services/PlatformBindingService.ts(727,12): error TS1361: 'TriggerMode' cannot be used as a value because it was imported using 'import type'.
-src/voucher-system/services/PlatformBindingService.ts(729,12): error TS1361: 'TriggerMode' cannot be used as a value because it was imported using 'import type'.
-src/voucher-system/services/PlatformBindingService.ts(731,12): error TS1361: 'TriggerMode' cannot be used as a value because it was imported using 'import type'.
-src/voucher-system/services/PlatformBindingService.ts(733,12): error TS1361: 'TriggerMode' cannot be used as a value because it was imported using 'import type'.
-src/voucher-system/services/PlatformBindingService.ts(833,5): error TS6133: 'amount' is declared but its value is never read.
-src/voucher-system/services/PlatformBindingService.ts(836,5): error TS6133: 'operatorId' is declared but its value is never read.
-src/voucher-system/services/PlatformBindingService.ts(885,19): error TS6133: 'operatorId' is declared but its value is never read.
+src/voucher-system/services/PlatformBindingService.ts(79,11): error TS6133: 'initialized' is declared but its value is never read.
+src/voucher-system/services/PlatformBindingService.ts(111,50): error TS2344: Type 'UserRewardLimit' does not satisfy the constraint '{ id: string; }'.
+  Property 'id' is missing in type 'UserRewardLimit' but required in type '{ id: string; }'.
+src/voucher-system/services/PlatformBindingService.ts(153,54): error TS2345: Argument of type 'UserRewardLimit[]' is not assignable to parameter of type '{ id: string; }[]'.
+  Property 'id' is missing in type 'UserRewardLimit' but required in type '{ id: string; }'.
+src/voucher-system/services/PlatformBindingService.ts(446,59): error TS2345: Argument of type 'string' is not assignable to parameter of type 'VoucherEventType'.
+src/voucher-system/services/PlatformBindingService.ts(454,19): error TS2339: Property 'success' does not exist on type 'void'.
+src/voucher-system/services/PlatformBindingService.ts(454,37): error TS2339: Property 'vouchers' does not exist on type 'void'.
+src/voucher-system/services/PlatformBindingService.ts(455,48): error TS2339: Property 'message' does not exist on type 'void'.
+src/voucher-system/services/PlatformBindingService.ts(469,27): error TS2339: Property 'vouchers' does not exist on type 'void'.
+src/voucher-system/services/PlatformBindingService.ts(470,24): error TS2339: Property 'vouchers' does not exist on type 'void'.
+src/voucher-system/services/PlatformBindingService.ts(472,9): error TS2741: Property 'event' is missing in type 'Record<string, any>' but required in type '{ [key: string]: any; event: string; score?: number | undefined; difficulty?: string | undefined; level?: number | undefined; duration?: number | undefined; }'.
+src/voucher-system/services/PlatformBindingService.ts(473,24): error TS2339: Property 'source' does not exist on type 'void'.
+src/voucher-system/services/PlatformBindingService.ts(531,11): error TS6133: 'allocationMode' is declared but its value is never read.
+src/voucher-system/services/PlatformBindingService.ts(545,18): error TS7006: Parameter 'a' implicitly has an 'any' type.
+src/voucher-system/services/PlatformBindingService.ts(545,21): error TS7006: Parameter 'b' implicitly has an 'any' type.
+src/voucher-system/services/PlatformBindingService.ts(546,17): error TS7006: Parameter 't' implicitly has an 'any' type.
+src/voucher-system/services/PlatformBindingService.ts(637,115): error TS2345: Argument of type 'Voucher' is not assignable to parameter of type 'string'.
+src/voucher-system/services/PlatformBindingService.ts(683,9): error TS2741: Property 'event' is missing in type 'Record<string, any>' but required in type '{ [key: string]: any; event: string; score?: number | undefined; difficulty?: string | undefined; level?: number | undefined; duration?: number | undefined; }'.
+src/voucher-system/services/PlatformBindingService.ts(752,12): error TS1361: 'TriggerMode' cannot be used as a value because it was imported using 'import type'.
+src/voucher-system/services/PlatformBindingService.ts(754,12): error TS1361: 'TriggerMode' cannot be used as a value because it was imported using 'import type'.
+src/voucher-system/services/PlatformBindingService.ts(756,12): error TS1361: 'TriggerMode' cannot be used as a value because it was imported using 'import type'.
+src/voucher-system/services/PlatformBindingService.ts(758,12): error TS1361: 'TriggerMode' cannot be used as a value because it was imported using 'import type'.
+src/voucher-system/services/PlatformBindingService.ts(858,5): error TS6133: 'amount' is declared but its value is never read.
+src/voucher-system/services/PlatformBindingService.ts(861,5): error TS6133: 'operatorId' is declared but its value is never read.
+src/voucher-system/services/PlatformBindingService.ts(910,19): error TS6133: 'operatorId' is declared but its value is never read.
 src/voucher-system/services/UserPoolService.ts(15,30): error TS6133: 'Voucher' is declared but its value is never read.
+src/voucher-system/services/UserPoolService.ts(16,51): error TS6133: 'upsertToCloud' is declared but its value is never read.
 src/voucher-system/services/VoteFraudDetector.ts(274,11): error TS6133: 'recentVotes' is declared but its value is never read.
 src/voucher-system/services/VoteFraudDetector.ts(393,11): error TS6133: 'total' is declared but its value is never read.
 src/voucher-system/services/VoteFraudDetector.ts(441,11): error TS6133: 'avg' is declared but its value is never read.
 src/voucher-system/services/VoteFraudDetector.ts(443,11): error TS6133: 'minVal' is declared but its value is never read.
 src/voucher-system/services/VoteVoucherService.ts(34,8): error TS6133: 'ProposalVoteRecord' is declared but its value is never read.
-src/voucher-system/services/VoteVoucherService.ts(42,7): error TS6133: 'MAX_BATCH_SIZE' is declared but its value is never read.
+src/voucher-system/services/VoteVoucherService.ts(44,7): error TS6133: 'MAX_BATCH_SIZE' is declared but its value is never read.
 src/voucher-system/services/VoucherService.ts(22,8): error TS6133: 'AlgorithmVoucherInfo' is declared but its value is never read.
 src/voucher-system/services/VoucherService.ts(55,7): error TS6133: 'hashHi' is declared but its value is never read.
 src/voucher-system/services/VoucherService.ts(260,5): error TS6133: 'operatorName' is declared but its value is never read.
@@ -572,8 +581,8 @@ src/voucher-system/settlement/PlatformDataCollector.ts(394,44): error TS6133: 's
 src/voucher-system/settlement/PlatformDataCollector.ts(394,63): error TS6133: 'endDate' is declared but its value is never read.
 src/voucher-system/settlement/SettlementScheduler.ts(10,3): error TS6196: 'SettlementCycleType' is declared but never used.
 src/voucher-system/settlement/SettlementScheduler.ts(11,3): error TS6196: 'SettlementStatus' is declared but never used.
-src/voucher-system/storage/VoucherDatabase.ts(40,11): error TS6133: 'cacheInitialized' is declared but its value is never read.
-src/voucher-system/storage/VoucherDatabase.ts(414,5): error TS2739: Type '{ totalVouchers: number; totalValue: number; activeVouchers: number; totalTransactions: number; totalTransfers: number; uniqueHolders: number; systemCapacity: number; utilizationRate: number; }' is missing the following properties from type 'VoucherSystemStats': totalDistributed, totalRecycled, activeRules
+src/voucher-system/storage/VoucherDatabase.ts(41,11): error TS6133: 'cacheInitialized' is declared but its value is never read.
+src/voucher-system/storage/VoucherDatabase.ts(427,5): error TS2739: Type '{ totalVouchers: number; totalValue: number; activeVouchers: number; totalTransactions: number; totalTransfers: number; uniqueHolders: number; systemCapacity: number; utilizationRate: number; }' is missing the following properties from type 'VoucherSystemStats': totalDistributed, totalRecycled, activeRules
 src/voucher-system/templates.ts(45,9): error TS2741: Property 'mode' is missing in type '{}' but required in type '{ mode: "fixed" | "ratio" | "tiered" | "formula"; fixedAmount?: number | undefined; ratio?: number | undefined; tieredAmounts?: TieredAmount[] | undefined; formula?: string | undefined; }'.
 src/voucher-system/templates.ts(67,9): error TS2741: Property 'mode' is missing in type '{}' but required in type '{ mode: "fixed" | "ratio" | "tiered" | "formula"; fixedAmount?: number | undefined; ratio?: number | undefined; tieredAmounts?: TieredAmount[] | undefined; formula?: string | undefined; }'.
 src/voucher-system/templates.ts(89,9): error TS2741: Property 'mode' is missing in type '{}' but required in type '{ mode: "fixed" | "ratio" | "tiered" | "formula"; fixedAmount?: number | undefined; ratio?: number | undefined; tieredAmounts?: TieredAmount[] | undefined; formula?: string | undefined; }'.

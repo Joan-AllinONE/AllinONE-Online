@@ -8,10 +8,12 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getPublishedGame, getSelfContainedGameHtml, getCloudHostedGameHtml, type PublishedGame } from '@/services/publishedGameService';
 import { skillGateway } from '@/skills';
+import { globalEventBus } from '@/skills/EventBus';
 import { platformBindingService, GameType, voucherService } from '@/voucher-system';
 import { isCurrencyVoucher } from '@/voucher-system/types';
 import { AuthContext } from '@/contexts/authContext';
 import { redeemCodeService } from '@/services/redeemCodeService';
+import { track } from '@/services/analytics';
 import { Coins, X, AlertCircle, ShieldCheck } from 'lucide-react';
 import { ProtocolEngine, schemaRegistry } from '@/publishing-center/protocol';
 
@@ -33,6 +35,7 @@ export default function GamePlay() {
   const [balance, setBalance] = useState<Record<string, number>>({});
   const [voucherBalance, setVoucherBalance] = useState<{ count: number; totalValue: number }>({ count: 0, totalValue: 0 });
   const [gameHtmlContent, setGameHtmlContent] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
   
   // 奖励提示状态
   const [rewardToast, setRewardToast] = useState<{
@@ -42,19 +45,49 @@ export default function GamePlay() {
     amount?: number;
   }>({ show: false, success: false, message: '' });
 
+  // 会话开始时间戳（用于计算在线时长）
+  const sessionStartRef = useRef<number>(0);
+
   useEffect(() => {
     if (!gameId) return;
 
     // 加载游戏信息
     const publishedGame = getPublishedGame(gameId);
     if (publishedGame) {
-      setGame(publishedGame);
+      // 模块化多文件游戏（RequireJS/AMD/动态 import）必须用真实 URL 渲染，
+      // 否则 srcDoc 内联时运行时子资源（XHR 拉模块）解析到父页 → 404 白屏。
+      // 这里强制构造服务端托管 URL，由 Service Worker 从 IndexedDB 本地缓存 / 后端 提供文件，
+      // 因此即使发布记录为 inline（当时后端不可用）也能正常加载，无需重新发布。
+      const effectiveGame =
+        publishedGame.isModular
+          ? {
+              ...publishedGame,
+              hostingType: 'server' as const,
+              cdnUrl: `/api/v1/games/${gameId}/files/${publishedGame.entryPoint || 'index.html'}`,
+            }
+          : publishedGame;
+
+      setGame(effectiveGame);
+      setRenderError(null);
+
+      // 📊 数据中心埋点：游戏启动 + 会话开始
+      sessionStartRef.current = Date.now();
+      const uid = currentUser?.uid || currentUser?.id || 'anonymous';
+      track({ type: 'game_launch', userId: uid, gameId });
+      track({ type: 'session_start', userId: uid, gameId });
 
       // 根据托管方式加载游戏内容
       (async () => {
         // 外部 URL 模式：直接通过 CDN/外部 URL 加载
-        if (publishedGame.hostingType === 'external' && publishedGame.cdnUrl) {
-          console.log('[GamePlay] 外部 URL 模式，将通过 src 加载:', publishedGame.cdnUrl);
+        if (effectiveGame.hostingType === 'external' && effectiveGame.cdnUrl) {
+          console.log('[GamePlay] 外部 URL 模式，将通过 src 加载:', effectiveGame.cdnUrl);
+          return;
+        }
+
+        // 服务端托管模式：直接通过真实 URL iframe 加载（多文件模块化游戏的正确渲染方式）
+        // Service Worker 会拦截该 URL：后端优先，失败回放 IndexedDB 本地文件
+        if (effectiveGame.hostingType === 'server' && effectiveGame.cdnUrl) {
+          console.log('[GamePlay] 服务端托管模式（SW 提供文件），将通过真实 URL 加载:', effectiveGame.cdnUrl);
           return;
         }
 
@@ -73,7 +106,7 @@ export default function GamePlay() {
           setGameHtmlContent(entryContent);
           console.log('[GamePlay] 自包含内联模式（回退），大小:', entryContent.length, '字节');
         } else {
-          console.log('[GamePlay] 云托管与本地均无内容，使用 cdnUrl 回退');
+          console.log('[GamePlay] 云托管与本地均无内容');
         }
       })();
 
@@ -92,6 +125,21 @@ export default function GamePlay() {
     }
     setIsLoading(false);
   }, [gameId]);
+
+  // 📊 数据中心埋点：会话结束（离开页面/切换游戏时上报在线时长）
+  useEffect(() => {
+    return () => {
+      if (sessionStartRef.current && gameId) {
+        const uid = currentUser?.uid || currentUser?.id || 'anonymous';
+        track({
+          type: 'session_end',
+          userId: uid,
+          gameId,
+          payload: { durationMs: Date.now() - sessionStartRef.current },
+        });
+      }
+    };
+  }, [gameId, currentUser]);
 
   const loadBalance = async () => {
     try {
@@ -277,6 +325,16 @@ export default function GamePlay() {
           // Schema 道具数据通过 REDEEM_RESULT.voucherData 单一通道传递
           // voucherItemService.redeemItemVoucherBySchema 的 URL 参数路径仍使用 EXTENSION_VOUCHER（独立通道，不经过 onRedeem）
 
+          // realEffectName: 真实效果名（如 heal/invincible），优先 itemData.effect → itemId
+          // → 非 custom 的 effectType；最终回落 'custom'。
+          // ⚠️ 不能用 effectType 直接填 effect：effectType 默认 'custom'，
+          // 会导致游戏侧 EFFECT_HANDLERS['custom'] 不存在 → 「未找到效果: custom」。
+          const realEffectName =
+            (gameEffect?.itemData as Record<string, any> | undefined)?.effect ||
+            gameEffect?.itemId ||
+            (effectType !== 'custom' ? effectType : '') ||
+            'custom';
+
           return {
             success: true,
             code,
@@ -287,7 +345,16 @@ export default function GamePlay() {
             effects: effectParams,
             // 🆕 voucherData: 携带完整的 itemData（effect/effectCode/effectScript/params/icon）
             // 游戏端 SDK/桥接通过 REDEEM_RESULT → CustomEvent → handleRedeemedItem 接收
-            voucherData: gameEffect?.itemData || null,
+            // voucherData: 优先用 itemData；缺失时合成 effect 填真实效果名（realEffectName），
+            // 保证游戏侧 EFFECT_HANDLERS[realEffectName] 可命中（而非 'custom'）。
+            voucherData: gameEffect?.itemData
+              ? { ...(gameEffect.itemData as Record<string, any>), effect: realEffectName }
+              : {
+                  effect: realEffectName,
+                  params: effectParams,
+                  itemId: gameEffect?.itemId,
+                  effectType,
+                },
             schemaName: gameEffect?.schemaName || null,
             message: `兑换成功! 获得 ${item?.name || '道具'}`,
           };
@@ -307,6 +374,7 @@ export default function GamePlay() {
     engine.on('game:event', ({ event, data }: { event: string; data: any }) => {
       if (['GAME_COMPLETE', 'GAME_WIN', 'LEVEL_COMPLETE', 'ACHIEVEMENT_UNLOCK', 'SCORE_MILESTONE'].includes(event)) {
         triggerGameReward(event.replace('GAME_', ''), data);
+        try { globalEventBus.emit('game.played', { gameId, event }, { userId: 'anonymous', sessionId: 'web' }); } catch { /* ignore */ }
       }
     });
 
@@ -438,7 +506,7 @@ export default function GamePlay() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 relative">
+    <div className="min-h-screen bg-slate-900 relative overflow-x-hidden">
       {/* 奖励提示 Toast */}
       <AnimatePresence>
         {rewardToast.show && (
@@ -446,7 +514,7 @@ export default function GamePlay() {
             initial={{ opacity: 0, y: -50, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: -50, x: '-50%' }}
-            className={`fixed top-24 left-1/2 z-50 px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 ${
+            className={`fixed top-20 sm:top-24 left-1/2 z-50 px-4 sm:px-6 py-3 sm:py-4 rounded-xl shadow-2xl flex items-center gap-3 max-w-[92vw] ${
               rewardToast.success
                 ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white'
                 : 'bg-gradient-to-r from-red-600 to-orange-600 text-white'
@@ -458,7 +526,7 @@ export default function GamePlay() {
                   <Coins className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="font-bold text-lg">🎉 {rewardToast.message}</p>
+                  <p className="font-bold text-sm sm:text-lg">🎉 {rewardToast.message}</p>
                   {rewardToast.amount && (
                     <p className="text-white/80 text-sm">已存入您的凭证资产</p>
                   )}
@@ -482,33 +550,33 @@ export default function GamePlay() {
 
       {/* Header */}
       <header className="bg-slate-800 border-b border-slate-700">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+        <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
               <Link
                 to="/game-center"
-                className="w-10 h-10 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-white transition-colors"
+                className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-white transition-colors"
               >
                 <i className="fa-solid fa-arrow-left"></i>
               </Link>
-              <div>
-                <h1 className="text-xl font-bold text-white">{game.name}</h1>
-                <p className="text-sm text-slate-400">{game.framework} · v{game.version}</p>
+              <div className="min-w-0">
+                <h1 className="text-base sm:text-xl font-bold text-white truncate">{game.name}</h1>
+                <p className="text-xs sm:text-sm text-slate-400 truncate">{game.framework} · v{game.version}</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-4 shrink-0">
               {/* 余额显示 */}
               {skills.find(s => s.id === 'wallet')?.enabled && (
-                <div className="flex items-center gap-3 bg-slate-700 rounded-lg px-4 py-2">
-                  <div className="flex items-center gap-2" title="游戏币">
+                <div className="flex items-center gap-1.5 sm:gap-3 bg-slate-700 rounded-lg px-2 sm:px-4 py-1.5 sm:py-2">
+                  <div className="flex items-center gap-1 sm:gap-2" title="游戏币">
                     <i className="fa-solid fa-coins text-yellow-500"></i>
-                    <span className="text-white font-medium">{balance.gameCoins || 0}</span>
+                    <span className="text-white font-medium text-sm sm:text-base">{balance.gameCoins || 0}</span>
                   </div>
                   <div className="w-px h-4 bg-slate-600"></div>
-                  <div className="flex items-center gap-2" title="凭证余额">
+                  <div className="flex items-center gap-1 sm:gap-2" title="凭证余额">
                     <ShieldCheck className="w-4 h-4 text-blue-400" />
-                    <span className="text-white font-medium">{voucherBalance.totalValue}</span>
+                    <span className="text-white font-medium text-sm sm:text-base">{voucherBalance.totalValue}</span>
                   </div>
                 </div>
               )}
@@ -517,17 +585,17 @@ export default function GamePlay() {
               {skills.find(s => s.id === 'store')?.enabled && (
                 <Link
                   to={`/game-store/${gameId}`}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                  className="px-2 sm:px-4 py-1.5 sm:py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors flex items-center gap-1 sm:gap-2"
                 >
                   <i className="fa-solid fa-store"></i>
-                  商店
+                  <span className="hidden sm:inline">商店</span>
                 </Link>
               )}
 
               {/* 全屏按钮 */}
               <button
                 onClick={handleFullscreen}
-                className="w-10 h-10 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-white transition-colors"
+                className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-white transition-colors"
               >
                 <i className="fa-solid fa-expand"></i>
               </button>
@@ -545,18 +613,26 @@ export default function GamePlay() {
               animate={{ opacity: 1, y: 0 }}
               className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700"
             >
-              {/* 游戏嵌入区域 */}
-              <div className="aspect-video bg-slate-950 relative">
-                {/* 外部 URL 模式：iframe src 直连 CDN */}
-                {game.hostingType === 'external' && game.cdnUrl ? (
-                  <iframe
-                    id="game-iframe"
-                    src={game.cdnUrl}
-                    className="w-full h-full border-0"
-                    allow="fullscreen"
-                    sandbox="allow-scripts allow-same-origin allow-popups"
-                  ></iframe>
-                ) : gameHtmlContent ? (
+                {/* 游戏嵌入区域 */}
+                <div className="relative w-full bg-slate-950 h-[68dvh] lg:h-auto lg:aspect-video">
+                  {/* 显式报错：模块化游戏误用内联模式 */}
+                  {renderError ? (
+                    <div className="absolute inset-0 flex items-center justify-center p-6">
+                      <div className="text-center max-w-md">
+                        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+                        <h3 className="text-lg font-bold text-white mb-2">游戏无法以内联模式加载</h3>
+                        <p className="text-slate-400 text-sm leading-relaxed">{renderError}</p>
+                      </div>
+                    </div>
+                  ) : (game.hostingType === 'external' || game.hostingType === 'server') && game.cdnUrl ? (
+                    <iframe
+                      id="game-iframe"
+                      src={game.cdnUrl}
+                      className="w-full h-full border-0"
+                      allow="fullscreen"
+                      sandbox="allow-scripts allow-same-origin allow-popups"
+                    ></iframe>
+                  ) : gameHtmlContent ? (
                   <iframe
                     id="game-iframe"
                     srcDoc={gameHtmlContent}

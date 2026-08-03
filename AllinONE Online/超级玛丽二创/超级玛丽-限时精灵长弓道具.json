@@ -1,0 +1,8 @@
+{
+  "name": "限时精灵长弓",
+  "effect": "start_weapon",
+  "params": { "weapon": "bow", "seconds": 10 },
+  "description": "装备精灵长弓 10 秒，按住 X / Z 键手动射击，击杀面朝方向 7 格内敌人，每个 +50 分。到期自动收弓。",
+  "icon": "🏹",
+  "effectCode": "function(params){\n  if (game.state !== 'play') return { message: '⚠️ 请先按 Enter 开始游戏再使用道具', error: true };\n  var sec = (params && params.seconds) ? params.seconds : 10;\n  var w = (params && params.weapon) ? params.weapon : 'bow';\n  var r = api.startWeapon(w, sec * 60);\n  if (r && r.applied === false) return { message: '⚠️ ' + (r.reason || '使用失败'), error: true };\n  return { message: '🏹 长弓已装备！按住 X/Z 射击，剩余 ' + sec + ' 秒' };\n}"
+}

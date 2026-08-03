@@ -12,7 +12,8 @@
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "allowImportingTsExtensions": false
+    "allowImportingTsExtensions": false,
+    "noEmitOnError": false
   },
   "include": [
     "src/server/memoryDatabase.ts",
@@ -25,6 +26,11 @@
     "src/server/routes/redeem.ts",
     "src/server/routes/inventory.ts",
     "src/server/routes/games.ts",
-    "src/server/routes/gameDeveloper.ts"
+    "src/server/routes/activity.ts",
+    "src/server/routes/gameDeveloper.ts",
+    "src/server/analytics/analyticsStore.ts",
+    "src/server/routes/analytics.ts",
+    "src/activity/types.ts",
+    "src/activity/seed/defaultActivities.ts"
   ]
 }

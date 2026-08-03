@@ -8,7 +8,7 @@
  * 4. 处理游戏与平台的通信
  */
 
-import { skillGateway } from '@/skills/SkillGateway';
+import { skillGateway } from '@/skills/index';
 import { AuthSkill } from '@/skills/auth/AuthSkill';
 import { WalletSkill } from '@/skills/wallet/WalletSkill';
 import { InventorySkill } from '@/skills/inventory/InventorySkill';

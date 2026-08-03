@@ -27,6 +27,7 @@ import type {
 import { MARKET_COMMISSION_RATE } from '@/types/marketplace';
 import { platformTreasuryService } from '@/services/platformTreasuryService';
 import { writeQueue } from './writeQueue';
+import { track } from './analytics';
 
 // ==================== 存储键 ====================
 const LISTINGS_KEY = 'market_listings_v2';
@@ -342,6 +343,22 @@ class MarketplaceService {
       saveListings(listings);
 
       console.log(`[Marketplace] 交易成功: ${listing.itemName}, 买家=${buyerName}, 卖家收到=${sellerReceives}`);
+
+      // 📊 数据中心埋点：市场交易
+      try {
+        track({
+          type: 'market_tx',
+          userId: buyerId,
+          gameId: (listing as any)?.gameId,
+          payload: {
+            amount: listing.price,
+            currency: listing.currency,
+            commission,
+            itemName: listing.itemName,
+            sellerId: listing.sellerId,
+          },
+        });
+      } catch { /* ignore */ }
 
       return {
         success: true,

@@ -4,6 +4,9 @@
  * 数据仅在服务器运行期间保留
  */
 
+import { ActivityDef, ClaimEvent, LeaderboardEntry } from '../activity/types';
+import { defaultActivities } from '../activity/seed/defaultActivities.js';
+
 interface InventoryItem {
   id: number;
   item_id: string;
@@ -97,6 +100,8 @@ class MemoryDatabase {
   private gameFiles: GameFileRecord[] = [];
   private developerAccounts: Map<string, DeveloperAccount> = new Map();
   private developerTransactions: DeveloperTransaction[] = [];
+  private activities: ActivityDef[] = [...defaultActivities];
+  private claims: ClaimEvent[] = [];
   private idCounters = {
     inventory: 1,
     syncLog: 1,
@@ -321,6 +326,47 @@ class MemoryDatabase {
     result.sort((a, b) => b.timestamp - a.timestamp);
     if (limit) result = result.slice(0, limit);
     return result;
+  }
+
+  // ========== 活动中心 ==========
+
+  async getActivities(): Promise<ActivityDef[]> {
+    return this.activities.filter((a) => a.status !== 'draft');
+  }
+
+  async getActivity(id: string): Promise<ActivityDef | undefined> {
+    return this.activities.find((a) => a.id === id);
+  }
+
+  async upsertActivity(a: ActivityDef): Promise<void> {
+    const i = this.activities.findIndex((x) => x.id === a.id);
+    if (i >= 0) this.activities[i] = a;
+    else this.activities.push(a);
+  }
+
+  async deleteActivity(id: string): Promise<void> {
+    this.activities = this.activities.filter((a) => a.id !== id);
+  }
+
+  async addClaim(e: ClaimEvent): Promise<void> {
+    this.claims.push(e);
+    if (this.claims.length > 2000) this.claims = this.claims.slice(-2000);
+  }
+
+  async getLeaderboard(limit = 20): Promise<LeaderboardEntry[]> {
+    const map = new Map<string, LeaderboardEntry>();
+    for (const c of this.claims) {
+      const e = map.get(c.userId) || {
+        userId: c.userId,
+        userName: c.userName || '玩家',
+        totalCoins: 0,
+      };
+      e.totalCoins += c.amount || 0;
+      map.set(c.userId, e);
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.totalCoins - a.totalCoins)
+      .slice(0, limit);
   }
 
   // ========== 调试 ==========

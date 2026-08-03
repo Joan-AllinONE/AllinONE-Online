@@ -14,7 +14,9 @@ import ItemWorkshop from "@/pages/ItemWorkshop";
 import PersonalCenter from "@/pages/PersonalCenter";
 import Marketplace from "@/components/Marketplace";
 import PlatformAdmin from "@/pages/PlatformAdmin";
+import PlatformDataCenter from "@/pages/PlatformDataCenter";
 import GameStoreManagement from "@/pages/GameStoreManagement";
+import { ActivityCenter } from "@/activity";
 
 export default function App() {
   return (
@@ -31,10 +33,12 @@ export default function App() {
         <Route path="/game-store-manage" element={<GameStoreManagement />} />
         <Route path="/marketplace" element={<Marketplace />} />
         <Route path="/platform-admin" element={<PlatformAdmin />} />
+        <Route path="/platform-data-center" element={<PlatformDataCenter />} />
         <Route path="/platform-store-manage" element={<Navigate to="/platform-admin?tab=store" replace />} />
         <Route path="/voucher-system" element={<VoucherSystemPage />} />
         <Route path="/workshop" element={<ItemWorkshop />} />
         <Route path="/publishing-center" element={<PublishingCenter />} />
+        <Route path="/activity" element={<ActivityCenter />} />
         <Route path="/personal-center" element={<PersonalCenter />} />
       </Routes>
     </AuthProvider>

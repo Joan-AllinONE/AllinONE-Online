@@ -1,8 +1,11 @@
 ---
 name: relational-database-web-cloudbase
-description: Use when building frontend Web apps that talk to CloudBase Relational Database via @cloudbase/js-sdk – provides the canonical init pattern so you can then use Supabase-style queries from the browser.
-version: 2.21.1
+description: "[Deprecated] Use when building frontend Web apps that talk to CloudBase Relational Database via @cloudbase/js-sdk – provides the canonical init pattern so you can then use Supabase-style queries from the browser. New environments should use PostgreSQL with app.rdb() — see postgresql-development skill instead."
+version: 2.24.1
 alwaysApply: false
+metadata:
+  priority: 5
+  deprecated: true
 ---
 
 ## Standalone Install Note
@@ -30,7 +33,7 @@ Keep local `references/...` paths for files that ship with the current skill dir
 
 ### Then also read
 
-- SQL management and MCP operations -> `../relational-database-tool/SKILL.md` (standalone fallback: `https://cnb.cool/tencent/cloud/cloudbase/cloudbase-skills/-/git/raw/main/skills/cloudbase/references/relational-database-tool/SKILL.md`)
+- MySQL SQL management and MCP operations -> `../relational-database-tool/SKILL.md` (standalone fallback: `https://cnb.cool/tencent/cloud/cloudbase/cloudbase-skills/-/git/raw/main/skills/cloudbase/references/relational-database-tool/SKILL.md`)
 - Web auth/login -> `../auth-web/SKILL.md` (standalone fallback: `https://cnb.cool/tencent/cloud/cloudbase/cloudbase-skills/-/git/raw/main/skills/cloudbase/references/auth-web/SKILL.md`)
 - General Web app setup -> `../web-development/SKILL.md` (standalone fallback: `https://cnb.cool/tencent/cloud/cloudbase/cloudbase-skills/-/git/raw/main/skills/cloudbase/references/web-development/SKILL.md`)
 
@@ -51,7 +54,7 @@ Keep local `references/...` paths for files that ship with the current skill dir
 
 - Confirm the caller is a Web frontend.
 - Keep one shared CloudBase app and one shared relational DB client.
-- Route provisioning/schema work to `relational-database-tool`.
+- Route MySQL provisioning/schema work to `relational-database-tool`. If the task says PostgreSQL, CloudBase PG, PG mode, `app.rdb()`, `queryPgDatabase`, `managePgDatabase`, or RLS, route to `postgresql-development` instead.
 - Handle auth separately before data access.
 
 ## Overview
@@ -75,7 +78,7 @@ const app = cloudbase.init({
   env: "your-env-id"
 });
 
-const auth = app.auth();
+const auth = app.auth;
 // Handle login separately
 
 const db = app.rdb();
@@ -99,8 +102,13 @@ const db = app.rdb();
 ### Use `relational-database-tool` instead when
 
 - you need to create/destroy MySQL
-- you need DDL or write-SQL administration
-- you need to inspect or change table security rules through MCP
+- you need MySQL DDL or write-SQL administration
+- you need to inspect or change MySQL table security rules through MCP
+
+### Use `postgresql-development` instead when
+
+- the task says PostgreSQL, CloudBase PG, PG mode, `app.rdb()`, `queryPgDatabase`, `managePgDatabase`, PostgREST, or RLS
+- browser-side table code must use PG semantics rather than legacy NoSQL / MySQL management tools
 
 ## Example: shared frontend DB client
 

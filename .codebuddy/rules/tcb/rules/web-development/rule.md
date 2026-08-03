@@ -1,7 +1,7 @@
 ---
 name: web-development
 description: Use when users need to implement, integrate, debug, build, deploy, or validate a Web frontend after the product direction is already clear, especially for React, Vue, Vite, browser flows, or CloudBase Web integration.
-version: 2.21.1
+version: 2.24.1
 alwaysApply: false
 ---
 
@@ -32,6 +32,7 @@ Keep local `references/...` paths for files that ship with the current skill dir
 
 - The task includes project structure, framework conventions, build config, deployment, routing, or frontend test and validation flows.
 - The request includes UI implementation but the visual direction is already fixed; otherwise read `ui-design` first.
+- **⚠️ Any task involving interface styling, layout, color scheme, or font selection — before writing the first line of CSS/Tailwind, you MUST load the `ui-design` skill and output a Design Specification.** Skipping this step causes frontend styling to degrade to generic AI template defaults. The `ui-design` skill must be loaded before any visual implementation begins, not retroactively after the user complains about the appearance.
 
 ### Then also read
 
@@ -164,8 +165,8 @@ Use this section only when the Web project needs CloudBase platform features.
 
 ### Web SDK rules
 
-- Prefer npm installation for React, Vue, Vite, and other bundler-based projects
-- Use the CDN only for static HTML pages, quick demos, embedded snippets, or README examples
+- Prefer npm installation for React, Vue, Vite, and other bundler-based projects: `npm install @cloudbase/js-sdk`
+- Use the CDN only for static HTML pages, quick demos, embedded snippets, or README examples: `https://static.cloudbase.net/cloudbase-js-sdk/latest/cloudbase.full.js`
 - Only use documented CloudBase Web SDK APIs; do not invent methods or options
 - Keep a shared `app` or `auth` instance instead of re-initializing on every call
 - If the user only provides an environment alias, nickname, or other shorthand, resolve it to the canonical full `EnvId` before writing SDK init code, console links, or config files. Do not pass alias-like short forms directly into `cloudbase.init({ env })`.
@@ -204,5 +205,5 @@ const app = cloudbase.init({
   env: "your-full-env-id", // Canonical full CloudBase environment ID resolved from envQuery or the console
 });
 
-const auth = app.auth();
+const auth = app.auth
 ```

@@ -9,6 +9,7 @@
  */
 import { voucherService } from '@/voucher-system/services/VoucherService';
 import { Voucher, Transaction, VoucherStatus, VoucherSourceType, isCurrencyVoucher } from '@/voucher-system/types';
+import { track } from './analytics';
 
 // ==================== 平台账户常量 ====================
 
@@ -178,6 +179,15 @@ class VoucherPaymentService {
       changeVouchers.push(...changeResult.vouchers);
       transactions.push(...changeResult.transactions);
     }
+
+    // 📊 数据中心埋点：A币交易
+    try {
+      track({
+        type: 'voucher_tx',
+        userId,
+        payload: { amount, currency: 'A币', txCount: transactions.length, description },
+      });
+    } catch { /* ignore */ }
 
     return {
       success: true,

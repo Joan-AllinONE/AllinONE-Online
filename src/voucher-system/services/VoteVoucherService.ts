@@ -36,6 +36,7 @@ import {
 } from '@/types/gameProposal';
 import { generateSimulatedPlayers, calculateVoteWeight, generatePlayerMetrics } from '@/data/simulatedPlayers';
 import { persistWithCloudSync, loadWithCloudSync } from '../storage/cloudSync';
+import { globalEventBus } from '@/skills/EventBus';
 
 // ==================== 常量 ====================
 
@@ -479,6 +480,9 @@ export class VoteVoucherService {
         voucherId,
       },
     }));
+
+    // 活动中心埋点：投票
+    try { globalEventBus.emit('vote.cast', { proposalId: voteInfo.proposalId, decision }, { userId: 'anonymous', sessionId: 'web' }); } catch { /* ignore */ }
 
     console.log(`[VoteVoucher] ✅ ${voucher.currentHolderName} ${decision === 'approve' ? '赞成' : decision === 'reject' ? '反对' : '弃权'} "${voteInfo.proposalTitle}"`);
 

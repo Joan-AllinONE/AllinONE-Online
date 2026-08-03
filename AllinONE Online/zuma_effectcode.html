@@ -932,7 +932,7 @@ Zuma.DefaultColorList = [
       renderCustomPowerUps();
     }
 
-    // ---------- 接收平台 EXTENSION_VOUCHER ----------
+    // ---------- 接收平台 EXTENSION_VOUCHER（postMessage 通道：UGC 工坊） ----------
     window.addEventListener('message', function(e) {
       if (e.data && e.data.type === 'EXTENSION_VOUCHER') {
         var v = e.data.voucher;
@@ -941,11 +941,11 @@ Zuma.DefaultColorList = [
           return;
         }
         var data = v.data;
-        if (data.effect) {
+        if (data.effect || data.effectCode || data.effectScript) {
           var customItem = {
             id: v.id || ('ugc_' + Date.now()),
             name: data.name || (data.effect + '道具'),
-            effect: data.effect,
+            effect: data.effect || null,
             params: data.params || {},
             description: data.description || '',
             effectCode: data.effectCode || null,
@@ -958,11 +958,83 @@ Zuma.DefaultColorList = [
         }
       }
 
-      // 兼容：兑换码结果
+      // 兼容：兑换码结果（实际道具由 allinone:item-redeemed CustomEvent 派发）
       if (e.data && e.data.type === 'REDEEM_RESULT' && e.data.data && e.data.data.success) {
         console.log('[Zuma] 兑换码成功:', e.data.data);
       }
     });
+
+    // ---------- 接收平台道具（CustomEvent 通道：兑换码兑换 / 平台统一下发） ----------
+    // ⚠️ 与超级玛丽一致：平台现在只通过 allinone:item-redeemed 派发道具，
+    //    不再单独发送 EXTENSION_VOUCHER，因此必须监听此事件，否则道具进不了背包。
+    function handleRedeemedItem(detail) {
+      if (!detail) return;
+      console.log('[Zuma] 收到 allinone:item-redeemed CustomEvent:', JSON.stringify(detail));
+
+      // ===== 解析真实效果名 =====
+      // 平台 CustomEvent 的 detail 结构:
+      //   { code, itemId, itemName, quantity, effects, effectType, voucherData? }
+      // - voucherData.effect 来自 UGC 工坊的 itemData.effect
+      // - detail.itemId 在兑换码路径下即效果名（如 'add_score'）
+      var voucherData = detail.voucherData || {};
+
+      // 优先级 1: voucherData.effect（UGC 工坊路径）
+      // ⚠️ 平台对“自定义道具”会把 voucherData.effect 设为字面量 'custom' 占位，
+      //    真实效果名通常落在 detail.itemId。必须排除 'custom'，否则回落不到正确效果。
+      var realEffect = (voucherData.effect && voucherData.effect !== 'custom')
+        ? voucherData.effect : null;
+      var realParams = voucherData.params || detail.effects || {};
+      var realEffectCode = voucherData.effectCode || null;
+      var realName = voucherData.name || detail.itemName || '未命名道具';
+
+      // 优先级 2: detail.itemId（兑换码路径，itemId = 效果名）
+      if (!realEffect && !realEffectCode) {
+        if (detail.itemId && detail.itemId !== 'custom') {
+          realEffect = detail.itemId;
+          console.log('[Zuma] 从 detail.itemId 解析效果名:', detail.itemId);
+        }
+      }
+      // 优先级 3: detail.effectType（兜底，排除 'custom'）
+      if (!realEffect && !realEffectCode) {
+        if (detail.effectType && detail.effectType !== 'custom') {
+          realEffect = detail.effectType;
+        }
+      }
+
+      console.log('[Zuma] 解析道具: name=' + realName + ', effect=' + realEffect +
+        ', hasEffectCode=' + !!realEffectCode + ', detail.effectType=' + detail.effectType);
+
+      if (!realEffect && !realEffectCode) {
+        console.warn('[Zuma] 道具缺少有效效果信息，忽略。', JSON.stringify(detail));
+        showToast('⚠️ 道具数据不完整: ' + realName, 'info');
+        return;
+      }
+
+      // 去重：避免 EXTENSION_VOUCHER 与 CustomEvent 重复投送
+      var alreadyInBag = customPowerUps.some(function(item) {
+        return item.effect === realEffect && item.name === realName;
+      });
+      if (alreadyInBag) {
+        console.log('[Zuma] 同名道具已在背包中，跳过');
+        return;
+      }
+
+      var newItem = {
+        id: detail.code || detail.itemId || ('ugc_' + Date.now()),
+        name: realName,
+        effect: realEffect,
+        params: realParams,
+        description: voucherData.description || '',
+        effectCode: realEffectCode,
+        icon: voucherData.icon || '⚡',
+      };
+      customPowerUps.push(newItem);
+      renderCustomPowerUps();
+      showToast('🎁 获得道具: ' + realName, 'success');
+      console.log('[Zuma] 道具已存入背包，effect=' + realEffect + '，点击 PROPS 栏使用');
+    }
+    // ⚠️ 只监听一种格式（与超级玛丽一致），避免平台/SK 分发两种格式导致重复收到道具
+    window.addEventListener('allinone:item-redeemed', function(e) { handleRedeemedItem(e.detail); });
 
     // 初始渲染
     renderCustomPowerUps();

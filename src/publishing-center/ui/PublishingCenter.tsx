@@ -10,7 +10,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { 
-  Upload, FileCode, Cpu, Rocket, CheckCircle, 
+  Upload, FileCode, Cpu, Rocket, CheckCircle, Eye, RefreshCw,
   AlertCircle, Loader2, ChevronRight, ChevronLeft,
   Package, Settings, BarChart3, Zap, Shield, 
   Gamepad2, Coins, ShoppingCart, Trophy, Users,
@@ -38,6 +38,7 @@ import {
 import { GameCodeAnalyzer } from '../ai/GameCodeAnalyzer';
 import { SkillRecommender } from '../ai/SkillRecommender';
 import { PublishingPipeline } from '../core/PublishingPipeline';
+import { buildLocalPreview, clearLocalPreview, waitForServiceWorkerController, type LocalPreviewResult } from '../local/localPreviewService';
 import { StandardGameValidator } from '../validator/StandardGameValidator';
 // 使用 Vite ?raw 导入 Mode B 示例模板的原始 HTML 内容
 import modeBTemplateHtml from '../templates/mode-b-example/index.html?raw';
@@ -281,6 +282,12 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
   const [currentStep, setCurrentStep] = useState<PublishStep>(PublishStep.UPLOAD);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [localPreview, setLocalPreview] = useState<LocalPreviewResult | null>(null);
+  const [isPreviewBuilding, setIsPreviewBuilding] = useState(false);
+  // 预览调试增强：屏幕内错误浮层（无需开 F12 即可看到游戏崩溃原因）
+  const [previewErrors, setPreviewErrors] = useState<string[]>([]);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const previewErrorSeen = useRef<Set<string>>(new Set());
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [extractedFiles, setExtractedFiles] = useState<UploadedFile[]>([]);
   const [analysisResult, setAnalysisResult] = useState<GameAnalysisResult | null>(null);
@@ -474,6 +481,15 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
     // 同时支持旧兑换码和新道具凭证
     const rarity = formData.get('rarity') as string || 'common';
     const supplyPolicy = formData.get('supplyPolicy') as string || 'open';
+    // 计算效果参数（metadata 与 itemData 共用，确保数据模型一致）
+    const effectTypeKey = formData.get('effectType') as string || 'difficulty_reducer';
+    const effectParams = Object.fromEntries(
+      effectTypeRegistry.get(effectTypeKey)?.parameters.map(p => {
+        const val = formData.get(`effect_param_${p.key}`);
+        if (val === null || val === undefined) return [p.key, p.defaultValue];
+        return [p.key, p.type === 'number' ? parseFloat(val as string) || p.defaultValue : val];
+      }) || []
+    );
     const newRedeemItem: CreateHostedItemRequest = {
       gameId: 'temp-game-id',
       name: formData.get('name') as string,
@@ -495,19 +511,21 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
       gameEffect: {
         itemId: formData.get('gameItemId') as string,
         quantity: parseInt(formData.get('gameQuantity') as string) || 1,
-        effectType: formData.get('effectType') as string || 'difficulty_reducer',
+        effectType: effectTypeKey,
         metadata: { 
           rarity, 
           supplyPolicy,
-          effectType: formData.get('effectType') as string || 'difficulty_reducer',
+          effectType: effectTypeKey,
           // 合并效果参数
-          ...Object.fromEntries(
-            effectTypeRegistry.get(formData.get('effectType') as string || 'difficulty_reducer')?.parameters.map(p => {
-              const val = formData.get(`effect_param_${p.key}`);
-              if (val === null || val === undefined) return [p.key, p.defaultValue];
-              return [p.key, p.type === 'number' ? parseFloat(val as string) || p.defaultValue : val];
-            }) || []
-          ),
+          ...effectParams,
+        },
+        // 🆕 itemData: 固化完整效果数据（effect/params），确保兑换时效果名不丢失
+        // （此前缺失 → REDEEM_RESULT.voucherData 为 null → 游戏无法识别效果 → 回落默认 bandit）
+        itemData: {
+          effect: effectTypeKey,
+          params: effectParams,
+          itemId: formData.get('gameItemId') as string,
+          effectType: effectTypeKey,
         },
       },
     };
@@ -605,6 +623,92 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
   // 在 handlePublish 里通过外部表单提取 rarity
   // 临时存储为 gameEffect.metadata
   // 发布时从第一个道具的 gameEffect.metadata 中获取
+
+  // 本地预览：纯本地运行游戏草稿，不发布、不污染线上数据
+  const handleLocalPreview = useCallback(async () => {
+    if (!analysisResult || extractedFiles.length === 0) {
+      toast.error('请先上传并分析游戏包');
+      return;
+    }
+    setIsPreviewBuilding(true);
+    try {
+      const entryPoint = analysisResult.fileStructure.entryPoints?.[0];
+      const result = await buildLocalPreview({
+        files: extractedFiles,
+        entryPoint,
+      });
+      // 确保离线服务（SW）已激活并接管页面，否则本地预览请求会被 dev 代理/后端吞掉导致空白
+      const swReady = await waitForServiceWorkerController(3000);
+      if (!swReady) {
+        toast.warning('离线预览服务尚未激活，若窗口空白请刷新页面后重试「本地预览」');
+      }
+      setLocalPreview(result);
+      toast.success('本地预览已生成，正在打开预览窗口');
+    } catch (err) {
+      toast.error('生成本地预览失败：' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsPreviewBuilding(false);
+    }
+  }, [analysisResult, extractedFiles]);
+
+  // 预览调试增强：把游戏报错推入屏幕内浮层（去重 + 最多保留 8 条）
+  const pushPreviewError = useCallback((raw: string) => {
+    const msg = raw.trim();
+    if (!msg) return;
+    if (previewErrorSeen.current.has(msg)) return;
+    previewErrorSeen.current.add(msg);
+    setPreviewErrors((prev) => [...prev, msg].slice(-8));
+  }, []);
+
+  // 预览弹窗打开/重新生成时重置错误浮层
+  useEffect(() => {
+    if (localPreview) {
+      previewErrorSeen.current.clear();
+      setPreviewErrors([]);
+    }
+  }, [localPreview]);
+
+  // 父窗口层监听：同源 iframe 的未捕获 JS 错误与未处理 Promise 会冒泡到此处
+  useEffect(() => {
+    if (!localPreview) return;
+    const onError = (e: ErrorEvent) => {
+      const where = e.filename ? ` (${e.filename}:${e.lineno}:${e.colno})` : '';
+      pushPreviewError(`脚本错误: ${e.message}${where}`);
+    };
+    const onReject = (e: PromiseRejectionEvent) => {
+      const r = e.reason;
+      pushPreviewError(`未处理的 Promise 异常: ${r instanceof Error ? r.message : String(r)}`);
+    };
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onReject);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onReject);
+    };
+  }, [localPreview, pushPreviewError]);
+
+  // iframe 加载完成后，直接挂到 iframe 的 window 上（捕获阶段，可捕获子资源 404 等加载错误）
+  const handleIframeLoad = useCallback(() => {
+    const frame = iframeRef.current;
+    const win = frame?.contentWindow;
+    if (!win) return;
+    const onError = (e: ErrorEvent | Event) => {
+      if (e instanceof ErrorEvent) {
+        const where = e.filename ? ` (${e.filename}:${e.lineno}:${e.colno})` : '';
+        pushPreviewError(`脚本错误: ${e.message}${where}`);
+      } else {
+        const t = e.target as HTMLElement | null;
+        const src = (t as any)?.src || (t as any)?.href || '';
+        if (src) pushPreviewError(`资源加载失败: ${src}`);
+      }
+    };
+    const onReject = (e: PromiseRejectionEvent) => {
+      const r = e.reason;
+      pushPreviewError(`未处理的 Promise 异常: ${r instanceof Error ? r.message : String(r)}`);
+    };
+    win.addEventListener('error', onError, true);
+    win.addEventListener('unhandledrejection', onReject);
+  }, [pushPreviewError]);
 
   // 发布
   const handlePublish = useCallback(async () => {
@@ -722,7 +826,8 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
 
         // 提示用户：道具已同步至两套系统
         console.log('[PublishingCenter] 发布成功! 道具数据已同步至「兑换码管理」和「道具凭证」系统');
-        
+
+        await clearLocalPreview();
         setCurrentStep(PublishStep.PUBLISH);
         onPublishComplete?.({ 
           gameId: config.gameId, 
@@ -1482,8 +1587,12 @@ AllinONE.onItemRedeemed(function(data) {
               <ChevronLeft className="w-4 h-4" />
               返回上传
             </Button>
-            <Button onClick={handlePublish} disabled={isPublishing || selectedSkills.size === 0}>
-              {isPublishing ? (
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={handleLocalPreview} disabled={isPreviewBuilding || isPublishing}>
+                <Eye className="w-4 h-4" /> {isPreviewBuilding ? '生成中...' : '本地预览'}
+              </Button>
+              <Button onClick={handlePublish} disabled={isPublishing || selectedSkills.size === 0}>
+                {isPublishing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
                   发布中...
@@ -1496,6 +1605,7 @@ AllinONE.onItemRedeemed(function(data) {
                 </>
               )}
             </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -2637,6 +2747,84 @@ const CONFIG_KEY = '__ALLINONE_CONFIG__';`}</pre>
           </div>
         </div>
       )}
+
+      {/* 本地预览弹窗（纯本地运行，不发布、不污染线上数据） */}
+      {localPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-slate-900 rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col border border-slate-700 overflow-hidden">
+            {/* 标题栏 */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-800/60">
+              <div className="flex items-center gap-2">
+                <Eye className="w-5 h-5 text-cyan-400" />
+                <span className="font-semibold text-white">本地预览</span>
+                <span className="text-xs text-gray-400">· {localPreview.entryPoint}</span>
+                <span className="text-xs text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30">纯本地 · 不发布</span>
+              </div>
+              <button
+                onClick={() => setLocalPreview(null)}
+                className="p-1.5 hover:bg-slate-700 rounded-lg text-gray-400 hover:text-white transition-colors"
+                aria-label="关闭预览"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {/* 预览调试错误浮层：游戏运行时报错/资源加载失败会在此显示，无需打开 F12 */}
+            {previewErrors.length > 0 && (
+              <div className="max-h-40 overflow-y-auto bg-red-950/80 border-b border-red-700/60 px-4 py-2 space-y-1">
+                <div className="flex items-center gap-2 text-red-300 text-xs font-semibold mb-1">
+                  <AlertCircle className="w-4 h-4" />
+                  预览运行时报错（{previewErrors.length}）· 同源 iframe 错误自动捕获
+                </div>
+                {previewErrors.map((err, i) => (
+                  <div key={i} className="text-red-200/90 text-xs font-mono leading-relaxed break-all">
+                    {i + 1}. {err}
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* 预览区 */}
+            <div className="flex-1 bg-white">
+              <iframe
+                ref={iframeRef}
+                onLoad={handleIframeLoad}
+                src={localPreview.launchUrl}
+                className="w-full h-full border-0"
+                title="本地预览"
+              />
+            </div>
+            {/* 底部操作栏 */}
+            <div className="p-3 border-t border-slate-700 bg-slate-800/60 flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-500 leading-snug">
+                预览仅在本地浏览器运行，平台数据不会持久化。修改文件后重新上传并再次「本地预览」即可覆盖当前草稿。
+              </span>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={() => window.open(localPreview.launchUrl, '_blank', 'noopener,noreferrer')}
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-600 text-gray-200 hover:bg-slate-700/50 transition-colors flex items-center gap-1.5"
+                  title="在新标签页打开，便于在独立窗口查看 Console"
+                >
+                  <ExternalLink className="w-4 h-4" /> 新标签页打开
+                </button>
+                <button
+                  onClick={handleLocalPreview}
+                  disabled={isPreviewBuilding}
+                  className="px-3 py-2 text-sm rounded-lg border border-slate-600 text-gray-200 hover:bg-slate-700/50 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isPreviewBuilding ? 'animate-spin' : ''}`} /> {isPreviewBuilding ? '生成中...' : '重新生成'}
+                </button>
+                <button
+                  onClick={() => { setLocalPreview(null); handlePublish(); }}
+                  disabled={isPublishing || selectedSkills.size === 0}
+                  className="px-4 py-2 text-sm rounded-lg bg-gradient-to-r from-cyan-500 to-purple-500 text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <CheckCircle className="w-4 h-4" /> 测试合格去发布
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

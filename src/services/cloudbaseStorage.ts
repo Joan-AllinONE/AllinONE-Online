@@ -49,7 +49,7 @@ export interface UploadResult {
  */
 export async function uploadGameFiles(
   gameId: string,
-  files: Array<{ name: string; content: string; path: string }>
+  files: Array<{ name: string; content: string | Uint8Array; path: string }>
 ): Promise<UploadResult> {
   if (!isCloudBaseReady()) {
     return { success: false, uploaded: 0, errors: ['CloudBase not ready'], fileManifest: [] };
@@ -66,7 +66,10 @@ export async function uploadGameFiles(
       const contentType = inferContentType(fileName);
 
       // 使用 File 对象而非 Blob — File 有 name 属性，CloudBase SDK 能正确获取文件大小和内容
-      const fileObj = new File([file.content], fileName, { type: contentType });
+      // 支持 string（文本）和 Uint8Array（二进制）两种内容格式
+      const fileObj = file.content instanceof Uint8Array
+        ? new File([file.content.buffer as ArrayBuffer], fileName, { type: contentType })
+        : new File([file.content], fileName, { type: contentType });
 
       // 上传前验证内容非空
       if (fileObj.size === 0) {

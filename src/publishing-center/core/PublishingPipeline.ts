@@ -20,6 +20,7 @@ import {
   PublishResult,
   GameType,
   ProtocolMode,
+  UploadedFile,
 } from '../types';
 import { SkillInitializer, type SkillInitializationResult } from './SkillInitializer';
 import { savePublishedGame, saveGameFiles, type PublishedGame, type RedeemItemConfig } from '@/services/publishedGameService';
@@ -479,96 +480,104 @@ export class PublishingPipeline {
     logger.info('代码优化中...', PublishStep.PUBLISH);
     await this.delay(500);
 
-    // ===== 注入 AllinONE 协议层 =====
-    const files = config.files;
-    if (files && files.length > 0 && config.gameId) {
-      const entryPoint = config.analysisResult.fileStructure.entryPoints[0] || 'index.html';
-      
-      // 查找 HTML 入口文件（优先选择 dist/ 编译版本，而非 src/ 源码版本）
-      let htmlFile = files.find(f => f.path === entryPoint);
-      if (!htmlFile) {
-        const htmlCandidates = files.filter(f => f.name === 'index.html' || f.name.endsWith('.html'));
-        htmlFile = htmlCandidates.find(f => f.path.includes('/dist/'))
-          || htmlCandidates.find(f => f.path.endsWith('/' + entryPoint))
-          || htmlCandidates[0];
-      }
-
-      if (htmlFile) {
-        try {
-          // 读取文件内容
-          let content: string;
-          if (typeof htmlFile.content === 'string') {
-            content = htmlFile.content;
-          } else if (htmlFile.content instanceof Uint8Array) {
-            content = new TextDecoder('utf-8').decode(htmlFile.content);
-          } else if (htmlFile.content instanceof ArrayBuffer) {
-            content = new TextDecoder('utf-8').decode(new Uint8Array(htmlFile.content));
-          } else {
-            content = String(htmlFile.content);
-          }
-
-          // 根据协议模式选择注入策略
-          if (protocolMode === 'integrated') {
-            // Mode B: 标准集成 — 只注入轻量协议桥接层
-            const protocolBridgeScript = this.generateProtocolBridge(config.gameId, config.redeemItems || []);
-
-            // 注入协议桥接层 (放 <head> 最前)
-            if (content.includes('<head>')) {
-              const headEndIndex = content.indexOf('</head>');
-              content = content.slice(0, headEndIndex) + protocolBridgeScript + '\n' + content.slice(headEndIndex);
-            } else if (content.includes('<html')) {
-              const htmlEnd = content.indexOf('>', content.indexOf('<html'));
-              content = content.slice(0, htmlEnd + 1) + '\n<head>' + protocolBridgeScript + '</head>\n' + content.slice(htmlEnd + 1);
-            } else {
-              content = protocolBridgeScript + '\n' + content;
-            }
-
-            logger.success(`[AllinONE Protocol] 协议桥接层已注入 "${htmlFile.name}" (Mode B)`, PublishStep.PUBLISH);
-            logger.info('[AllinONE Protocol] 游戏已集成 @allinone/standard-sdk，通信通过协议层进行', PublishStep.PUBLISH);
-
-          } else {
-            // Mode A (默认): 注入适配 — 完整 Effect Engine + SDK
-            const protocolLayer = this.generateProtocolLayer(config.gameId, config.redeemItems || []);
-            const sdkScript = this.generateAllinoneSDK(config.gameId, config.redeemItems || []);
-
-            // 注入协议层 (放 <head> 最前, 必须在任何游戏脚本之前执行)
-            if (content.includes('<head>')) {
-              const headStartIndex = content.indexOf('<head>') + '<head>'.length;
-              content = content.slice(0, headStartIndex) + '\n' + protocolLayer + content.slice(headStartIndex);
-            } else if (content.includes('<html')) {
-              const htmlEnd = content.indexOf('>', content.indexOf('<html'));
-              content = content.slice(0, htmlEnd + 1) + '\n<head>' + protocolLayer + '</head>\n' + content.slice(htmlEnd + 1);
-            } else {
-              content = protocolLayer + '\n' + content;
-            }
-
-            // 注入 SDK (放 </body> 前)
-            if (content.includes('</body>')) {
-              content = content.replace('</body>', `${sdkScript}\n</body>`);
-            } else {
-              content = content + '\n' + sdkScript;
-            }
-
-            logger.success(`[AllinONE Protocol] 注入适配层 + 兑换条已注入 "${htmlFile.name}" (${content.length.toLocaleString()} 字节)`, PublishStep.PUBLISH);
-            logger.info(`[AllinONE Protocol] 协议模式: Mode A (注入适配), 通过帧级拦截实现效果控制`, PublishStep.PUBLISH);
-          }
-
-          // 更新文件内容
-          htmlFile.content = content;
-          htmlFile.size = content.length;
-
-        } catch (err) {
-          logger.warning(`注入 AllinONE 协议层失败: ${err instanceof Error ? err.message : String(err)}`, PublishStep.PUBLISH);
-        }
-      } else {
-        logger.warning('未找到 HTML 入口文件, 跳过协议层注入', PublishStep.PUBLISH);
-      }
+    // ===== 注入 AllinONE 协议层（复用公共方法，本地预览同源）=====
+    if (config.files && config.files.length > 0 && config.gameId) {
+      const entryPoint = config.analysisResult?.fileStructure?.entryPoints?.[0] || 'index.html';
+      config.files = this.injectProtocolIntoFiles(config.files, config.gameId, {
+        entryPoint,
+        protocolMode,
+        redeemItems: config.redeemItems || [],
+      });
     } else {
       logger.info('没有游戏文件可构建, 跳过协议层注入', PublishStep.PUBLISH);
     }
 
     logger.success('构建完成', PublishStep.PUBLISH);
     context.data.set('buildSuccess', true);
+  }
+
+  /**
+   * 向游戏文件注入 AllinONE 协议层 / SDK（与 stepBuild 注入行为一致）。
+   * 抽取为公共方法，供「本地预览」复用，保证「预览 ≈ 发布」行为一致。
+   * @param files     游戏文件列表（UploadedFile[]）
+   * @param gameId    目标 gameId（发布用真实 id，本地预览用 local-preview-draft）
+   * @param opts      entryPoint / protocolMode / redeemItems
+   * @returns 注入后的文件副本（不修改入参）
+   */
+  public injectProtocolIntoFiles(
+    files: UploadedFile[],
+    gameId: string,
+    opts: { entryPoint?: string; protocolMode?: ProtocolMode; redeemItems?: RedeemItemConfig[] }
+  ): UploadedFile[] {
+    const protocolMode: ProtocolMode = opts.protocolMode || 'inject';
+    const redeemItems = opts.redeemItems || [];
+    const entryPoint = opts.entryPoint || 'index.html';
+
+    if (!files || files.length === 0 || !gameId) return files;
+
+    // 复制文件，避免修改原数组（发布路径也会重新赋值 config.files）
+    const cloned = files.map(f => ({ ...f }));
+
+    // 查找 HTML 入口文件（优先 dist/ 编译版本，而非 src/ 源码版本）
+    let htmlFile = cloned.find(f => f.path === entryPoint);
+    if (!htmlFile) {
+      const htmlCandidates = cloned.filter(f => f.name === 'index.html' || f.name.endsWith('.html'));
+      htmlFile = htmlCandidates.find(f => f.path.includes('/dist/'))
+        || htmlCandidates.find(f => f.path.endsWith('/' + entryPoint))
+        || htmlCandidates[0];
+    }
+    if (!htmlFile) return cloned;
+
+    try {
+      let content = this.readFileAsString(htmlFile.content);
+
+      if (protocolMode === 'integrated') {
+        // Mode B: 标准集成 — 只注入轻量协议桥接层
+        const protocolBridgeScript = this.generateProtocolBridge(gameId, redeemItems);
+        if (content.includes('<head>')) {
+          const headEndIndex = content.indexOf('</head>');
+          content = content.slice(0, headEndIndex) + protocolBridgeScript + '\n' + content.slice(headEndIndex);
+        } else if (content.includes('<html')) {
+          const htmlEnd = content.indexOf('>', content.indexOf('<html'));
+          content = content.slice(0, htmlEnd + 1) + '\n<head>' + protocolBridgeScript + '</head>\n' + content.slice(htmlEnd + 1);
+        } else {
+          content = protocolBridgeScript + '\n' + content;
+        }
+      } else {
+        // Mode A (默认): 注入适配 — 完整 Effect Engine + SDK
+        const protocolLayer = this.generateProtocolLayer(gameId, redeemItems);
+        const sdkScript = this.generateAllinoneSDK(gameId, redeemItems);
+        if (content.includes('<head>')) {
+          const headStartIndex = content.indexOf('<head>') + '<head>'.length;
+          content = content.slice(0, headStartIndex) + '\n' + protocolLayer + content.slice(headStartIndex);
+        } else if (content.includes('<html')) {
+          const htmlEnd = content.indexOf('>', content.indexOf('<html'));
+          content = content.slice(0, htmlEnd + 1) + '\n<head>' + protocolLayer + '</head>\n' + content.slice(htmlEnd + 1);
+        } else {
+          content = protocolLayer + '\n' + content;
+        }
+        if (content.includes('</body>')) {
+          content = content.replace('</body>', `${sdkScript}\n</body>`);
+        } else {
+          content = content + '\n' + sdkScript;
+        }
+      }
+
+      htmlFile.content = content;
+      htmlFile.size = content.length;
+    } catch (err) {
+      console.warn('[injectProtocolIntoFiles] 注入失败:', err);
+    }
+
+    return cloned;
+  }
+
+  /** 将 UploadedFile.content 统一读为字符串（与 stepBuild 一致） */
+  private readFileAsString(content: UploadedFile['content']): string {
+    if (typeof content === 'string') return content;
+    if (content instanceof Uint8Array) return new TextDecoder('utf-8').decode(content);
+    if (content instanceof ArrayBuffer) return new TextDecoder('utf-8').decode(new Uint8Array(content));
+    return String(content);
   }
 
   private async stepDeploy(context: PipelineContext): Promise<void> {
@@ -765,7 +774,10 @@ export class PublishingPipeline {
     // 创建PublishedGame记录
     const publishedGame: Omit<PublishedGame, 'players' | 'status'> = {
       id: config.gameId,
-      name: config.gameId.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      name: config.standardConfig?.gameName
+        || (config.analysisResult as any)?.detectedInfo?.projectName
+        || (config.analysisResult as any)?.gameName
+        || config.gameId.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
       description: `通过Publishing Center发布的游戏`,
       framework: config.analysisResult.framework.framework,
       version: '1.0.0',
@@ -784,6 +796,7 @@ export class PublishingPipeline {
       revenueSharePercent,
       hostingType: hostingType as 'server' | 'inline' | 'external',
       baseUrl,
+      isModular: config.analysisResult.fileStructure.isModular || false,
     };
 
     logger.info('保存游戏数据...', PublishStep.PUBLISH);
@@ -914,34 +927,37 @@ export class PublishingPipeline {
           if (input) input.value = '';
           setTimeout(function() { if (bar) bar.classList.remove('show'); }, 1500);
 
-          // ===== [关键] 尝试自动执行效果 =====
+          // ===== [关键] Effect Engine 路由 + CustomEvent 分发 =====
+          // invincible/super_mode/heal 等预设效果：handler 返回 false → 始终分发 CustomEvent
+          // 在 voucherData 中注入 effectCode（仅对本地玩家生效的沙箱脚本）
+          var applied = false;
           try {
             if (window.AllinONE && window.AllinONE.Effects) {
-              var applied = window.AllinONE.Effects.apply({
+              applied = window.AllinONE.Effects.apply({
                 id: res.itemId,
                 effectType: res.effectType || 'custom',
                 itemName: res.itemName,
                 quantity: res.quantity || 1,
                 effects: res.effects || {}
               });
-              if (applied) {
-                console.log('[AllinONE Protocol Bridge] Effect Engine 已自动执行:', res.itemName);
-              } else {
-                console.warn('[AllinONE Protocol Bridge] SDK 未注册效果处理器，效果未自动执行:', res.effectType);
-              }
+              console.log('[AllinONE Protocol Bridge] Effect Engine apply() →', applied ? '自动执行' : '委托 CustomEvent', ':', res.itemName || res.effectType);
             }
           } catch (e) {
             console.error('[AllinONE Protocol Bridge] Effect Engine 执行失败:', e);
           }
 
-          // 分发 CustomEvent（游戏方 registerEffect 或手动监听均可用）
+          // ⚠️ 始终分发 CustomEvent（不再按 applied 条件跳过）
+          // 新方案（2026-07-24）：保持原始 effect 名 → 游戏可识别并添加到 customPowerUps；
+          // 本地玩家专属效果由 Effect Engine 注入的 LocalPatcher 在
+          // window.allinoneAdapter.handlers 上原地替换，玩家点击时执行本地玩家版本。
           var detail = {
             code: res.code,
             itemId: res.itemId || '',
             itemName: res.itemName || '',
             quantity: res.quantity || 1,
             effects: res.effects || {},
-            effectType: res.effectType || 'custom'
+            effectType: res.effectType || 'custom',
+            voucherData: res.voucherData || {}
           };
           window.dispatchEvent(new CustomEvent('allinone-item-redeemed', { detail: detail }));
           window.dispatchEvent(new CustomEvent('allinone:item-redeemed', { detail: detail }));
@@ -1186,6 +1202,28 @@ export class PublishingPipeline {
     }
     function _searchMod(kws,mod) { _visited=[]; for(var key in window) { if(key==='AllinONE'||key==='window'||key==='self'||key==='top'||key==='parent'||key==='frames'||key==='document') continue; try { var val=window[key]; if(val&&typeof val==='object') _deepMod(val,kws,mod,3,key); } catch(e){} } }
 
+    // 本地玩家识别（排除 AI 控制的角色）
+    // LF2 角色用 .con 引用 controller（非 .controller），其他游戏可能用 .controller
+    function _getLocalPlayer(game) {
+      var players = game.getPlayers();
+      if (!players || !players.length) return null;
+      for (var i = 0; i < players.length; i++) {
+        var p = players[i];
+        var ctrl = (p && p.con) || (p && p.controller);
+        if (!ctrl) continue;
+        var t = ctrl.type;
+        if (t === 'AIcontroller' || t === 'AIscript') continue;
+        if (t === 'keyboard' || t === 'touch' || t === 'gamepad' || t === 'network') return p;
+        if (t && t !== 'AIcontroller' && t !== 'AIscript') return p;
+      }
+      // fallback：无 controller 信息时用第一个玩家
+      return players[0] || null;
+    }
+
+    // 注：本地玩家专属 effectCode 映射已移除（2026-07-24）。
+    // 改由 Effect Engine 注入的 LocalPatcher 在 window.allinoneAdapter.handlers
+    // 上原地替换 heal/invincible/super_mode/restore_mp/give_weapon 为本地玩家版本。
+
     // 效果处理器
     var _effectHandlers = {
       'difficulty_reducer': function(d) {
@@ -1218,6 +1256,29 @@ export class PublishingPipeline {
         console.log('[AllinONE] Effect: time_bonus, +'+bonus+'s');
         setTimeout(function(){ _searchMod(['time','timer','countdown','remain','left','second'], function(v){return v+bonus;}); }, 500);
         setTimeout(function(){ _searchMod(['time','timer','countdown','remain','left','second'], function(v){return v+bonus;}); }, 2000);
+      },
+      // ============ 游戏桥预设效果（委托 CustomEvent，LocalPatcher 接管） ============
+      // ⚠️ 同 Mode A：返回 false → 始终分发 CustomEvent（保持原始 effect 名）；
+      // 本地玩家专属由 Effect Engine 注入的 LocalPatcher 替换 allinoneAdapter.handlers
+      'invincible': function(d) {
+        console.log('[AllinONE] Effect: invincible → 委托 CustomEvent（LocalPatcher 接管）');
+        return false;
+      },
+      'super_mode': function(d) {
+        console.log('[AllinONE] Effect: super_mode → 委托 CustomEvent（LocalPatcher 接管）');
+        return false;
+      },
+      'heal': function(d) {
+        console.log('[AllinONE] Effect: heal → 委托 CustomEvent（LocalPatcher 接管）');
+        return false;
+      },
+      'restore_mp': function(d) {
+        console.log('[AllinONE] Effect: restore_mp → 委托 CustomEvent（LocalPatcher 接管）');
+        return false;
+      },
+      'give_weapon': function(d) {
+        console.log('[AllinONE] Effect: give_weapon → 委托 CustomEvent（LocalPatcher 接管）');
+        return false;
       }
     };
 
@@ -1228,9 +1289,15 @@ export class PublishingPipeline {
           window.AllinONE._customEffectHandlers[itemData.effectType](itemData);
           return true;
         }
-        // 降级到内置效果引擎
-        var handler = _effectHandlers[itemData.effectType];
-        if (handler) { handler(itemData); return true; }
+        // ⚠️ id 回退：当 effectType 为 'custom'/未知时，尝试用 itemId (id) 查找已知 handler
+        var effectType = itemData.effectType || 'custom';
+        var handlerKey = effectType;
+        if (effectType === 'custom' && itemData.id && _effectHandlers[itemData.id]) {
+          handlerKey = itemData.id;
+        }
+        // 降级到内置效果引擎（handler 返回 false → 降级到 CustomEvent 分发）
+        var handler = _effectHandlers[handlerKey];
+        if (handler) { var r = handler(itemData); return r !== false; }
         console.log('[AllinONE] Effect: custom/unknown effectType, itemData:', itemData);
         return false;
       },
@@ -1637,6 +1704,152 @@ export class PublishingPipeline {
     return modifiedCount;
   }
 
+  // ==================== 本地玩家识别 ====================
+  // 从游戏桥 getPlayers() 中筛选本地人类玩家（排除 AI 控制的角色）。
+  // F.LF 等引擎中，CPU 对手的 controller.type 为 'AIcontroller' / 'AIscript',
+  // 而人类玩家为 'keyboard'/'touch'/'gamepad'/'network' 等。
+  // ⚠️ LF2 角色用 .con 引用 controller（非 .controller），需兼容两种属性名。
+  // 返回 null 表示未找到人类玩家 → 效果处理器应返回 false 降级到 CustomEvent 分发。
+  function _getLocalPlayer(game) {
+    var players = game.getPlayers();
+    if (!players || !players.length) return null;
+    for (var i = 0; i < players.length; i++) {
+      var p = players[i];
+      var ctrl = (p && p.con) || (p && p.controller);
+      if (!ctrl) continue;
+      var t = ctrl.type;
+      if (t === 'AIcontroller' || t === 'AIscript') continue;
+      if (t === 'keyboard' || t === 'touch' || t === 'gamepad' || t === 'network') return p;
+      if (t && t !== 'AIcontroller' && t !== 'AIscript') return p;
+    }
+    // fallback：无 controller 信息时用第一个玩家（多数场景下 P1 为人类）
+    return players[0] || null;
+  }
+
+  // ==================== 本地玩家专属处理器替换器 ====================
+  // 新方案（2026-07-24）：不再注入 effectCode 沙箱脚本（游戏方 sandbox 有 game 引用
+  // 陈旧、安全检查过严等问题，且 effect 改为 _local_<x> 后游戏内置 EFFECT_HANDLERS
+  // 无法识别 → 道具不可用）。
+  // 改为：保持原始 effect 名（heal/invincible 等）让游戏识别并加到 customPowerUps，
+  // 在游戏暴露 window.allinoneAdapter.handlers 后，原地替换这些 handler 为本地玩家
+  // 专属版本（筛除 AI 角色），玩家点击道具时执行替换后的版本，仅对本地玩家生效。
+  (function() {
+    if (window.__allinoneLocalPatchStarted) return;
+    window.__allinoneLocalPatchStarted = true;
+
+    function _getLocalPlayer(g) {
+      if (!g || typeof g.getPlayers !== 'function') return null;
+      var ps = g.getPlayers();
+      if (!ps || !ps.length) return null;
+      // LF2 角色用 .con 引用 controller（非 .controller），其他游戏可能用 .controller
+      // 人类 controller type: 'keyboard' / 'touch'；AI: 'AIcontroller' / 'AIscript'
+      for (var i = 0; i < ps.length; i++) {
+        var p = ps[i];
+        var ctrl = (p && p.con) || (p && p.controller);
+        if (!ctrl) continue;
+        var t = ctrl.type;
+        if (t === 'AIcontroller' || t === 'AIscript') continue;
+        // 人类 controller type: 'keyboard' / 'touch' / 'gamepad' / 'network' 等
+        if (t === 'keyboard' || t === 'touch' || t === 'gamepad' || t === 'network') return p;
+        // 未知 type 但非 AI → 可能是人类玩家（保守返回）
+        if (t && t !== 'AIcontroller' && t !== 'AIscript') return p;
+      }
+      // fallback：无 controller 信息时用第一个玩家（多数场景下 P1 为人类）
+      console.warn('[AllinONE LocalPatcher] 无人类 controller → fallback 首个玩家');
+      return ps[0] || null;
+    }
+
+    // 本地玩家专属处理器（仅对第一个人类角色生效，避开 forEach 全场误伤）
+    var _LOCAL_HANDLERS = {
+      invincible: function(params) {
+        var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+        var lp = _getLocalPlayer(g); if (!lp) return { error: true, message: '暂无本地玩家' };
+        var on = !(params && params.on === false);
+        var dur = (params && params.duration) ? params.duration * 1000 : 0;
+        if (typeof g.setInvincible === 'function') g.setInvincible(lp, on);
+        if (on && dur && typeof g.setInvincible === 'function') {
+          setTimeout(function() { g.setInvincible(lp, false); }, dur);
+          return { message: '🛡️ 无敌 ' + params.duration + ' 秒（本地玩家）' };
+        }
+        return { message: on ? '🛡️ 无敌开启（本地玩家）' : '🛡️ 无敌关闭' };
+      },
+      heal: function(params) {
+        var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+        var lp = _getLocalPlayer(g); if (!lp) return { error: true, message: '暂无本地玩家' };
+        var amt = (params && params.amount) ? params.amount : 100;
+        if (typeof g.heal === 'function') g.heal(lp, amt);
+        return { message: '💚 回复 ' + amt + ' HP（本地玩家）' };
+      },
+      restore_mp: function(params) {
+        var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+        var lp = _getLocalPlayer(g); if (!lp) return { error: true, message: '暂无本地玩家' };
+        var amt = (params && params.amount) ? params.amount : 100;
+        if (typeof g.restoreMp === 'function') g.restoreMp(lp, amt);
+        return { message: '🔵 回复 ' + amt + ' MP（本地玩家）' };
+      },
+      give_weapon: function(params) {
+        var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+        var lp = _getLocalPlayer(g); if (!lp) return { error: true, message: '暂无本地玩家' };
+        var wid = (params && params.weapon) || (params && params.weaponId) || 100;
+        if (typeof g.giveWeapon === 'function') g.giveWeapon(lp, wid);
+        return { message: '⚔️ 获得武器 #' + wid + '（本地玩家）' };
+      },
+      super_mode: function(params) {
+        var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+        var lp = _getLocalPlayer(g); if (!lp) return { error: true, message: '暂无本地玩家' };
+        if (typeof g.heal === 'function') g.heal(lp, 9999);
+        if (typeof g.restoreMp === 'function') g.restoreMp(lp, 9999);
+        if (typeof g.setInvincible === 'function') g.setInvincible(lp, true);
+        if (typeof g.giveWeapon === 'function') g.giveWeapon(lp, (params && params.weaponId) || 213);
+        var dur = (params && params.duration) ? params.duration * 1000 : 0;
+        if (dur && typeof g.setInvincible === 'function') setTimeout(function() { g.setInvincible(lp, false); }, dur);
+        return { message: '🌟 超级模式！（本地玩家）' };
+      }
+    };
+
+    function _patchAdapter(adapter) {
+      if (!adapter || !adapter.handlers) return false;
+      var h = adapter.handlers;
+      var patched = 0;
+      for (var name in _LOCAL_HANDLERS) {
+        var existing = h[name];
+        if (existing && existing.__allinoneLocalPatched) continue;
+        var fn = _LOCAL_HANDLERS[name];
+        fn.__allinoneLocalPatched = true;
+        h[name] = fn;
+        patched++;
+      }
+      return patched > 0;
+    }
+
+    // 轮询等待游戏暴露 allinoneAdapter（游戏脚本在本脚本之后执行）
+    var _attempts = 0;
+    var _maxAttempts = 60; // 30s @ 500ms
+    var _timer = setInterval(function() {
+      _attempts++;
+      var adapter = window.allinoneAdapter;
+      if (adapter) {
+        if (_patchAdapter(adapter)) {
+          console.log('[AllinONE LocalPatcher] 已替换本地玩家专属处理器: heal/invincible/super_mode/restore_mp/give_weapon');
+          clearInterval(_timer);
+          return;
+        }
+      }
+      if (_attempts >= _maxAttempts) {
+        clearInterval(_timer);
+        if (!window.allinoneAdapter) {
+          console.warn('[AllinONE LocalPatcher] 游戏未暴露 allinoneAdapter，跳过替换（道具将用游戏内置 handler）');
+        }
+      }
+    }, 500);
+
+    // 暴露 patcher 供调试/手动调用
+    window.AllinONE = window.AllinONE || {};
+    window.AllinONE.patchLocalPlayerHandlers = function(adapter) {
+      return _patchAdapter(adapter || window.allinoneAdapter);
+    };
+  })();
+
   // ==================== 效果处理器 ====================
   var effectHandlers = {
     'difficulty_reducer': function(itemData) {
@@ -1763,20 +1976,63 @@ export class PublishingPipeline {
       }, 500);
     },
 
+    // ============ 游戏桥预设效果（委托 CustomEvent，本地玩家由 LocalPatcher 处理） ============
+    // ⚠️ 变更（2026-07-24）：handler 返回 false → 始终分发 CustomEvent（保持原始 effect 名）
+    // 原因：自动执行 + 跳过 CustomEvent → 道具不在游戏 props 栏显示（玩家无视觉反馈）
+    // 流程：CustomEvent 始终分发 → handleRedeemedItem() 添加道具到 props 栏 →
+    // 玩家点击 → useCustomPowerUp() → EFFECT_HANDLERS[effect] → 已被 LocalPatcher
+    // 替换为本地玩家版本（筛除 AI 角色）→ 仅对本地玩家生效 → 避免 forEach 全场误伤
+
+    'invincible': function(itemData) {
+      console.log('[AllinONE] Effect Engine: invincible → 委托 CustomEvent（LocalPatcher 接管）');
+      return false; // 不自动执行，委托 CustomEvent，由 LocalPatcher 替换后的 handler 处理
+    },
+
+    'super_mode': function(itemData) {
+      console.log('[AllinONE] Effect Engine: super_mode → 委托 CustomEvent（LocalPatcher 接管）');
+      return false;
+    },
+
+    'heal': function(itemData) {
+      console.log('[AllinONE] Effect Engine: heal → 委托 CustomEvent（LocalPatcher 接管）');
+      return false;
+    },
+
+    'restore_mp': function(itemData) {
+      console.log('[AllinONE] Effect Engine: restore_mp → 委托 CustomEvent（LocalPatcher 接管）');
+      return false;
+    },
+
+    'give_weapon': function(itemData) {
+      console.log('[AllinONE] Effect Engine: give_weapon → 委托 CustomEvent（LocalPatcher 接管）');
+      return false;
+    },
+
     'custom': function(itemData) {
       console.log('[AllinONE] Effect Engine: 自定义道具, 无自动执行脚本:', itemData.id);
+      return false; // ⚠️ 必须返回 false → 让 apply() 返回 false → 触发 CustomEvent 分发降级
     }
   };
 
   // ==================== 公共 API ====================
   window.AllinONE = window.AllinONE || {};
   window.AllinONE.Effects = {
-    /** 应用效果 - 被 SDK 兑换成功时自动调用 */
+    /** 应用效果 - 被 SDK 兑换成功时自动调用
+     *  handler 返回 true → 效果已施加，SDK 跳过 CustomEvent 分发
+     *  handler 返回 false → 游戏桥未就绪/无本地玩家，SDK 分发 CustomEvent 降级
+     */
     apply: function(itemData) {
-      var handler = effectHandlers[itemData.effectType || 'custom'];
+      var effectType = itemData.effectType || 'custom';
+      // ⚠️ id 回退：当 effectType 为 'custom' 时，尝试用 itemId (id) 查找已知 handler
+      // 例：effectType='custom' + id='super_mode' → 使用 effectHandlers['super_mode']
+      var handlerKey = effectType;
+      if (effectType === 'custom' && itemData.id && effectHandlers[itemData.id]) {
+        handlerKey = itemData.id;
+      }
+      var handler = effectHandlers[handlerKey];
       if (handler) {
-        handler(itemData);
-        return true;
+        var result = handler(itemData);
+        return result !== false;
       }
       return false;
     },
@@ -1968,17 +2224,23 @@ export class PublishingPipeline {
         setTimeout(function() { badge.style.display = 'none'; }, 5000);
         setTimeout(function() { bar.classList.remove('show'); }, 1500);
 
-        // ===== [关键] 自动调用 Effect Engine 执行效果 =====
+        // ===== [关键] Effect Engine 路由 + CustomEvent 分发 =====
+        // invincible/super_mode/heal/restore_mp/give_weapon 等预设效果：
+        // 平台 handler 返回 false（不自动执行）→ 始终分发 CustomEvent →
+        // 在 voucherData 中注入 effectCode（仅对本地玩家生效的沙箱脚本）
+        // 游戏端 handleRedeemedItem() → 添加道具到 customPowerUps →
+        // 玩家点击 → useCustomPowerUp() → registerDynamicEffect() → effectCode 执行
+        var effectAppliedByPlatform = false;
         try {
           if (window.AllinONE && window.AllinONE.Effects) {
-            window.AllinONE.Effects.apply({
+            effectAppliedByPlatform = window.AllinONE.Effects.apply({
               id: res.itemId,
               effectType: res.effectType || 'custom',
               itemName: res.itemName,
               quantity: res.quantity || 1,
               effects: res.effects || {}
             });
-            console.log('[AllinONE SDK] Effect Engine 已自动执行:', res.itemName);
+            console.log('[AllinONE SDK] Effect Engine apply() →', effectAppliedByPlatform ? '自动执行' : '委托 CustomEvent', ':', res.itemName || res.effectType);
           } else {
             console.warn('[AllinONE SDK] Effect Engine 不可用');
           }
@@ -1986,8 +2248,12 @@ export class PublishingPipeline {
           console.error('[AllinONE SDK] Effect Engine 执行失败:', e);
         }
 
-        // 仍然触发 CustomEvent（兼容游戏方手动监听）
-        // 🆕 增加 voucherData 字段，携带 Schema 道具完整数据（effect/effectCode/effectScript/params/icon）
+        // ⚠️ 始终分发 CustomEvent（不再按 effectAppliedByPlatform 条件跳过）
+        // 原因：跳过 CustomEvent → 道具不在游戏 props 栏显示（玩家无视觉反馈）
+        // 新方案（2026-07-24）：保持原始 effect 名（不前缀 _local_）→ 游戏可识别
+        // 并添加到 customPowerUps；本地玩家专属效果由 Effect Engine 注入的
+        // LocalPatcher 在 window.allinoneAdapter.handlers 上原地替换，玩家点击时
+        // 执行替换后的本地玩家版本（筛除 AI 角色），避免 forEach 全场误伤。
         var detail = {
           code: res.code,
           itemId: res.itemId,
@@ -1995,10 +2261,9 @@ export class PublishingPipeline {
           quantity: res.quantity || 1,
           effects: res.effects || {},
           effectType: res.effectType,
-          voucherData: res.voucherData || null,
+          voucherData: res.voucherData || {},
           schemaName: res.schemaName || null
         };
-        // ⚠️ 只分发一种格式（allinone:item-redeemed），避免监听两种格式的游戏收到2个道具
         window.dispatchEvent(new CustomEvent('allinone:item-redeemed', { detail: detail }));
       } else {
         showStatus('&#10007; ' + (res.message || '兑换失败'), 'error');
@@ -2079,7 +2344,7 @@ export class PublishingPipeline {
   }
 
   /** 查找文件路径的公共目录前缀（用于去除 ZIP 根目录），兼容正斜杠和反斜杠 */
-  private findCommonDirPrefix(paths: string[]): string | null {
+  public findCommonDirPrefix(paths: string[]): string | null {
     if (paths.length <= 1) return null;
     // 统一反斜杠为正斜杠
     const normalized = paths.map(p => p.replace(/\\/g, '/'));

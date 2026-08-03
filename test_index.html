@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script>
+(function() {
+  window.AllinONE = window.AllinONE || {};
+  window.AllinONE.__PROTOCOL_MODE__ = 'inject';
+  window.AllinONE.__PROTOCOL_VERSION__ = '1.0.0';
+  window.AllinONE.__GAME_ID__ = "game-1784972668120";
+})();
+</script>
+<!-- AllinONE Effect Engine v1.0 [PRESENCE_MARKER_ACTIVE] - 自动游戏效果执行 (帧级拦截) -->
+<script>
+(function() {
+  'use strict';
+  try {
+    console.log('[AllinONE] Effect Engine: 初始化开始...');
+
+  /* ===================================================================
+   * Effect Engine - 在游戏脚本之前运行，通过 monkey-patch 核心 API
+   * 实现"无侵入式"游戏效果控制。
+   * =================================================================== */
+
+  var EFFECT_CONFIG = [{"id":"heal","effectType":"custom","effects":{"rarity":"common","supplyPolicy":"open","effectType":"custom"}}];
+
+  // ==================== 时间缩放机制 — 快照+增量法，切换缩放时无时间跳变 ====================
+  var _timeScale = 1.0;          // 1.0=正常, <1=减速, >1=加速
+  // performance.now 时间基准（独立的 ref pair，因为它与 RAF 时间戳同源）
+  var _perfRealRef = null;
+  var _perfVirtRef = null;
+  // Date.now 时间基准
+  var _dateRealRef = null;
+  var _dateVirtRef = null;
+
+  // 拦截 performance.now() — Egret/Cocos 等引擎使用此 API 计算帧间隔
+  try {
+    var _origPerfNow = performance.now.bind(performance);
+    performance.now = function() {
+      var real = _origPerfNow();
+      if (_perfRealRef === null || _perfVirtRef === null) {
+        _perfRealRef = real;
+        _perfVirtRef = real;
+        return real;
+      }
+      return _perfVirtRef + (real - _perfRealRef) * _timeScale;
+    };
+  } catch(e) {}
+
+  // 拦截 Date.now() — 部分引擎回退使用此 API
+  var _origDateNow = Date.now;
+  Date.now = function() {
+    var real = _origDateNow();
+    if (_dateRealRef === null || _dateVirtRef === null) {
+      _dateRealRef = real;
+      _dateVirtRef = real;
+      return Math.round(real);
+    }
+    return Math.round(_dateVirtRef + (real - _dateRealRef) * _timeScale);
+  };
+
+  // 拦截 new Date().getTime() / new Date().valueOf() — 大量游戏引擎通过此路径获取时间
+  // 如 (new Date() - startTime) 或 (new Date()).getTime()
+  var _origDateGetTime = Date.prototype.getTime;
+  Date.prototype.getTime = function() {
+    // 只有"当前时间"的 Date 对象才走缩放，特定日期的 Date 返回实际时间
+    var real = _origDateGetTime.call(this);
+    // 如果 Date 对象的原始时间戳与当前真实时间相差在 2 秒内，认为是"当前时间"
+    var now = _origDateNow();
+    if (Math.abs(real - now) < 2000) {
+      if (_dateRealRef === null || _dateVirtRef === null) {
+        return real;
+      }
+      return Math.round(_dateVirtRef + (real - _dateRealRef) * _timeScale);
+    }
+    return real; // 历史日期不缩放
+  };
+  // valueOf 指向 getTime（Date 的 - 运算符会调用 valueOf）
+  Date.prototype.valueOf = Date.prototype.getTime;
+
+  // 重新计算 _timeScale（聚合所有活跃帧修饰器的时间缩放因子），同时更新基准点
+  function _recalcTimeScale() {
+    var s = 1.0;
+    for (var k in _frameModifiers) {
+      var m = _frameModifiers[k];
+      if (m.timeScale && m.timeScale !== 1.0) s *= m.timeScale;
+    }
+    var oldScale = _timeScale;
+    _timeScale = s;
+    // 更新 performance.now 基准
+    try {
+      var nowPerf = _origPerfNow();
+      var vPerf;
+      if (_perfRealRef === null || _perfVirtRef === null) {
+        vPerf = nowPerf;
+      } else {
+        vPerf = _perfVirtRef + (nowPerf - _perfRealRef) * oldScale;
+      }
+      _perfRealRef = nowPerf;
+      _perfVirtRef = vPerf;
+    } catch(e) {}
+    // 更新 Date.now 基准
+    var nowDate = _origDateNow();
+    var vDate;
+    if (_dateRealRef === null || _dateVirtRef === null) {
+      vDate = nowDate;
+    } else {
+      vDate = _dateVirtRef + (nowDate - _dateRealRef) * oldScale;
+    }
+    _dateRealRef = nowDate;
+    _dateVirtRef = vDate;
+  }
+
+  // ==================== 帧率控制 (requestAnimationFrame) — 时间膨胀慢放，每帧都正常渲染 ====================
+  var _origRAF = window.requestAnimationFrame;
+  var _frameModifiers = {}; // { id: { mode: 'double'|'timescale', factor: number, timeScale: number } }
+
+  window.requestAnimationFrame = function(callback) {
+    return _origRAF.call(window, function(timestamp) {
+      var shouldDouble = false;
+
+      for (var key in _frameModifiers) {
+        var mod = _frameModifiers[key];
+        if (mod.mode === 'double') {
+          shouldDouble = true;
+        }
+      }
+
+      // 时间缩放: 基于快照+增量，消除绝对乘法导致的时间倒退
+      var scale = _timeScale;
+      var scaledTimestamp = timestamp;
+      if (scale !== 1.0 && _perfRealRef !== null && _perfVirtRef !== null) {
+        scaledTimestamp = _perfVirtRef + (timestamp - _perfRealRef) * scale;
+      }
+
+      // 每帧都正常渲染（不跳过任何帧）
+      callback(scaledTimestamp);
+
+      // 加速效果：在同一个 tick 里额外调用一次回调
+      if (shouldDouble) {
+        callback(scaledTimestamp);
+      }
+    });
+  };
+
+  // ==================== Canvas 文本拦截 (score_boost 视觉层增强) ====================
+  var _scoreMultiplier = 1;
+  var _canvasInterceptionActive = false;
+
+  function _setupCanvasInterception() {
+    if (_canvasInterceptionActive) return;
+    if (typeof CanvasRenderingContext2D === 'undefined') return;
+    _canvasInterceptionActive = true;
+    var _origFillText = CanvasRenderingContext2D.prototype.fillText;
+    var _origStrokeText = CanvasRenderingContext2D.prototype.strokeText;
+
+    CanvasRenderingContext2D.prototype.fillText = function(text, x, y) {
+      if (_scoreMultiplier !== 1 && typeof text === 'string') {
+        var modified = _interceptScoreText(text, this, x, y);
+        if (modified !== text) {
+          return _origFillText.call(this, modified, x, y);
+        }
+      }
+      return _origFillText.call(this, text, x, y);
+    };
+
+    CanvasRenderingContext2D.prototype.strokeText = function(text, x, y) {
+      if (_scoreMultiplier !== 1 && typeof text === 'string') {
+        var modified = _interceptScoreText(text, this, x, y);
+        if (modified !== text) {
+          return _origStrokeText.call(this, modified, x, y);
+        }
+      }
+      return _origStrokeText.call(this, text, x, y);
+    };
+  }
+
+  function _interceptScoreText(text, ctx, x, y) {
+    // 模式1: 纯数字（常见于简洁风格的分数显示）
+    if (/^\d{1,8}$/.test(text.trim())) {
+      var num = parseInt(text.trim(), 10);
+      if (num >= 1 && num < 999999) {
+        return String(Math.floor(num * _scoreMultiplier));
+      }
+    }
+    // 模式2: 包含分数关键词的文本
+    var keywords = ['score', '分数', 'points', 'pts', '得分', '积分', 'combo', 'x '];
+    var lower = text.toLowerCase();
+    for (var ki = 0; ki < keywords.length; ki++) {
+      if (lower.indexOf(keywords[ki]) !== -1) {
+        var replaced = text.replace(/(\d{1,8})/g, function(m) {
+          var n = parseInt(m, 10);
+          return (n >= 1 && n < 999999) ? String(Math.floor(n * _scoreMultiplier)) : m;
+        });
+        if (replaced !== text) return replaced;
+      }
+    }
+    return text;
+  }
+
+  // 定时器控制 (setInterval/setTimeout) — 延迟按时间膨胀缩放 ====================
+  var _origSetInterval = window.setInterval;
+  var _origSetTimeout = window.setTimeout;
+
+  window.setInterval = function(callback, delay) {
+    var scaledDelay = _timeScale !== 1.0 ? Math.max(1, Math.round(delay / _timeScale)) : delay;
+    return _origSetInterval.call(window, callback, scaledDelay);
+  };
+
+  window.setTimeout = function(callback, delay) {
+    var scaledDelay = _timeScale !== 1.0 ? Math.max(1, Math.round(delay / _timeScale)) : delay;
+    return _origSetTimeout.call(window, callback, scaledDelay);
+  };
+
+  // ==================== 路径黑名单（游戏引擎内部系统，禁止修改） ====================
+  var _skipPathPrefixes = [
+    'RES.',
+    'egret.',
+    'Egret',
+    'PIXI.',
+    'Phaser.',
+    'THREE.',
+    'Babylon',
+    'Laya',
+    'Cocos',
+    'cc.',
+    'laya.',
+    'dragonBones',
+    'soundManager',
+    'Audio',
+    'Resource',
+    'assetManager',
+    'loader.',
+    'Texture',
+    'Sprite',
+    'Stage',
+    'Renderer',
+  ];
+  
+  function isSkippablePath(fullPath) {
+    for (var i = 0; i < _skipPathPrefixes.length; i++) {
+      if (fullPath.indexOf(_skipPathPrefixes[i]) >= 0) return true;
+    }
+    return false;
+  }
+
+  // ==================== 关键词匹配工具（按 camelCase 拆词） ====================
+  // 将属性名拆成独立单词，避免误匹配：
+  //   'HeroSpeed'      → ['hero', 'speed']
+  //   'soundenemyshot' → ['soundenemyshot']
+  //   'speedVariance'  → ['speed', 'variance']
+  function keyToWords(key) {
+    return key.replace(/([a-z])([A-Z])/g, '$1 $2')
+              .replace(/[._-]/g, ' ')
+              .toLowerCase()
+              .split(/s+/)
+              .filter(function(w) { return w.length > 0; });
+  }
+
+  function hasMatchingKeyword(key, keywords) {
+    var words = keyToWords(key);
+    for (var w = 0; w < words.length; w++) {
+      for (var k = 0; k < keywords.length; k++) {
+        if (words[w] === keywords[k].toLowerCase()) return true;
+      }
+    }
+    return false;
+  }
+
+  // ==================== 全局变量扫描 ====================
+  var _visitedObjects = [];
+  var _modifiedPaths = {}; // 记录已修改的完整路径，防止跨扫描重复修改
+  function isVisited(obj) {
+    for (var i = 0; i < _visitedObjects.length; i++) {
+      if (_visitedObjects[i] === obj) return true;
+    }
+    return false;
+  }
+
+  function deepModify(obj, keywords, modifier, depth, path) {
+    if (depth <= 0) return;
+    if (!obj || typeof obj !== 'object') return;
+    // 已访问过的对象跳过（防止循环引用导致的无限递归）
+    if (isVisited(obj)) return;
+    _visitedObjects.push(obj);
+
+    depth = depth || 3;
+    path = path || '';
+    for (var key in obj) {
+      try {
+        var val = obj[key];
+        var fullPath = path ? path + '.' + key : key;
+
+        // 跳过已经修改过的路径（跨扫描防护）
+        if (_modifiedPaths[fullPath]) continue;
+
+        // 跳过游戏引擎内部系统路径
+        if (isSkippablePath(fullPath)) continue;
+
+        // 按 camelCase 拆词匹配关键词
+        if (hasMatchingKeyword(key, keywords)) {
+          if (typeof val === 'number' && !isNaN(val) && isFinite(val) && val > 0.01 && val < 10000) {
+            var original = val;
+            obj[key] = modifier(val);
+            if (obj[key] !== original) {
+              _modifiedPaths[fullPath] = true;
+              console.log('[AllinONE] Effect Engine: 修改 ' + fullPath + ': ' + original + ' -> ' + obj[key]);
+            }
+          }
+        }
+
+        if (val && typeof val === 'object' && depth > 1) {
+          deepModify(val, keywords, modifier, depth - 1, fullPath);
+        }
+      } catch(e) {}
+    }
+  }
+
+  function searchAndModify(keywords, modifier, maxDepth) {
+    maxDepth = maxDepth || 5;
+    // 每次扫描前重置访问列表（允许访问新创建的对象），但保留已修改路径记录
+    _visitedObjects = [];
+    var modifiedCount = 0;
+    var scanRoots = [window];
+    // 额外扫描 document.all 中可能挂载的全局对象
+    try {
+      if (document && document.all) {
+        for (var di = 0; di < Math.min(document.all.length, 20); di++) {
+          var el = document.all[di];
+          if (el && el.id && typeof el === 'object') scanRoots.push(el);
+        }
+      }
+    } catch(e) {}
+
+    for (var ri = 0; ri < scanRoots.length; ri++) {
+      var root = scanRoots[ri];
+      var rootName = ri === 0 ? '' : (root.id || 'docEl_' + ri);
+      for (var key in root) {
+        if (ri === 0 && (key === 'AllinONE' || key === 'window' || key === 'self' || key === 'top' || key === 'parent' || key === 'frames' || key === 'document' || key === 'chrome' || key === 'performance')) continue;
+        try {
+          var val = root[key];
+          if (val && typeof val === 'object') {
+            var before = Object.keys(_modifiedPaths).length;
+            deepModify(val, keywords, modifier, maxDepth, rootName ? rootName + '.' + key : key);
+            modifiedCount += (Object.keys(_modifiedPaths).length - before);
+          } else if (typeof val === 'number' && hasMatchingKeyword(key, keywords) && val > 0.01 && val < 10000) {
+            var fullPath = rootName ? rootName + '.' + key : key;
+            if (!_modifiedPaths[fullPath]) {
+              var orig = val;
+              root[key] = modifier(val);
+              if (root[key] !== orig) {
+                _modifiedPaths[fullPath] = true;
+                modifiedCount++;
+                console.log('[AllinONE] Effect Engine: 修改(顶层) ' + fullPath + ': ' + orig + ' -> ' + root[key]);
+              }
+            }
+          }
+        } catch(e) {}
+      }
+    }
+    return modifiedCount;
+  }
+
+  // ==================== 本地玩家识别 ====================
+  // 从游戏桥 getPlayers() 中筛选本地人类玩家（排除 AI 控制的角色）。
+  // F.LF 等引擎中，CPU 对手的 controller.type 为 'AIcontroller' / 'AIscript',
+  // 而人类玩家为 'keyboard'/'touch'/'gamepad'/'network' 等。
+  // ⚠️ LF2 角色用 .con 引用 controller（非 .controller），需兼容两种属性名。
+  // 返回 null 表示未找到人类玩家 → 效果处理器应返回 false 降级到 CustomEvent 分发。
+  function _getLocalPlayer(game) {
+    var players = game.getPlayers();
+    if (!players || !players.length) return null;
+    for (var i = 0; i < players.length; i++) {
+      var p = players[i];
+      var ctrl = (p && p.con) || (p && p.controller);
+      if (!ctrl) continue;
+      var t = ctrl.type;
+      if (t === 'AIcontroller' || t === 'AIscript') continue;
+      if (t === 'keyboard' || t === 'touch' || t === 'gamepad' || t === 'network') return p;
+      if (t && t !== 'AIcontroller' && t !== 'AIscript') return p;
+    }
+    // fallback：无 controller 信息时用第一个玩家（多数场景下 P1 为人类）
+    return players[0] || null;
+  }
+
+  // ==================== 本地玩家专属处理器替换器 ====================
+  // 新方案（2026-07-24）：不再注入 effectCode 沙箱脚本（游戏方 sandbox 有 game 引用
+  // 陈旧、安全检查过严等问题，且 effect 改为 _local_<x> 后游戏内置 EFFECT_HANDLERS
+  // 无法识别 → 道具不可用）。
+  // 改为：保持原始 effect 名（heal/invincible 等）让游戏识别并加到 customPowerUps，
+  // 在游戏暴露 window.allinoneAdapter.handlers 后，原地替换这些 handler 为本地玩家
+  // 专属版本（筛除 AI 角色），玩家点击道具时执行替换后的版本，仅对本地玩家生效。
+  (function() {
+    if (window.__allinoneLocalPatchStarted) return;
+    window.__allinoneLocalPatchStarted = true;
+
+    function _getLocalPlayer(g) {
+      if (!g || typeof g.getPlayers !== 'function') return null;
+      var ps = g.getPlayers();
+      if (!ps || !ps.length) return null;
+      // LF2 角色用 .con 引用 controller（非 .controller），其他游戏可能用 .controller
+      // 人类 controller type: 'keyboard' / 'touch'；AI: 'AIcontroller' / 'AIscript'
+      for (var i = 0; i < ps.length; i++) {
+        var p = ps[i];
+        var ctrl = (p && p.con) || (p && p.controller);
+        if (!ctrl) continue;
+        var t = ctrl.type;
+        if (t === 'AIcontroller' || t === 'AIscript') continue;
+        // 人类 controller type: 'keyboard' / 'touch' / 'gamepad' / 'network' 等
+        if (t === 'keyboard' || t === 'touch' || t === 'gamepad' || t === 'network') return p;
+        // 未知 type 但非 AI → 可能是人类玩家（保守返回）
+        if (t && t !== 'AIcontroller' && t !== 'AIscript') return p;
+      }
+      // fallback：无 controller 信息时用第一个玩家（多数场景下 P1 为人类）
+      console.warn('[AllinONE LocalPatcher] 无人类 controller → fallback 首个玩家');
+      return ps[0] || null;
+    }
+
+    // 本地玩家专属处理器（仅对第一个人类角色生效，避开 forEach 全场误伤）
+    var _LOCAL_HANDLERS = {
+      invincible: function(params) {
+        var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+        var lp = _getLocalPlayer(g); if (!lp) return { error: true, message: '暂无本地玩家' };
+        var on = !(params && params.on === false);
+        var dur = (params && params.duration) ? params.duration * 1000 : 0;
+        if (typeof g.setInvincible === 'function') g.setInvincible(lp, on);
+        if (on && dur && typeof g.setInvincible === 'function') {
+          setTimeout(function() { g.setInvincible(lp, false); }, dur);
+          return { message: '🛡️ 无敌 ' + params.duration + ' 秒（本地玩家）' };
+        }
+        return { message: on ? '🛡️ 无敌开启（本地玩家）' : '🛡️ 无敌关闭' };
+      },
+      heal: function(params) {
+        var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+        var lp = _getLocalPlayer(g); if (!lp) return { error: true, message: '暂无本地玩家' };
+        var amt = (params && params.amount) ? params.amount : 100;
+        if (typeof g.heal === 'function') g.heal(lp, amt);
+        return { message: '💚 回复 ' + amt + ' HP（本地玩家）' };
+      },
+      restore_mp: function(params) {
+        var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+        var lp = _getLocalPlayer(g); if (!lp) return { error: true, message: '暂无本地玩家' };
+        var amt = (params && params.amount) ? params.amount : 100;
+        if (typeof g.restoreMp === 'function') g.restoreMp(lp, amt);
+        return { message: '🔵 回复 ' + amt + ' MP（本地玩家）' };
+      },
+      give_weapon: function(params) {
+        var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+        var lp = _getLocalPlayer(g); if (!lp) return { error: true, message: '暂无本地玩家' };
+        var wid = (params && params.weapon) || (params && params.weaponId) || 100;
+        if (typeof g.giveWeapon === 'function') g.giveWeapon(lp, wid);
+        return { message: '⚔️ 获得武器 #' + wid + '（本地玩家）' };
+      },
+      super_mode: function(params) {
+        var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+        var lp = _getLocalPlayer(g); if (!lp) return { error: true, message: '暂无本地玩家' };
+        if (typeof g.heal === 'function') g.heal(lp, 9999);
+        if (typeof g.restoreMp === 'function') g.restoreMp(lp, 9999);
+        if (typeof g.setInvincible === 'function') g.setInvincible(lp, true);
+        if (typeof g.giveWeapon === 'function') g.giveWeapon(lp, (params && params.weaponId) || 213);
+        var dur = (params && params.duration) ? params.duration * 1000 : 0;
+        if (dur && typeof g.setInvincible === 'function') setTimeout(function() { g.setInvincible(lp, false); }, dur);
+        return { message: '🌟 超级模式！（本地玩家）' };
+      }
+    };
+
+    function _patchAdapter(adapter) {
+      if (!adapter || !adapter.handlers) return false;
+      var h = adapter.handlers;
+      var patched = 0;
+      for (var name in _LOCAL_HANDLERS) {
+        var existing = h[name];
+        if (existing && existing.__allinoneLocalPatched) continue;
+        var fn = _LOCAL_HANDLERS[name];
+        fn.__allinoneLocalPatched = true;
+        h[name] = fn;
+        patched++;
+      }
+      return patched > 0;
+    }
+
+    // 轮询等待游戏暴露 allinoneAdapter（游戏脚本在本脚本之后执行）
+    var _attempts = 0;
+    var _maxAttempts = 60; // 30s @ 500ms
+    var _timer = setInterval(function() {
+      _attempts++;
+      var adapter = window.allinoneAdapter;
+      if (adapter) {
+        if (_patchAdapter(adapter)) {
+          console.log('[AllinONE LocalPatcher] 已替换本地玩家专属处理器: heal/invincible/super_mode/restore_mp/give_weapon');
+          clearInterval(_timer);
+          return;
+        }
+      }
+      if (_attempts >= _maxAttempts) {
+        clearInterval(_timer);
+        if (!window.allinoneAdapter) {
+          console.warn('[AllinONE LocalPatcher] 游戏未暴露 allinoneAdapter，跳过替换（道具将用游戏内置 handler）');
+        }
+      }
+    }, 500);
+
+    // 暴露 patcher 供调试/手动调用
+    window.AllinONE = window.AllinONE || {};
+    window.AllinONE.patchLocalPlayerHandlers = function(adapter) {
+      return _patchAdapter(adapter || window.allinoneAdapter);
+    };
+  })();
+
+  // ==================== 效果处理器 ====================
+  var effectHandlers = {
+    'difficulty_reducer': function(itemData) {
+      var multiplier = (itemData.effects && itemData.effects.multiplier) || 0.6;
+      var itemId = itemData.id || 'difficulty_reducer';
+
+      console.log('[AllinONE] Effect Engine: 执行难度降低, 倍率=' + multiplier + '（时间膨胀慢放，不跳帧）');
+
+      // 纯时间膨胀策略：只通过 timeScale 控制时间流逝速度，不跳过任何帧
+      // 每一帧仍然正常渲染，但 performance.now/Date.now 返回的时间以 multiplier 速度前进
+      // 就像视频播放器 0.6 倍慢放，画面流畅但动作变慢
+      _frameModifiers[itemId] = {
+        mode: 'timescale',
+        factor: multiplier,
+        timeScale: multiplier
+      };
+      _recalcTimeScale();     // 立即生效时间缩放
+
+      // 策略 B: 全局变量扫描 - 修改 difficulty/speed 相关变量
+      setTimeout(function() {
+        searchAndModify(
+          ['difficulty', 'gameSpeed', 'speed', 'enemy', 'fallSpeed', 'dropSpeed', 'levelSpeed', 'moveSpeed'],
+          function(val) { return Math.max(0.1, val * multiplier); }
+        );
+      }, 500);
+
+      // 策略 C: 再次尝试（游戏可能延迟初始化）
+      setTimeout(function() {
+        searchAndModify(
+          ['difficulty', 'gameSpeed', 'speed'],
+          function(val) { return Math.max(0.1, val * multiplier); }
+        );
+      }, 2000);
+    },
+
+    'speed_boost': function(itemData) {
+      var multiplier = (itemData.effects && itemData.effects.multiplier) || 1.5;
+      var duration = (itemData.effects && itemData.effects.duration) || 30000;
+      var itemId = itemData.id || 'speed_boost';
+
+      console.log('[AllinONE] Effect Engine: 执行速度提升, 倍率=' + multiplier + ', 持续=' + duration + 'ms');
+
+      // 策略 A: RAF 双倍调用 - 加速帧率
+      _frameModifiers[itemId] = {
+        mode: 'double',
+        factor: multiplier,
+        counter: 0,
+        timeScale: multiplier  // 针对 Egret 等引擎的时间缩放
+      };
+      _recalcTimeScale();     // 立即生效时间缩放
+
+      // 自动恢复
+      if (duration > 0) {
+        setTimeout(function() {
+          delete _frameModifiers[itemId];
+          _recalcTimeScale();  // 恢复时间缩放
+          console.log('[AllinONE] Effect Engine: 速度提升已到期');
+        }, duration);
+      }
+
+      // 策略 B: 全局变量扫描
+      setTimeout(function() {
+        searchAndModify(
+          ['speed', 'movespeed', 'runspeed', 'playerspeed'],
+          function(val) { return Math.min(100, val * multiplier); }
+        );
+      }, 500);
+    },
+
+    'score_boost': function(itemData) {
+      var multiplier = (itemData.effects && itemData.effects.multiplier) || 2;
+      console.log('[AllinONE] Effect Engine: 执行分数加成, 倍率=' + multiplier);
+
+      // 策略 A: 全局变量扫描（深度5，更多关键词）
+      var scoreKeywords = ['score', 'points', 'multiplier', 'scoremultiplier', 'combo', 'total', 'value', 'pts', 'gameScore', 'playerScore', 'scoreTotal', 'currentScore', 'finalScore', 'totalScore'];
+
+      function doScan(delay, label) {
+        setTimeout(function() {
+          var count = searchAndModify(
+            scoreKeywords,
+            function(val) { return Math.min(999999, val * multiplier); },
+            5
+          );
+          console.log('[AllinONE] Effect Engine: ' + label + '扫描完成, 修改了 ' + count + ' 个变量');
+        }, delay);
+      }
+
+      doScan(300, '第1次');
+      doScan(1500, '第2次');
+      doScan(4000, '第3次');
+
+      // 策略 B: Canvas fillText/strokeText 拦截（视觉层修改分数显示）
+      _scoreMultiplier = multiplier;
+      setTimeout(function() {
+        _setupCanvasInterception();
+        console.log('[AllinONE] Effect Engine: Canvas 文本拦截已激活, 分数倍率=' + multiplier);
+      }, 100);
+
+      // 策略 C: 全局变量挂载（游戏可读取 window.__allinoneScoreMultiplier）
+      window.__allinoneScoreMultiplier = multiplier;
+    },
+
+    'extra_life': function(itemData) {
+      var lives = (itemData.effects && itemData.effects.lives) || 1;
+      console.log('[AllinONE] Effect Engine: 执行额外生命, +' + lives);
+
+      setTimeout(function() {
+        searchAndModify(
+          ['life', 'lives', 'health', 'hp', 'hitpoints', 'playerhealth', 'playerlives'],
+          function(val) { return Math.min(999, val + lives); }
+        );
+      }, 500);
+    },
+
+    'time_bonus': function(itemData) {
+      var bonusTime = (itemData.effects && itemData.effects.bonusTime) || 30;
+      console.log('[AllinONE] Effect Engine: 执行时间奖励, +' + bonusTime + 's');
+
+      setTimeout(function() {
+        searchAndModify(
+          ['time', 'timer', 'countdown', 'remaining', 'timeleft', 'gameTime', 'levelTime'],
+          function(val) { return Math.min(99999, val + bonusTime); }
+        );
+      }, 500);
+    },
+
+    // ============ 游戏桥预设效果（委托 CustomEvent，本地玩家由 LocalPatcher 处理） ============
+    // ⚠️ 变更（2026-07-24）：handler 返回 false → 始终分发 CustomEvent（保持原始 effect 名）
+    // 原因：自动执行 + 跳过 CustomEvent → 道具不在游戏 props 栏显示（玩家无视觉反馈）
+    // 流程：CustomEvent 始终分发 → handleRedeemedItem() 添加道具到 props 栏 →
+    // 玩家点击 → useCustomPowerUp() → EFFECT_HANDLERS[effect] → 已被 LocalPatcher
+    // 替换为本地玩家版本（筛除 AI 角色）→ 仅对本地玩家生效 → 避免 forEach 全场误伤
+
+    'invincible': function(itemData) {
+      console.log('[AllinONE] Effect Engine: invincible → 委托 CustomEvent（LocalPatcher 接管）');
+      return false; // 不自动执行，委托 CustomEvent，由 LocalPatcher 替换后的 handler 处理
+    },
+
+    'super_mode': function(itemData) {
+      console.log('[AllinONE] Effect Engine: super_mode → 委托 CustomEvent（LocalPatcher 接管）');
+      return false;
+    },
+
+    'heal': function(itemData) {
+      console.log('[AllinONE] Effect Engine: heal → 委托 CustomEvent（LocalPatcher 接管）');
+      return false;
+    },
+
+    'restore_mp': function(itemData) {
+      console.log('[AllinONE] Effect Engine: restore_mp → 委托 CustomEvent（LocalPatcher 接管）');
+      return false;
+    },
+
+    'give_weapon': function(itemData) {
+      console.log('[AllinONE] Effect Engine: give_weapon → 委托 CustomEvent（LocalPatcher 接管）');
+      return false;
+    },
+
+    'custom': function(itemData) {
+      console.log('[AllinONE] Effect Engine: 自定义道具, 无自动执行脚本:', itemData.id);
+      return false; // ⚠️ 必须返回 false → 让 apply() 返回 false → 触发 CustomEvent 分发降级
+    }
+  };
+
+  // ==================== 公共 API ====================
+  window.AllinONE = window.AllinONE || {};
+  window.AllinONE.Effects = {
+    /** 应用效果 - 被 SDK 兑换成功时自动调用
+     *  handler 返回 true → 效果已施加，SDK 跳过 CustomEvent 分发
+     *  handler 返回 false → 游戏桥未就绪/无本地玩家，SDK 分发 CustomEvent 降级
+     */
+    apply: function(itemData) {
+      var effectType = itemData.effectType || 'custom';
+      // ⚠️ id 回退：当 effectType 为 'custom' 时，尝试用 itemId (id) 查找已知 handler
+      // 例：effectType='custom' + id='super_mode' → 使用 effectHandlers['super_mode']
+      var handlerKey = effectType;
+      if (effectType === 'custom' && itemData.id && effectHandlers[itemData.id]) {
+        handlerKey = itemData.id;
+      }
+      var handler = effectHandlers[handlerKey];
+      if (handler) {
+        var result = handler(itemData);
+        return result !== false;
+      }
+      return false;
+    },
+
+    /** 清除所有帧修饰器 */
+    clearAll: function() {
+      _frameModifiers = {};
+      _recalcTimeScale();
+    },
+
+    /** 清除指定效果 */
+    clear: function(itemId) {
+      delete _frameModifiers[itemId];
+      _recalcTimeScale();
+    },
+
+    /** 手动执行变量搜索 (游戏可主动调用) */
+    searchAndModify: function(keywords, modifier) {
+      searchAndModify(keywords, modifier);
+    }
+  };
+
+  console.log('[AllinONE] Effect Engine v1.1 已就绪, 已注册 ' + Object.keys(effectHandlers).length + ' 种效果处理器');
+  } catch(e) {
+    console.error('[AllinONE] Effect Engine 初始化失败:', e && e.message ? e.message : e);
+    // 即使初始化失败，确保 SDK 仍能调用公共 API
+    if (!window.AllinONE) window.AllinONE = {};
+    if (!window.AllinONE.Effects) {
+      window.AllinONE.Effects = {
+        apply: function() { console.warn('[AllinONE] Effects 不可用 (初始化失败)'); return false; },
+        clearAll: function() {},
+        clear: function() {},
+        searchAndModify: function() {}
+      };
+    }
+  }
+})();
+</script>
+<meta http-equiv='content-type' content='text/html; charset=UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="icon" href="data:,">
+<title>小斗士2 LF2 · AllinONE</title>
+<style>
+  /* AllinONE UGC 道具栏 */
+  .ugc-bar {
+    position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center; padding: 8px 16px;
+    background: rgba(0,0,0,0.85); border-radius: 12px; z-index: 9999;
+    font-family: system-ui; min-height: 40px;
+  }
+  .ugc-label { color: #4caf50; font-weight: bold; font-size: 12px; margin-right: 4px; }
+  .ugc-item {
+    padding: 4px 10px; background: #333; border-radius: 8px; cursor: pointer;
+    color: #fff; font-size: 13px; border: 1px solid #555; transition: all 0.2s;
+  }
+  .ugc-item:hover { background: #4caf50; border-color: #4caf50; }
+  .ugc-empty { color: #666; font-size: 12px; }
+  /* Toast 通知 */
+  .toast {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%) translateY(-100px);
+    padding: 10px 20px; background: rgba(0,0,0,0.9); color: #fff; border-radius: 8px;
+    font-size: 14px; z-index: 10000; border-left: 4px solid #4caf50;
+    transition: transform 0.3s ease; pointer-events: none;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+
+<body>
+<div class='LFroot'>
+	<div class='container'>
+		<div class='window_caption'>
+			<div class='window_caption_title'>
+				F.LF
+			</div>
+			<div class='window_caption_button_bar'>
+				<div class='maximize_button'><span class='unisym'>&#9723;</span></div>
+				<div class='ProjectFbutton'>
+					<a href='http://project-f.github.io' target='_blank'>
+						<span style='font-family: Palatino Linotype, serif; font-size:16px;'>Project <i>F</i></span>
+					</a>
+				</div>
+			</div>
+		</div>
+		<div class='window'>
+			<div class='frontpage'>
+				<div class='frontpage_text' style='right:0;bottom:0;text-align:right;'>
+					Original work<br>
+					by Marti Wong, Starsky Wong<br>
+					<span class='number'>1999-2005, </span>all rights reserved<br>
+					<a href='http://www.littlefighter.com' target='_blank' style='letter-spacing:-0.2px;'>http://www.LittleFighter.com</a>
+				</div>
+				<div class='frontpage_text' style='left:0;bottom:0;'>
+					Open Source Implementation<br>
+					by Project F, <span class='number'>2011-2014</span><br>
+					<a href='http://project-f.github.io' target='_blank' style='letter-spacing:-0.2px;'>http://project-f.github.io</a>
+				</div>
+				<div class='frontpage_content'>
+				</div>
+			</div>
+			<div class='settings'>
+			</div>
+			<div class='network_game'>
+				<div class='network_game_menu'>
+					<select class='server_select'>
+					</select>
+					<button class='server_connect'>Connect</button>
+					<button class='network_game_cancel'>Cancel</button>
+					<input class='server_address' type='url' value=''>
+					<textarea class='network_log' readonly></textarea>
+				</div>
+			</div>
+			<div class='gameplay'>
+				<canvas class='canvas' width='0' height='0'></canvas>
+				<div class='top_status'></div>
+				<div class='bottom_status'>
+					<input class='fps' value='0fps'></input>
+					<span class='footnote'></span>
+				</div>
+				<div class='dialog_holder'>
+					<div class='pause_message'></div>
+					<div class='summary_dialog'></div>
+				</div>
+			</div>
+			<div class='character_selection'>
+			</div>
+		</div>
+		<pre class='projectFmessage'>
+                 ______
+                / ____/
+             __/_/___
+           / _/_____/
+           \ / /
+            `-/
+
+           Project F
+		</pre>
+	</div>
+	<div class='extra_UI container'>
+		<div class='dialog_holder'>
+			<div class='alert_box' style='display:none;'>
+				<span class='alert_message'>Loading...</span>
+				<button class='alert_box_ok'>OK</button>
+			</div>
+		</div>
+	</div>
+	<div class='touch_control_holder'></div>
+	<div class='lobby'>
+		<div class='header'>
+			<div class='nav'>
+				<a>&nbsp;&nbsp;&nbsp;F.LF Lobby&nbsp;&nbsp;&nbsp;</a>
+				<a href='http://project-f.github.io/F.LF/docs/multiplayer.html' target='_blank' class='help_button'>&nbsp;?&nbsp;</a>
+				<a class='close_button'>&nbsp;X&nbsp;</a>
+			</div>
+		</div>
+		<iframe class='lobby_window'></iframe>
+	</div>
+
+</div>
+<pre id='flf-config' style='display:none'>
+{"root":"./","package":"LF2_19"}
+</pre>
+
+<!-- RequireJS 预配置：baseUrl 锁定为当前页面目录，避免平台托管下相对路径歧义 -->
+<!-- 顺序加载：require.js 先执行注入全局 requirejs，再由 flf-boot.js 完成 requirejs.config + 引导 -->
+<!-- 刻意不使用 RequireJS 的主脚本属性，避免平台 GameCodeAnalyzer 把引导脚本误判为独立 JS 游戏入口 -->
+<script>var require = { baseUrl: './' };</script>
+<script src="require.js"></script>
+<script src="flf-boot.js"></script>
+
+<!-- ===================== AllinONE 道具集成 ===================== -->
+<div id="ugc-bar" class="ugc-bar">
+  <span class="ugc-label">PROPS</span>
+  <span class="ugc-empty">No items yet</span>
+</div>
+<div id="toast-container"></div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============ Toast 提示 ============
+  function showToast(msg, type) {
+    var toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = msg;
+    if (type === 'error') toast.style.borderColor = '#f44336';
+    else if (type === 'info') toast.style.borderColor = '#2196f3';
+    document.getElementById('toast-container').appendChild(toast);
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() { toast.classList.add('show'); });
+    });
+    setTimeout(function() {
+      toast.classList.remove('show');
+      setTimeout(function() { toast.remove(); }, 400);
+    }, 3000);
+  }
+
+  // ============ 名称 -> 引擎 id 映射 ============
+  var WEAPON_NAME = { stick: 100, hoe: 101, stone: 150, wooden_box: 151, ice_sword: 213 };
+  function resolveWeapon(v) {
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string') {
+      if (WEAPON_NAME[v] !== undefined) return WEAPON_NAME[v];
+      var n = parseInt(v, 10);
+      if (!isNaN(n)) return n;
+    }
+    return 100;
+  }
+
+  // ============ 内置效果表（小斗士2 专属）============
+  var EFFECT_HANDLERS = {
+    invincible: function(params) {
+      var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+      var players = g.getPlayers(); if (!players.length) return { error: true, message: '暂无玩家' };
+      var on = !(params && params.on === false);
+      var dur = (params && params.duration) ? params.duration * 1000 : 0;
+      players.forEach(function(p) { g.setInvincible(p, on); });
+      if (on && dur) {
+        setTimeout(function() {
+          players.forEach(function(p) { g.setInvincible(p, false); });
+        }, dur);
+        return { message: '🛡️ 无敌 ' + params.duration + ' 秒' };
+      }
+      return { message: on ? '🛡️ 无敌开启' : '🛡️ 无敌关闭' };
+    },
+    give_weapon: function(params) {
+      var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+      var players = g.getPlayers(); if (!players.length) return { error: true, message: '暂无玩家' };
+      var wid = resolveWeapon(params && params.weapon);
+      var ok = 0;
+      players.forEach(function(p) { if (g.giveWeapon(p, wid)) ok++; });
+      if (!ok) return { error: true, message: '武器发放失败' };
+      return { message: '⚔️ 获得武器 #' + wid };
+    },
+    heal: function(params) {
+      var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+      var players = g.getPlayers(); if (!players.length) return { error: true, message: '暂无玩家' };
+      var amt = (params && params.amount) ? params.amount : 100;
+      players.forEach(function(p) { g.heal(p, amt); });
+      return { message: '💚 回复 ' + amt + ' HP' };
+    },
+    restore_mp: function(params) {
+      var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+      var players = g.getPlayers(); if (!players.length) return { error: true, message: '暂无玩家' };
+      var amt = (params && params.amount) ? params.amount : 100;
+      players.forEach(function(p) { g.restoreMp(p, amt); });
+      return { message: '🔵 回复 ' + amt + ' MP' };
+    },
+    spawn_enemy: function(params) {
+      var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+      var id = (params && params.id) ? params.id : 'bandit';
+      var count = (params && params.count) ? params.count : 1;
+      if (g.spawn({ id: id, count: count, relation: 'enemy', hp: (params && params.hp) || 100 }))
+        return { message: '👹 召唤敌人 x' + count };
+      return { error: true, message: '召唤失败' };
+    },
+    spawn_ally: function(params) {
+      var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+      var id = (params && params.id) ? params.id : 'davis';
+      var count = (params && params.count) ? params.count : 1;
+      if (g.spawn({ id: id, count: count, relation: 'ally', hp: (params && params.hp) || 100 }))
+        return { message: '🤝 召唤队友 x' + count };
+      return { error: true, message: '召唤失败' };
+    },
+    super_mode: function(params) {
+      var g = window.myGame; if (!g) return { error: true, message: '游戏未就绪' };
+      var players = g.getPlayers(); if (!players.length) return { error: true, message: '暂无玩家' };
+      players.forEach(function(p) {
+        g.heal(p, 9999); g.restoreMp(p, 9999); g.setInvincible(p, true); g.giveWeapon(p, 213);
+      });
+      return { message: '🌟 超级模式！' };
+    }
+  };
+
+  // ============ effectCode 沙箱引擎 ============
+  var _dynamicHandlerCache = {};
+
+  function registerDynamicEffect(effectName, effectCodeStr) {
+    if (EFFECT_HANDLERS[effectName]) return true;
+    if (_dynamicHandlerCache[effectName]) {
+      EFFECT_HANDLERS[effectName] = _dynamicHandlerCache[effectName];
+      return true;
+    }
+    if (!effectCodeStr || typeof effectCodeStr !== 'string') return false;
+    if (effectCodeStr.length > 4000) return false;
+
+    var blocked = [
+      'eval(', 'new function', 'import(', 'require(', '__proto__',
+      'prototype', 'constructor', 'window.', 'document.',
+      'parent.', 'top.', 'globalthis', 'self.',
+      'fetch(', 'xmlhttprequest', 'websocket', 'worker(',
+      'localstorage', 'sessionstorage', 'cookie',
+      'alert(', 'confirm(', 'prompt('
+    ];
+    var lowerCode = effectCodeStr.toLowerCase();
+    for (var i = 0; i < blocked.length; i++) {
+      if (lowerCode.indexOf(blocked[i]) !== -1) return false;
+    }
+
+    // 沙箱变量：game = window.myGame（F.LF 控制桥）
+    try {
+      var sandboxFn = new Function(
+        'game', 'Math', 'JSON', 'console',
+        'return (' + effectCodeStr + ');'
+      );
+      var rawHandler = sandboxFn(
+        window.myGame || {},
+        Math, JSON, console
+      );
+      if (typeof rawHandler !== 'function') return false;
+
+      var wrappedHandler = function(params) {
+        try {
+          // 每次调用都刷新 game 引用（游戏可能在运行后初始化）
+          var h = rawHandler(params, window.myGame || {});
+          return h || { message: '效果已执行' };
+        }
+        catch (e) { return { error: true, message: '效果出错: ' + (e.message || e) }; }
+      };
+      _dynamicHandlerCache[effectName] = wrappedHandler;
+      EFFECT_HANDLERS[effectName] = wrappedHandler;
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // ============ UGC 道具库存 ============
+  var customPowerUps = [];
+
+  function renderCustomPowerUps() {
+    var bar = document.getElementById('ugc-bar');
+    bar.innerHTML = '';
+    var label = document.createElement('span');
+    label.className = 'ugc-label';
+    label.textContent = 'PROPS';
+    bar.appendChild(label);
+    if (customPowerUps.length === 0) {
+      var empty = document.createElement('span');
+      empty.className = 'ugc-empty';
+      empty.textContent = 'No items yet';
+      bar.appendChild(empty);
+      return;
+    }
+    customPowerUps.forEach(function(item, index) {
+      var el = document.createElement('span');
+      el.className = 'ugc-item';
+      el.textContent = (item.icon || '⚡') + ' ' + item.name;
+      el.title = item.description || item.effect;
+      el.onclick = function() { useCustomPowerUp(index); };
+      bar.appendChild(el);
+    });
+  }
+
+  function useCustomPowerUp(index) {
+    var item = customPowerUps[index];
+    if (!item) return;
+    if (item.effectCode && !EFFECT_HANDLERS[item.effect]) {
+      if (!registerDynamicEffect(item.effect, item.effectCode)) {
+        showToast('❌ 效果注册失败', 'error');
+        return;
+      }
+    }
+    var handler = EFFECT_HANDLERS[item.effect] || (item.itemId ? EFFECT_HANDLERS[item.itemId] : null);
+    if (handler) {
+      var result = handler(item.params);
+      if (result && result.message) showToast(result.message, result.error ? 'error' : 'success');
+    } else {
+      showToast('❌ 未找到效果: ' + item.effect, 'error');
+    }
+    customPowerUps.splice(index, 1);
+    renderCustomPowerUps();
+  }
+
+  // ============ 接收平台道具（双通道）============
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'EXTENSION_VOUCHER') {
+      var v = e.data.voucher;
+      if (!v || !v.data) return;
+      var data = v.data;
+      if (data.effect) {
+        customPowerUps.push({
+          id: v.id || ('ugc_' + Date.now()),
+          name: data.name || (data.effect + '道具'),
+          effect: data.effect,
+          params: data.params || {},
+          description: data.description || '',
+          effectCode: data.effectCode || null,
+          icon: data.icon || '⚡',
+        });
+        renderCustomPowerUps();
+        showToast('🎁 获得道具: ' + (data.name || data.effect), 'success');
+      }
+    }
+    if (e.data && e.data.type === 'REDEEM_RESULT' && e.data.data && e.data.data.success) {
+      showToast('✅ 兑换成功', 'success');
+    }
+  });
+
+  var _redeemedIds = {};
+  function handleRedeemedItem(detail) {
+    var key = detail.code || detail.itemId;
+    if (_redeemedIds[key]) return;
+    _redeemedIds[key] = true;
+
+    var voucherData = detail.voucherData || {};
+    var realEffect = voucherData.effect || null;
+    // 'custom' 视为无效效果名，回退到 itemId / effectType，避免「未找到效果: custom」
+    if ((!realEffect || realEffect === 'custom') && detail.itemId && detail.itemId !== 'custom') {
+      realEffect = detail.itemId;
+    }
+    if ((!realEffect || realEffect === 'custom') && detail.effectType && detail.effectType !== 'custom') {
+      realEffect = detail.effectType;
+    }
+    if ((!realEffect || realEffect === 'custom') && voucherData.itemId && voucherData.itemId !== 'custom') {
+      realEffect = voucherData.itemId;
+    }
+    if (!realEffect || realEffect === 'custom') return;
+
+    customPowerUps.push({
+      id: key || ('ugc_' + Date.now()),
+      name: voucherData.name || detail.itemName || '道具',
+      effect: realEffect,
+      params: voucherData.params || detail.effects || {},
+      description: voucherData.description || '',
+      effectCode: voucherData.effectCode || null,
+      icon: voucherData.icon || '⚡',
+    });
+    renderCustomPowerUps();
+    showToast('🎁 获得道具: ' + (detail.itemName || realEffect), 'success');
+  }
+  window.addEventListener('allinone-item-redeemed', function(e) { handleRedeemedItem(e.detail); });
+  window.addEventListener('allinone:item-redeemed', function(e) { handleRedeemedItem(e.detail); });
+
+  renderCustomPowerUps();
+
+  // 暴露给调试/自定义
+  window.allinoneAdapter = {
+    handlers: EFFECT_HANDLERS,
+    use: useCustomPowerUp,
+    give: function(item) { customPowerUps.push(item); renderCustomPowerUps(); }
+  };
+})();
+</script>
+<!-- AllinONE SDK v1.0 - 游戏兑换条 -->
+<script>
+(function() {
+  'use strict';
+  var GAME_ID = "game-1784972668120";
+  var ITEMS = [{"itemId":"heal","effectType":"custom","name":"回血100","quantity":1,"effects":{"rarity":"common","supplyPolicy":"open","effectType":"custom"},"rarity":"common"}];
+
+  // ===== 创建兑换条 UI =====
+  var styles = document.createElement('style');
+  styles.textContent = [
+    '#allinone-redeem-bar{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:99999;display:none;background:rgba(15,15,25,0.92);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:14px 22px;min-width:380px;max-width:500px;box-shadow:0 12px 48px rgba(0,0,0,0.5);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#fff;transition:all .3s ease;}',
+    '#allinone-redeem-bar.show{display:block;}',
+    '#allinone-redeem-bar .bar-row{display:flex;align-items:center;gap:10px;}',
+    '#allinone-redeem-bar .bar-row input{flex:1;padding:10px 14px;border-radius:10px;border:1px solid rgba(139,92,246,0.3);background:rgba(255,255,255,0.06);color:#fff;font-size:14px;font-family:monospace;letter-spacing:2px;outline:none;transition:border-color .2s;}',
+    '#allinone-redeem-bar .bar-row input:focus{border-color:rgba(139,92,246,0.7);}',
+    '#allinone-redeem-bar .bar-row input::placeholder{font-family:sans-serif;letter-spacing:0;color:rgba(255,255,255,0.3);}',
+    '#allinone-redeem-bar .bar-row .btn-redeem{padding:10px 22px;border-radius:10px;border:none;background:linear-gradient(135deg,#7c3aed,#6366f1);color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .2s,transform .1s;white-space:nowrap;}',
+    '#allinone-redeem-bar .bar-row .btn-redeem:hover{opacity:0.9;}',
+    '#allinone-redeem-bar .bar-row .btn-redeem:active{transform:scale(0.97);}',
+    '#allinone-redeem-bar .bar-row .btn-redeem:disabled{opacity:0.5;cursor:not-allowed;}',
+    '#allinone-redeem-bar .bar-row .btn-close{padding:6px 10px;border-radius:8px;border:none;background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-size:14px;cursor:pointer;transition:background .2s;}',
+    '#allinone-redeem-bar .bar-row .btn-close:hover{background:rgba(255,255,255,0.15);color:#fff;}',
+    '#allinone-redeem-bar .bar-status{margin-top:10px;font-size:12px;text-align:center;display:none;}',
+    '#allinone-redeem-bar .bar-status.show{display:block;}',
+    '#allinone-redeem-bar .bar-status.success{color:#4ade80;}',
+    '#allinone-redeem-bar .bar-status.error{color:#f87171;}',
+    '#allinone-redeem-bar .bar-status.loading{color:#a78bfa;}',
+    '#allinone-redeem-bar .bar-status.info{color:#fbbf24;}',
+    '#allinone-redeem-bar .bar-items{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;}',
+    '#allinone-redeem-bar .bar-items .item-chip{padding:4px 10px;border-radius:6px;background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.15);font-size:11px;color:#a78bfa;cursor:default;user-select:none;}',
+    '#allinone-redeem-bar .bar-hint{font-size:12px;color:rgba(255,255,255,0.45);margin-bottom:10px;text-align:center;line-height:1.4;}',
+    '#allinone-redeem-bar .bar-items-label{font-size:11px;color:rgba(255,255,255,0.35);margin-top:10px;margin-bottom:4px;text-align:left;}',
+    '#allinone-redeem-toggle{position:fixed;bottom:24px;right:24px;z-index:99998;width:48px;height:48px;border-radius:50%;border:2px solid rgba(124,58,237,0.4);background:rgba(15,15,25,0.85);backdrop-filter:blur(8px);color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,0.4);transition:transform .2s,border-color .2s;}',
+    '#allinone-redeem-toggle:hover{transform:scale(1.05);border-color:rgba(124,58,237,0.7);}',
+    '#allinone-redeem-toggle .badge{position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;background:#7c3aed;font-size:9px;display:flex;align-items:center;justify-content:center;color:#fff;display:none;}',
+    '@keyframes allinone-pulse{0%{opacity:1;}50%{opacity:0.4;}100%{opacity:1;}}',
+    '#allinone-redeem-bar.loading .btn-redeem{animation:allinone-pulse 1.2s ease-in-out infinite;}'
+  ].join('');
+  document.head.appendChild(styles);
+
+  // ===== DOM 结构 =====
+  var bar = document.createElement('div');
+  bar.id = 'allinone-redeem-bar';
+  bar.innerHTML = [
+    '<div class="bar-hint">🎮 输入您购买的道具兑换码，点击「兑换」激活效果</div>',
+    '<div class="bar-row">',
+      '<input id="allinone-code-input" type="text" placeholder="粘贴或输入兑换码，如 IV-A3F9K2M7" maxlength="20" spellcheck="false" autocomplete="off">',
+      '<button class="btn-redeem" id="allinone-redeem-btn">兑换</button>',
+      '<button class="btn-close" id="allinone-bar-close">&#10005;</button>',
+    '</div>',
+    '<div class="bar-status" id="allinone-bar-status"></div>',
+    ITEMS.length > 0 ? [
+      '<div class="bar-items-label">本游戏可用道具：</div>',
+      '<div class="bar-items">',
+        ITEMS.map(function(item) {
+          return '<span class="item-chip" title="' + item.name + ' (' + item.effectType + ')">' + item.name + '</span>';
+        }).join(''),
+      '</div>'
+    ].join('') : ''
+  ].join('');
+  document.body.appendChild(bar);
+
+  var toggle = document.createElement('button');
+  toggle.id = 'allinone-redeem-toggle';
+  toggle.innerHTML = '<span>🎁</span><span class="badge" id="allinone-badge"></span>';
+  toggle.title = '兑换道具';
+  document.body.appendChild(toggle);
+
+  // ===== 元素引用 =====
+  var input = document.getElementById('allinone-code-input');
+  var btn = document.getElementById('allinone-redeem-btn');
+  var close = document.getElementById('allinone-bar-close');
+  var status = document.getElementById('allinone-bar-status');
+  var badge = document.getElementById('allinone-badge');
+
+  // ===== 事件绑定 =====
+  toggle.onclick = function() {
+    bar.classList.toggle('show');
+    if (bar.classList.contains('show')) { input.focus(); }
+  };
+  close.onclick = function() { bar.classList.remove('show'); };
+  btn.onclick = function() { doRedeem(); };
+  input.onkeydown = function(e) { if (e.key === 'Enter') doRedeem(); };
+
+  // ===== 道具标签点击提示 =====
+  setTimeout(function() {
+    document.querySelectorAll('.item-chip').forEach(function(chip) {
+      chip.addEventListener('click', function() {
+        showStatus('请先购买此道具获取兑换码，然后在此处输入兑换', 'info');
+      });
+    });
+  }, 100);
+
+  function showStatus(msg, type) {
+    status.textContent = msg;
+    status.className = 'bar-status show ' + type;
+    bar.classList.remove('loading');
+    if (type === 'success') {
+      setTimeout(function() { status.classList.remove('show'); }, 4000);
+    } else if (type !== 'loading') {
+      setTimeout(function() { status.classList.remove('show'); }, 3000);
+    }
+  }
+
+  function doRedeem() {
+    var code = input.value.trim();
+    if (!code) { showStatus('请输入兑换码', 'error'); return; }
+
+    btn.disabled = true;
+    btn.textContent = '验证中...';
+    bar.classList.add('loading');
+    showStatus('正在验证兑换码...', 'loading');
+
+    window.parent.postMessage({
+      type: 'REDEEM_ITEM',
+      data: { code: code.toUpperCase(), gameId: GAME_ID }
+    }, '*');
+  }
+
+  // ===== 监听平台返回 =====
+  window.addEventListener('message', function(event) {
+    if (event.data && event.data.type === 'REDEEM_RESULT') {
+      var res = event.data.data;
+      btn.disabled = false;
+      btn.textContent = '兑换';
+      bar.classList.remove('loading');
+
+      if (res.success) {
+        showStatus('&#10003; 兑换成功! 道具: ' + (res.itemName || '') + ' x' + (res.quantity || 1), 'success');
+        input.value = '';
+        badge.style.display = 'flex';
+        badge.textContent = '1';
+        setTimeout(function() { badge.style.display = 'none'; }, 5000);
+        setTimeout(function() { bar.classList.remove('show'); }, 1500);
+
+        // ===== [关键] Effect Engine 路由 + CustomEvent 分发 =====
+        // invincible/super_mode/heal/restore_mp/give_weapon 等预设效果：
+        // 平台 handler 返回 false（不自动执行）→ 始终分发 CustomEvent →
+        // 在 voucherData 中注入 effectCode（仅对本地玩家生效的沙箱脚本）
+        // 游戏端 handleRedeemedItem() → 添加道具到 customPowerUps →
+        // 玩家点击 → useCustomPowerUp() → registerDynamicEffect() → effectCode 执行
+        var effectAppliedByPlatform = false;
+        try {
+          if (window.AllinONE && window.AllinONE.Effects) {
+            effectAppliedByPlatform = window.AllinONE.Effects.apply({
+              id: res.itemId,
+              effectType: res.effectType || 'custom',
+              itemName: res.itemName,
+              quantity: res.quantity || 1,
+              effects: res.effects || {}
+            });
+            console.log('[AllinONE SDK] Effect Engine apply() →', effectAppliedByPlatform ? '自动执行' : '委托 CustomEvent', ':', res.itemName || res.effectType);
+          } else {
+            console.warn('[AllinONE SDK] Effect Engine 不可用');
+          }
+        } catch (e) {
+          console.error('[AllinONE SDK] Effect Engine 执行失败:', e);
+        }
+
+        // ⚠️ 始终分发 CustomEvent（不再按 effectAppliedByPlatform 条件跳过）
+        // 原因：跳过 CustomEvent → 道具不在游戏 props 栏显示（玩家无视觉反馈）
+        // 新方案（2026-07-24）：保持原始 effect 名（不前缀 _local_）→ 游戏可识别
+        // 并添加到 customPowerUps；本地玩家专属效果由 Effect Engine 注入的
+        // LocalPatcher 在 window.allinoneAdapter.handlers 上原地替换，玩家点击时
+        // 执行替换后的本地玩家版本（筛除 AI 角色），避免 forEach 全场误伤。
+        var detail = {
+          code: res.code,
+          itemId: res.itemId,
+          itemName: res.itemName,
+          quantity: res.quantity || 1,
+          effects: res.effects || {},
+          effectType: res.effectType,
+          voucherData: res.voucherData || {},
+          schemaName: res.schemaName || null
+        };
+        window.dispatchEvent(new CustomEvent('allinone:item-redeemed', { detail: detail }));
+      } else {
+        showStatus('&#10007; ' + (res.message || '兑换失败'), 'error');
+      }
+    }
+  });
+
+  // 🆕 ===== EXTENSION_VOUCHER 处理 + CustomEvent 分发（UGC 道具） =====
+  window.addEventListener('message', function(event) {
+    if (event.data && event.data.type === 'EXTENSION_VOUCHER') {
+      var v = event.data.voucher;
+      if (!v || !v.schemaName) { console.warn('[AllinONE SDK] EXTENSION_VOUCHER 无效'); return; }
+
+      var schemaToItem = {};
+      try {
+        if (v.schemaName === 'weapon') {
+          schemaToItem.itemId = (v.data && v.data.effectType) || 'match3_bomb';
+          schemaToItem.itemName = (v.data && v.data.name) || 'UGC武器';
+        } else if (v.schemaName === 'shop') {
+          schemaToItem.itemId = (v.data && v.data.effectType) || 'match3_bomb';
+          schemaToItem.itemName = (v.data && v.data.name) || 'UGC商店';
+        } else if (v.schemaName === 'quest') {
+          schemaToItem.itemId = (v.data && v.data.effectType) || 'match3_lightning';
+          schemaToItem.itemName = (v.data && v.data.name) || 'UGC任务';
+        } else if (v.schemaName === 'match3-powerup') {
+          // match3-powerup: 优先使用 data.effect（效果类型），如 replace_color, remove_row 等
+          schemaToItem.itemId = (v.data && v.data.effect) || (v.data && v.data.effectType) || v.schemaName;
+          schemaToItem.itemName = (v.data && v.data.name) || v.schemaName;
+        } else {
+          // 所有自定义 schema（ra2-item 等）：优先 effect → effectType → schemaName
+          schemaToItem.itemId = (v.data && v.data.effect) || (v.data && v.data.effectType) || v.schemaName;
+          schemaToItem.itemName = (v.data && v.data.name) || v.schemaName;
+        }
+      } catch(e) { console.error('[AllinONE SDK] 解析失败:', e); return; }
+
+      console.log('[AllinONE SDK] EXTENSION_VOUCHER → CustomEvent 分发:', schemaToItem.itemId);
+
+      var detail = {
+        code: v.signature || 'ugc-' + Date.now(),
+        itemId: schemaToItem.itemId,
+        itemName: schemaToItem.itemName,
+        quantity: 1,
+        effects: {},
+        effectType: 'custom',
+        source: 'ugc',
+        voucherData: v.data
+      };
+      // ⚠️ 只分发一种格式（allinone:item-redeemed），避免监听两种格式的游戏收到2个道具
+      window.dispatchEvent(new CustomEvent('allinone:item-redeemed', { detail: detail }));
+    }
+  });
+
+  // ===== SDK API（供游戏方手动调用） =====
+  window.AllinONE = window.AllinONE || {};
+  window.AllinONE.GAME_ID = GAME_ID;
+  window.AllinONE.ITEMS = ITEMS;
+
+  window.AllinONE.onItemRedeemed = function(callback) {
+    if (typeof callback === 'function') {
+      window.addEventListener('allinone:item-redeemed', function(e) {
+        callback(e.detail);
+      });
+    }
+  };
+
+  window.AllinONE.showRedeemBar = function() {
+    bar.classList.add('show');
+    input.focus();
+  };
+
+  window.AllinONE.hideRedeemBar = function() {
+    bar.classList.remove('show');
+  };
+
+  console.log('[AllinONE SDK] v1.0 兑换条已注入, 游戏ID:', GAME_ID, ', 道具:', ITEMS.length + ' 种');
+})();
+</script>
+</body>
+</html>
+
+HTTP_CODE:200
+SIZE:58673

@@ -1,20 +1,153 @@
 /**
  * GameBase - 游戏化首页（MVP v1.0）
  * 展示玩家的个人基地，包含建筑卡片、HUD状态栏、事件横幅和底部导航
+ * v1.1: HUD 钱包区域增加「明细」按钮，点击弹出钱包明细抽屉
  */
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/authContext';
-import { useWallet } from '@/hooks/useWallet';
+import { useWallet, TransactionItem, WalletStatsData } from '@/hooks/useWallet';
 
-// ==================== 内联组件 ====================
+// ==================== 钱包明细抽屉 ====================
+
+function WalletDetailDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { wallet, transactions, stats } = useWallet();
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          {/* 背景遮罩 */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 0.5 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="fixed inset-0 bg-black z-[60]"
+          />
+          {/* 抽屉面板 */}
+          <motion.div
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-[420px] bg-slate-900 border-l border-slate-700/50 z-[61] overflow-y-auto"
+          >
+            {/* 顶部 */}
+            <div className="sticky top-0 bg-slate-900/95 backdrop-blur border-b border-slate-700/50 px-4 py-3 flex items-center justify-between">
+              <h2 className="font-bold text-white text-lg">钱包明细</h2>
+              <button onClick={onClose} className="text-slate-400 hover:text-white text-xl transition-colors">✕</button>
+            </div>
+
+            {/* 余额概览 */}
+            <div className="px-4 py-4">
+              <div className="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/40">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 bg-slate-700/40 rounded-xl">
+                    <div className="text-xs text-slate-400">游戏币余额</div>
+                    <div className="text-xl font-bold text-yellow-300 mt-1">
+                      {(wallet?.gameCoins || 0).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="p-3 bg-slate-700/40 rounded-xl">
+                    <div className="text-xs text-slate-400">A币余额</div>
+                    <div className="text-xl font-bold text-purple-400 mt-1">
+                      {(wallet?.voucherBalance || 0).toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 收支统计 */}
+            {stats && (
+              <div className="px-4 pb-3">
+                <div className="p-3 bg-slate-800/40 rounded-xl border border-slate-700/30">
+                  <div className="text-xs text-slate-400 mb-2">收支统计</div>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-green-400">今日收入</span>
+                      <span className="text-white font-bold ml-1.5">{stats.todayIncome.toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <span className="text-red-400">今日支出</span>
+                      <span className="text-white font-bold ml-1.5">{stats.todayExpense.toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <span className="text-green-400/70">累计收入</span>
+                      <span className="text-slate-300 font-bold ml-1.5">{stats.totalIncome.toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <span className="text-red-400/70">累计支出</span>
+                      <span className="text-slate-300 font-bold ml-1.5">{stats.totalExpense.toLocaleString()}</span>
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-2">共 {stats.transactionCount} 笔交易</div>
+                </div>
+              </div>
+            )}
+
+            {/* 交易明细列表 */}
+            <div className="px-4 pb-6">
+              <div className="text-sm font-medium text-slate-300 mb-2">交易记录</div>
+              {transactions.length === 0 ? (
+                <div className="text-center py-10 text-slate-500">
+                  <div className="text-4xl mb-2">📊</div>
+                  <p>暂无交易记录</p>
+                  <p className="text-xs mt-1">获得奖励或消费后将显示明细</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {transactions.map((tx: TransactionItem) => (
+                    <div key={tx.id} className="p-3 bg-slate-800/50 rounded-xl border border-slate-700/30 flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-white text-sm font-medium truncate">{tx.description}</div>
+                        <div className="text-xs text-slate-400 mt-0.5">
+                          {formatTimestamp(tx.timestamp)}
+                        </div>
+                      </div>
+                      <div className="text-right ml-3">
+                        <div className={`font-bold text-sm ${tx.type === 'income' ? 'text-green-400' : 'text-red-400'}`}>
+                          {tx.type === 'income' ? '+' : '-'}{tx.amount.toLocaleString()}
+                        </div>
+                        <div className="text-[10px] text-slate-500">{tx.currency || '游戏币'}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function formatTimestamp(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  const diffHour = Math.floor(diffMs / 3600000);
+  const diffDay = Math.floor(diffMs / 86400000);
+
+  if (diffMin < 1) return '刚刚';
+  if (diffMin < 60) return `${diffMin}分钟前`;
+  if (diffHour < 24) return `${diffHour}小时前`;
+  if (diffDay < 7) return `${diffDay}天前`;
+  return d.toLocaleDateString();
+}
+
+// ==================== HUD ====================
 
 function HUD() {
   const { currentUser, isAuthenticated, logout } = useAuth();
   const { wallet } = useWallet();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [walletDrawerOpen, setWalletDrawerOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // 点击外部关闭菜单
@@ -29,56 +162,67 @@ function HUD() {
   }, [menuOpen]);
 
   return (
-    <div className="relative flex items-center justify-between px-4 py-3 bg-slate-800/80 backdrop-blur border-b border-slate-700/50">
-      <div className="flex items-center gap-5">
-        <div className="flex items-center gap-1.5">
-          <span className="text-lg">💰</span>
-          <span className="font-bold text-yellow-300">{wallet?.gameCoins?.toLocaleString() || '0'}</span>
-          <span className="text-xs text-slate-400">游戏币</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-lg">🎫</span>
-          <span className="font-bold text-purple-400">{wallet?.voucherBalance?.toLocaleString() || '0'}</span>
-          <span className="text-xs text-slate-400">A币</span>
-        </div>
-      </div>
-      <div className="flex items-center gap-3 ml-auto" ref={menuRef}>
-        {isAuthenticated ? (
-          <>
-            <span className="text-sm text-slate-300">{currentUser?.nickname || '冒险者'}</span>
-            <button
-              onClick={() => setMenuOpen(!menuOpen)}
-              className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold hover:ring-2 hover:ring-purple-400 transition-all"
-            >
-              {(currentUser?.nickname || 'A')[0].toUpperCase()}
-            </button>
-            {menuOpen && (
-              <div className="absolute top-12 right-4 w-36 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden z-50">
-                <button
-                  onClick={() => { setMenuOpen(false); navigate('/login'); }}
-                  className="w-full px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-700 text-left transition-colors"
-                >
-                  🔄 切换账号
-                </button>
-                <button
-                  onClick={() => { setMenuOpen(false); logout(); }}
-                  className="w-full px-4 py-2.5 text-sm text-red-400 hover:bg-slate-700 text-left transition-colors border-t border-slate-700"
-                >
-                  🚪 退出登录
-                </button>
-              </div>
-            )}
-          </>
-        ) : (
-          <button
-            onClick={() => navigate('/login')}
-            className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 rounded-full text-sm font-medium text-white transition-colors"
+    <>
+      <div className="relative flex items-center justify-between px-4 py-3 bg-slate-800/80 backdrop-blur border-b border-slate-700/50">
+        <div className="flex items-center gap-5">
+          <div
+            className="flex items-center gap-1.5 cursor-pointer hover:bg-slate-700/30 rounded-lg px-1.5 py-0.5 transition-colors"
+            onClick={() => setWalletDrawerOpen(true)}
+            title="查看钱包明细"
           >
-            🔑 登录
-          </button>
-        )}
+            <span className="text-lg">💰</span>
+            <span className="font-bold text-yellow-300">{wallet?.gameCoins?.toLocaleString() || '0'}</span>
+            <span className="text-xs text-slate-400">游戏币</span>
+          </div>
+          <div
+            className="flex items-center gap-1.5 cursor-pointer hover:bg-slate-700/30 rounded-lg px-1.5 py-0.5 transition-colors"
+            onClick={() => setWalletDrawerOpen(true)}
+            title="查看钱包明细"
+          >
+            <span className="text-lg">🎫</span>
+            <span className="font-bold text-purple-400">{wallet?.voucherBalance?.toLocaleString() || '0'}</span>
+            <span className="text-xs text-slate-400">A币</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 ml-auto" ref={menuRef}>
+          {isAuthenticated ? (
+            <>
+              <span className="text-sm text-slate-300">{currentUser?.nickname || '冒险者'}</span>
+              <button
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-cyan-500 flex items-center justify-center text-white text-sm font-bold hover:ring-2 hover:ring-purple-400 transition-all"
+              >
+                {(currentUser?.nickname || 'A')[0].toUpperCase()}
+              </button>
+              {menuOpen && (
+                <div className="absolute top-12 right-4 w-36 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden z-50">
+                  <button
+                    onClick={() => { setMenuOpen(false); navigate('/login'); }}
+                    className="w-full px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-700 text-left transition-colors"
+                  >
+                    🔄 切换账号
+                  </button>
+                  <button
+                    onClick={() => { setMenuOpen(false); logout(); }}
+                    className="w-full px-4 py-2.5 text-sm text-red-400 hover:bg-slate-700 text-left transition-colors border-t border-slate-700"
+                  >
+                    🚪 退出登录
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <button
+              onClick={() => navigate('/login')}
+              className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 rounded-full text-sm font-medium text-white transition-colors"
+            >
+              🔑 登录
+            </button>
+          )}
+        </div>
       </div>
-    </div>
+      <WalletDetailDrawer open={walletDrawerOpen} onClose={() => setWalletDrawerOpen(false)} />
+    </>
   );
 }
 
@@ -162,6 +306,7 @@ export default function GameBase() {
     { icon: '🏪', label: '交易市场', description: '玩家P2P道具交易', route: '/marketplace' },
     { icon: '🎒', label: '背包', description: '查看我的凭证', route: '/personal-center' },
     { icon: '🎮', label: '游戏世界', description: '探索游戏', route: '/game-center' },
+    { icon: '🎁', label: '活动中心', description: '任务签到赢游戏币', route: '/activity' },
     ...(isAdmin ? [{ icon: '⚙️', label: '平台管理', description: '金库·商店·运营', route: '/platform-admin' }] : []),
   ];
 

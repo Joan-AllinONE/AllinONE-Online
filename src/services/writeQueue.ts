@@ -18,7 +18,7 @@
  *   await writeQueue.enqueueAndWait({ collection: 'users', operation: 'update', docId: 'xxx', data: { ... } });
  */
 
-import { waitForCloudBase } from './cloudbase';
+import { waitForCloudBase, isCloudSyncEnabled } from './cloudbase';
 
 // ==================== 类型定义 ====================
 
@@ -98,6 +98,8 @@ class WriteQueueService {
    * 写入请求会被持久化到 localStorage，并在 CloudBase 就绪后自动处理
    */
   enqueue(request: WriteRequest): string {
+    if (!isCloudSyncEnabled()) return ''; // dev 不写云：跳过，不入队、不持久化
+
     if (this.queue.size >= MAX_QUEUE_SIZE) {
       console.warn('[WriteQueue] Queue full, dropping oldest entry');
       const oldest = this.getOldestEntry();
@@ -124,6 +126,8 @@ class WriteQueueService {
    * @returns true=成功, false=超时或失败
    */
   async enqueueAndWait(request: WriteRequest, timeoutMs = 5000): Promise<boolean> {
+    if (!isCloudSyncEnabled()) return true; // dev 不写云：视为成功（本地缓存已处理）
+
     const id = this.enqueue(request);
     const deadline = Date.now() + timeoutMs;
 
@@ -223,6 +227,7 @@ class WriteQueueService {
 
   private async process(): Promise<void> {
     if (!this.processing) return;
+    if (!isCloudSyncEnabled()) return; // dev 不写云：停止处理器，不空转重试
 
     // auth 断裂时：仅做一次轻量检查，不处理队列
     if (this.authBroken) {
@@ -455,6 +460,7 @@ class WriteQueueService {
   private restoreQueue(): void {
     if (this.restored) return;
     this.restored = true;
+    if (!isCloudSyncEnabled()) return; // dev 不恢复历史云端写入
     try {
       const raw = localStorage.getItem(QUEUE_KEY);
       if (!raw) return;

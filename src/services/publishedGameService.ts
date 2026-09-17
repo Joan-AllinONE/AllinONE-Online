@@ -16,8 +16,8 @@
 
 import { saveToDB, loadFromDB, deleteFromDB, trySaveLS, tryLoadLS, deleteLS } from './gameFileDb';
 import { gameDeveloperService } from './gameDeveloperService';
-import { writeQueue } from './writeQueue';
-import { isCloudSyncEnabled } from './cloudbase';
+
+import { isCloudSyncEnabled, isProductionTarget } from './cloudbase';
 import { globalEventBus } from '@/skills/EventBus';
 
 // ==================== SOP 跨浏览器持久化 ====================
@@ -31,7 +31,12 @@ import { globalEventBus } from '@/skills/EventBus';
 // 而 published game HTML 跨浏览器工作的真正原因是 entryHtmlContent 直接存 DB 文档（匿名可读）。
 // 因此 SOP 复用此 proven pattern — sopDocument 直接存 DB 文档作为首要通道。
 
-const GAMES_API_BASE = '/api/v1/games';
+// 生产环境（CloudBase 静态托管）下相对路径 /api/** 会被 hosting rewrite 成 index.html，
+// 必须直连永久云函数域名；本地 dev 走 vite 代理的相对路径。
+const GAMES_API_BASE =
+  typeof window !== 'undefined' && /tcloudbaseapp\.com$/.test(window.location.hostname)
+    ? 'https://allinonegaming-d4gmsmrzz573264f6.service.tcloudbase.com/api/v1/games'
+    : '/api/v1/games';
 
 // ---------- SOP 跨浏览器加载通道 ----------
 // v3 修正后的通道优先级（按可靠性排序）：
@@ -57,9 +62,9 @@ interface SopUploadResult {
  */
 export async function saveSopToCloudStorage(gameId: string, md: string): Promise<SopUploadResult> {
   try {
-    const { isCloudBaseReady } = await import('./cloudbase');
-    if (!isCloudBaseReady()) {
-      console.warn('[PublishedGame] SOP 云存储: CloudBase 未就绪');
+    // 环境隔离：仅 prod 环境 + 云同步启用才上传线上云存储，避免 dev/联调污染共享存储
+    if (!isProductionTarget()) {
+      console.warn('[PublishedGame] SOP 云存储: 非 prod 环境，跳过线上云存储上传');
       return { success: false };
     }
 
@@ -306,13 +311,8 @@ function addSopToCloudManifest(gameId: string, sopCloudFileID: string, sopMd?: s
     dbData._sopDocumentUpdatedAt = Date.now();
   }
 
-  writeQueue.enqueue({
-    collection: 'published_games',
-    operation: 'upsert',
-    where: { id: gameId },
-    data: dbData,
-  });
-  console.log(`[PublishedGame] SOP cloudFileID + sopDocument 已入队写 DB: ${sopCloudFileID}${sopMd ? ` (${sopMd.length} 字节)` : ''}`);
+  patchGameOnBackend(gameId, dbData).catch(() => {});
+  console.log(`[PublishedGame] SOP cloudFileID + sopDocument 已提交后端写 DB: ${sopCloudFileID}${sopMd ? ` (${sopMd.length} 字节)` : ''}`);
 
   // ③ 同时保存 SOP 到后端 API（辅助通道，fire-and-forget）
   if (sopMd) {
@@ -387,6 +387,135 @@ export async function loadSopFromBackend(gameId: string): Promise<string | null>
     return text && text.length > 0 ? text : null;
   } catch {
     return null;
+  }
+}
+
+// ---------- published_games 后端读写（替代已失效的 writeQueue） ----------
+// 根因：CloudBase JS SDK 浏览器端 auth 损坏（auth.call is not a function），
+// writeQueue → DB 写入线上永不落库。统一改走 gamesApi 云函数（admin SDK）。
+
+/**
+ * 压缩 dataURL 图片（发布元数据瘦身：云函数 HTTP 访问服务有请求体上限，
+ * 超限 413 会导致整份元数据写入失败 → name/status/hostingType 缺失 → 游戏中心显示维护中）
+ */
+async function compressDataUrlImage(dataUrl: string, maxBytes: number): Promise<string> {
+  if (!dataUrl || !dataUrl.startsWith('data:image/') || dataUrl.length <= maxBytes) return dataUrl;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('image load failed'));
+      i.src = dataUrl;
+    });
+    const maxSide = 640;
+    let { width, height } = img;
+    if (Math.max(width, height) > maxSide) {
+      const ratio = maxSide / Math.max(width, height);
+      width = Math.max(1, Math.round(width * ratio));
+      height = Math.max(1, Math.round(height * ratio));
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return dataUrl;
+    ctx.drawImage(img, 0, 0, width, height);
+    let quality = 0.85;
+    let out = canvas.toDataURL('image/jpeg', quality);
+    while (out.length > maxBytes && quality > 0.3) {
+      quality -= 0.15;
+      out = canvas.toDataURL('image/jpeg', quality);
+    }
+    return out.length < dataUrl.length ? out : dataUrl;
+  } catch {
+    return dataUrl;
+  }
+}
+
+/** upsert 整条游戏文档到后端（发布链路元数据瘦身，防 413 整体失败） */
+export async function upsertGameToBackend(game: Record<string, any>): Promise<boolean> {
+  try {
+    const token = await getBackendSopToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    // ---- 元数据瘦身（云函数 HTTP 访问服务请求体上限，超限 413 会拒绝整份元数据）----
+    const payload: Record<string, any> = { ...game };
+    // ① entryHtmlContent：自包含 HTML 可达数百 KB。线上文件加载主链路为
+    //    SW → 云函数文件路由 → game_files / 云存储（cloudFileManifest），大 HTML 没必要随元数据上送。
+    //    本地缓存与 IndexedDB 仍保留完整内容（回退链不受影响）。
+    if (typeof payload.entryHtmlContent === 'string' && payload.entryHtmlContent.length > 60_000) {
+      console.warn(
+        `[PublishedGame] 元数据瘦身：剥离 entryHtmlContent（${(payload.entryHtmlContent.length / 1024).toFixed(0)}KB > 60KB 阈值），文件加载走 cloudFileManifest`,
+        '| gameId=', game.id,
+      );
+      delete payload.entryHtmlContent;
+    }
+    // ② coverImage：超大 base64 压缩到 ~120KB（游戏中心展示用）
+    if (typeof payload.coverImage === 'string' && payload.coverImage.length > 120_000) {
+      payload.coverImage = await compressDataUrlImage(payload.coverImage, 120_000);
+      console.warn(
+        `[PublishedGame] 元数据瘦身：coverImage 压缩 ${(game.coverImage.length / 1024).toFixed(0)}KB → ${(payload.coverImage.length / 1024).toFixed(0)}KB`,
+        '| gameId=', game.id,
+      );
+    }
+    const res = await fetch(GAMES_API_BASE, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      // ⚠️ 发布写入后端失败会导致封面/简介等字段丢失（刷新后游戏中心看不到封面）。
+      // 此前失败被静默吞掉，这里显式暴露状态码，便于定位（401=JWT 缺失，429=限流，4xx/5xx=后端错误）。
+      const text = await res.text().catch(() => '');
+      console.error(
+        `[PublishedGame] ❌ 写入后端失败: HTTP ${res.status} ${res.statusText}`,
+        text.slice(0, 200),
+        '| gameId=', game.id,
+        '| hasCover=', !!game.coverImage,
+        '| hasSummary=', !!game.summary,
+      );
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[PublishedGame] ❌ 写入后端异常:', (e as Error).message, '| gameId=', game.id);
+    return false;
+  }
+}
+
+/** 部分更新游戏文档字段（PATCH） */
+export async function patchGameOnBackend(
+  gameId: string,
+  patch: Record<string, any>,
+): Promise<boolean> {
+  try {
+    const token = await getBackendSopToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${GAMES_API_BASE}/${encodeURIComponent(gameId)}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(patch),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 删除游戏文档 */
+export async function deleteGameOnBackend(gameId: string): Promise<boolean> {
+  try {
+    const token = await getBackendSopToken();
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${GAMES_API_BASE}/${encodeURIComponent(gameId)}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 
@@ -480,6 +609,10 @@ export interface PublishedGame {
   publisherName?: string;
   revenueSharePercent?: number;
   itemSop?: GameItemSop;
+  /** 内容创作 SOP（与 itemSop 并列、独立启用）。启用后内容工坊开放该游戏创作，分发层注入 ContentLoader */
+  contentSop?: import('@/types/quest').GameContentSop;
+  /** 内容创作 SOP 上传的创作指南 md（与 contentSop.contentTypes 并列存储） */
+  contentSopDocument?: string;
   /** 道具工坊上传的 SOP 原始文档（与 itemSop 完全独立，互不影响） */
   sopDocument?: string;
   /** 云存储文件清单（fileName → cloudFileID），SOP 文件也存于此，跨浏览器加载用 cloudFileID 模式 */
@@ -488,6 +621,56 @@ export interface PublishedGame {
   baseUrl?: string;
   /** 是否为模块化多文件游戏（RequireJS/AMD/动态import）。模块化游戏必须用真实URL托管，srcDoc 内联会白屏 */
   isModular?: boolean;
+  /** 游戏简介（开发商填写的纯文本介绍） */
+  summary?: string;
+  /** 游戏封面图（base64 data URL，上传时前端压缩；与 entryHtmlContent 同机制，列表 API 直接返回，跨浏览器可读） */
+  coverImage?: string;
+  /** 任务合并产生的扩展入口（P1）：每个已合并 submission 的资源/入口记录，游戏侧据此加载扩展 */
+  questExtensions?: Array<{
+    submissionId: string;
+    slot: string;
+    entryPoint: string;
+    assets: Array<{ path: string; size: number; mimeType: string }>;
+    mergedAt: number;
+    /** 方案 E：注入型扩展标记（脚本已写入 injections，加载入口 HTML 时自动生效） */
+    inject?: boolean;
+    /** 扩展/注入名称（任务标题），仅用于展示 */
+    name?: string;
+  }>;
+  /** 方案 E：注入型扩展脚本（server 模式由 SW 注入；inline/srcDoc 模式由 GamePlay 注入） */
+  injections?: Array<{
+    submissionId: string;
+    name?: string;
+    slot: string;
+    code: string;
+    /** 可选：data.css 内联样式（.css 文件资产走 <link> 注入，不在此列） */
+    styles?: string[];
+    /** 全部资产清单（js/css/图片/音频/字体），供 AllinONE_asset() 引用 */
+    assets?: Array<{ path: string; size: number; mimeType: string }>;
+    /** 资产命名空间（相对游戏文件根）：extensions/{questId}/{submissionId}/ */
+    assetBase?: string;
+    mergedAt: number;
+  }>;
+  /**
+   * 方案 C：首次任务合并前的「原版」快照（merge 时只写一次）。
+   * 用于「恢复原版」：历史 merge 把扩展数据直接 push 进 base（levels/items）后，
+   * 方案 A 的条件注入只止血、不清理已污染字段，需靠快照覆盖回滚。
+   */
+  baseSnapshot?: Record<string, any> & { snapshotAt?: number };
+  /**
+   * 审核状态（独立于发布流程，只能经 /api/v1/games/__review 端点变更）：
+   * pending 待审核 | approved 已通过上架 | rejected 已驳回 | changes_required 需修改 | removed 已下架。
+   * 缺省视为 approved（旧数据向后兼容）。
+   */
+  reviewStatus?: 'pending' | 'approved' | 'rejected' | 'changes_required' | 'removed';
+  /** 完整审核记录（时间、审核管理员、审核结果、原因、备注、checklist），追加不删，便于追溯 */
+  reviewRecords?: import('./gameReviewService').GameReviewRecord[];
+  /** 最近一次提交审核的时间戳 */
+  submittedAt?: number;
+  /** 最近一次审核（通过/驳回/需修改/下架）的时间戳 */
+  reviewedAt?: number;
+  /** 最近一次审核的管理员名称 */
+  reviewedBy?: string;
 }
 
 const CACHE_KEY = 'allinone_published_games';  // localStorage 缓存键名（仅缓存）
@@ -510,6 +693,13 @@ function invalidateGamesCache(): void {
  */
 function saveGamesToCache(games: PublishedGame[]): void {
   _publishedGamesCache = games;
+
+  // dev 模式：仅更新内存缓存，绝不写 localStorage / IndexedDB。
+  // 这是方案 2「dev 不污染」的关键闭环——否则后台刷新拉到后端数据后又写回本地缓存，
+  // 下次手动删除本地缓存后刷新会再次从后端补回，形成「删了又来」的循环。
+  // 同时保证 dev 下浏览器侧不留任何已发布游戏痕迹，刷新即问后端要最新。
+  if (import.meta.env.DEV) return;
+
   const json = JSON.stringify(games);
 
   // ① 优先 localStorage（同步读写，速度最快）
@@ -594,20 +784,20 @@ async function loadGamesFromIDBCache(): Promise<PublishedGame[]> {
  * 这是数据的权威来源
  */
 async function loadGamesFromCloudBase(): Promise<PublishedGame[]> {
-  const { isCloudBaseReady, getCloudBaseApp } = await import('./cloudbase');
-  if (!isCloudBaseReady()) {
-    // 抛错而非返回 [] — 让重试机制感知到"未就绪 ≠ 空集合"
-    throw new Error('[PublishedGame] CloudBase 未就绪，无法加载游戏列表');
+  // ✅ 走 gamesApi 云函数（admin SDK，无浏览器端 auth 限制，跨浏览器可直达）
+  // 列表接口剔除 entryHtmlContent（大 HTML 由详情接口按需返回），避免回包超限。
+  // 不再使用 JS SDK database() 坏通道（auth.call is not a function）。
+  try {
+    const res = await fetch(`${GAMES_API_BASE}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const games: PublishedGame[] = json?.data?.games || json?.data || [];
+    console.log(`[PublishedGame] 后端返回 ${games.length} 条已发布游戏记录`);
+    return games;
+  } catch (e) {
+    // 抛错而非返回 [] — 让重试机制感知到"未就绪/失败 ≠ 空集合"
+    throw new Error(`[PublishedGame] 后端加载游戏列表失败: ${(e as Error).message}`);
   }
-
-  const res = await getCloudBaseApp().database()
-    .collection('published_games')
-    .limit(500)
-    .get();
-
-  console.log(`[PublishedGame] CloudBase 返回 ${res.data.length} 条已发布游戏记录`);
-  // 兼容 CloudBase JSON 序列化丢失 undefined / Date 类型的情况
-  return (res.data as PublishedGame[]) || [];
 }
 
 /**
@@ -615,17 +805,40 @@ async function loadGamesFromCloudBase(): Promise<PublishedGame[]> {
  */
 async function loadGameFromCloudBase(gameId: string): Promise<PublishedGame | null> {
   try {
-    const { isCloudBaseReady, getCloudBaseApp } = await import('./cloudbase');
-    if (!isCloudBaseReady()) return null;
-
-    const res = await getCloudBaseApp().database()
-      .collection('published_games')
-      .where({ id: gameId })
-      .limit(1)
-      .get();
-
-    if (res.data.length > 0) return res.data[0] as PublishedGame;
+    // ✅ 走 gamesApi 云函数详情接口（含 entryHtmlContent，供跨浏览器播放）
+    const res = await fetch(`${GAMES_API_BASE}/${encodeURIComponent(gameId)}`, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (!json?.success || !json?.data) return null;
+    return json.data as PublishedGame;
+  } catch {
     return null;
+  }
+}
+
+/**
+ * 刷新单个游戏的最新详情（跨浏览器权威数据，含 questExtensions），并合并回本地缓存。
+ * 用途：任务合并后前端缓存可能滞后（questExtensions 未同步），GamePlay 加载时调用此函数
+ * 可拿到最新扩展入口，避免「扩展已合并但游戏里看不到」。
+ */
+export async function refreshGameDetail(gameId: string): Promise<PublishedGame | null> {
+  try {
+    const fresh = await loadGameFromCloudBase(gameId);
+    if (!fresh) return null;
+    // 合并回缓存（以最新详情为准，但保留本地尚未落云的 SOP 字段）
+    const games = _publishedGamesCache || loadGamesFromCache();
+    const idx = games.findIndex((g) => g.id === gameId);
+    if (idx >= 0) {
+      games[idx] = {
+        ...fresh,
+        sopDocument: fresh.sopDocument ?? games[idx].sopDocument,
+        itemSop: fresh.itemSop ?? games[idx].itemSop,
+      };
+    } else {
+      games.push(fresh);
+    }
+    saveGamesToCache(games);
+    return games[idx >= 0 ? idx : games.length - 1];
   } catch {
     return null;
   }
@@ -643,27 +856,56 @@ export async function savePublishedGame(
 ): Promise<PublishedGame> {
   const newGame: PublishedGame = {
     ...game,
-    players: game.players ?? 0,
-    status: game.status ?? 'available',
+    players: 0,
+    status: 'available',
     publisherId: game.publisherId || 'admin',
     publisherName: game.publisherName || '平台管理员',
     revenueSharePercent: game.revenueSharePercent ?? 10,
   };
 
-  // ① 写入 CloudBase 数据库（主存储，通过写入队列）
+  // ① 写入数据库（主存储，走 gamesApi 云函数 admin SDK）
   // waitForCloud=true 时阻塞等待落云，用于 SOP 等关键字段，避免后台云刷新覆盖尚未落云的本地写入
+  //
+  // 诊断（dev）：打印本次发布携带的封面/简介，便于确认「上传了封面但刷新后不显示」是
+  // 前端没传值（长度 0）还是后端写入失败（见 upsertGameToBackend 的错误日志）。
+  if (import.meta.env.DEV) {
+    console.log(
+      `[PublishedGame] 发布落库: ${newGame.id}`,
+      '| coverImage长度=', newGame.coverImage ? String(newGame.coverImage).length : 0,
+      '| summary长度=', newGame.summary ? String(newGame.summary).length : 0,
+    );
+  }
+
+  // 元数据瘦身配套（413 防护）：自包含 HTML 超过元数据阈值（60KB）时，
+  // upsertGameToBackend 会剥离 entryHtmlContent（云函数 HTTP 访问服务请求体上限），
+  // 此时必须把托管模式升级为 server——文件已由 saveGameFiles 上传云存储
+  // （cloudFileManifest），GamePlay/审核预览经文件路由（云函数端云存储回退）加载，
+  // 不再依赖随元数据存取的 entryHtmlContent。
+  const htmlLen = typeof (newGame as any).entryHtmlContent === 'string' ? (newGame as any).entryHtmlContent.length : 0;
+  if ((newGame.hostingType || 'inline') === 'inline' && htmlLen > 60_000) {
+    newGame.hostingType = 'server';
+    // cdnUrl 与 GamePlay 的 buildGameFileUrl 同构（GAMES_API_BASE 已含 prod 绝对 URL 感知）
+    newGame.cdnUrl = `${GAMES_API_BASE}/${game.id}/files/${newGame.entryPoint || 'index.html'}`;
+    console.log(
+      `[PublishedGame] 自包含 HTML ${(htmlLen / 1024).toFixed(0)}KB 超过元数据阈值，托管模式升级 inline → server（文件走云存储 manifest）:`,
+      game.id,
+    );
+  }
+
+  const persistTask = upsertGameToBackend(newGame as any).then((ok) => {
+    if (!ok) {
+      console.error(
+        `[PublishedGame] 发布未成功写入后端，刷新后封面/简介会丢失: ${newGame.id}`
+      );
+    } else if (import.meta.env.DEV) {
+      console.log(`[PublishedGame] ✅ 发布已写入后端: ${newGame.id}`);
+    }
+    return ok;
+  });
   if (opts?.waitForCloud) {
-    await writeQueue.enqueueAndWait({
-      collection: 'published_games',
-      operation: 'upsert',
-      data: newGame as any,
-    });
+    await persistTask;
   } else {
-    writeQueue.enqueue({
-      collection: 'published_games',
-      operation: 'upsert',
-      data: newGame as any,
-    });
+    persistTask.catch(() => {});
   }
 
   // ② 更新本地缓存
@@ -682,6 +924,12 @@ export async function savePublishedGame(
   if (newGame.sopDocument) {
     const sopMd = newGame.sopDocument;
 
+    // dev 模式：绝不写云存储（隔离线上），仅走本地后端 API 辅助通道（server.js 内存库）。
+    // 这是方案 2「dev 不污染生产」的兜底——即使 SOP 也只在本地落库，不会误传线上。
+    if (import.meta.env.DEV) {
+      saveSopToBackend(game.id, sopMd).catch(() => {});
+      patchGameOnBackend(game.id, { sopDocument: sopMd, _sopDocumentUpdatedAt: Date.now() }).catch(() => {});
+    } else {
     // 主通道：云存储上传（捕获 cloudFileID → 写 DB manifest + sopDocument）
     saveSopToCloudStorage(game.id, sopMd).then(uploadResult => {
       if (uploadResult.success && uploadResult.cloudFileID) {
@@ -694,23 +942,14 @@ export async function savePublishedGame(
           if (!ok2) console.warn('[PublishedGame] SOP 后端保存也失败，已保留本地缓存兜底');
         }).catch(() => {});
         // 同时尝试单独写 sopDocument 到 DB（兜底）
-        writeQueue.enqueue({
-          collection: 'published_games',
-          operation: 'upsert',
-          where: { id: game.id },
-          data: { id: game.id, sopDocument: sopMd, _sopDocumentUpdatedAt: Date.now() },
-        });
+        patchGameOnBackend(game.id, { sopDocument: sopMd, _sopDocumentUpdatedAt: Date.now() }).catch(() => {});
       }
     }).catch(() => {
       saveSopToBackend(game.id, sopMd).catch(() => {});
       // 兜底：写 sopDocument 到 DB
-      writeQueue.enqueue({
-        collection: 'published_games',
-        operation: 'upsert',
-        where: { id: game.id },
-        data: { id: game.id, sopDocument: sopMd, _sopDocumentUpdatedAt: Date.now() },
-      });
+      patchGameOnBackend(game.id, { sopDocument: sopMd, _sopDocumentUpdatedAt: Date.now() }).catch(() => {});
     });
+    }
   }
 
   // ③ 自动创建/更新游戏开发者账户（fire-and-forget）
@@ -740,6 +979,21 @@ export async function savePublishedGame(
  * 同步返回缓存（立即可用），异步从 CloudBase 刷新缓存
  */
 export function getPublishedGames(): PublishedGame[] {
+  // ===== dev 模式：跳过一切本地缓存，后端（server.js 内存库）为唯一权威源 =====
+  // 目的：彻底避免「删了本地缓存又被后端补回 / 后端拉到后又写回缓存」的污染循环，
+  // 让 dev 下的清数据 = 清本地后端（server.js + .data/memory-db.json）即可，浏览器无需手动清缓存。
+  // 隔离保证：dev 下 GAMES_API_BASE 永远是相对路径（vite 代理 → 本地 server.js），
+  // 绝不会指向线上云函数（绝对 URL 仅在 tcloudbaseapp.com 生产域下生效），因此不会读写线上数据。
+  if (import.meta.env.DEV) {
+    // 内存缓存仅作「已触发刷新后立即可用」的暂存，不来自 localStorage/IndexedDB，
+    // 且 dev 下 saveGamesToCache 已被短路（见下方 saveGamesToCache 改造），不会污染磁盘/IndexedDB。
+    // 首次（内存为空）→ 立即触发一次后台刷新拉取后端最新数据。
+    if (!_publishedGamesCache && _cloudRefreshRetries < MAX_CLOUD_REFRESH_RETRIES) {
+      scheduleCloudRefresh();
+    }
+    return _publishedGamesCache ?? [];
+  }
+
   if (_publishedGamesCache) return _publishedGamesCache;
 
   // 从本地缓存加载
@@ -774,7 +1028,10 @@ export function getPublishedGames(): PublishedGame[] {
  * 指数退避：1s → 2s → 4s，最多 3 次
  */
 function scheduleCloudRefresh(): void {
-  if (!isCloudSyncEnabled()) return; // dev 不写云：禁止后台拉取线上数据覆盖本地视图
+  // dev 不写云：仅当指向线上云函数（绝对 URL）时禁止后台拉取；
+  // 相对路径（vite 代理 → 本地 server.js）允许刷新，保证 questExtensions 等同步。
+  const isRemote = GAMES_API_BASE.startsWith('http');
+  if (isRemote && !isCloudSyncEnabled()) return;
 
   refreshGamesFromCloudBase()
     .then((count) => {
@@ -800,7 +1057,12 @@ function scheduleCloudRefresh(): void {
  * 数据库是权威数据源，本地缓存仅用于加速
  */
 export async function refreshGamesFromCloudBase(): Promise<number> {
-  if (!isCloudSyncEnabled()) return 0; // dev 不写云：不触达云端
+  // 仅当 API 指向线上云函数（绝对 URL）时才受云同步开关门控（dev 不写云）；
+  // dev 下 GAMES_API_BASE 是相对路径（vite 代理 → 本地 server.js），拉取本地后端
+  // 是安全的且是必需的——否则 merge 写入的 questExtensions 永远不同步到前端缓存，
+  // 导致 GamePlay 扩展入口 UI 在 dev 下不显示。
+  const isRemote = GAMES_API_BASE.startsWith('http');
+  if (isRemote && !isCloudSyncEnabled()) return 0;
 
   const cloudGames = await loadGamesFromCloudBase();
 
@@ -870,12 +1132,8 @@ export function getPublishedGame(id: string): PublishedGame | null {
  * 删除发布的游戏
  */
 export async function deletePublishedGame(id: string): Promise<boolean> {
-  // ① 从 CloudBase 数据库删除（主存储）
-  writeQueue.enqueue({
-    collection: 'published_games',
-    operation: 'delete',
-    where: { id: id },
-  });
+  // ① 从数据库删除（主存储，走 gamesApi 云函数）
+  deleteGameOnBackend(id).catch(() => {});
 
   // ② 更新本地缓存
   const games = getPublishedGames();
@@ -904,12 +1162,8 @@ export function incrementGamePlayers(id: string): void {
     game.players += 1;
     // 更新本地缓存
     saveGamesToCache(games);
-    // 同步到 CloudBase（非阻塞）
-    writeQueue.enqueue({
-      collection: 'published_games',
-      operation: 'upsert',
-      data: game as any,
-    });
+    // 同步到后端（非阻塞）
+    upsertGameToBackend(game as any).catch(() => {});
   }
 }
 
@@ -985,8 +1239,8 @@ export async function saveGameFiles(
   }
 
   // ① 上传到 CloudBase 云存储（主存储）
-  // dev 不写云：跳过云端上传与文档写入，仅保留本地缓存（见下方 ②）
-  if (isCloudSyncEnabled()) {
+  // 环境隔离：仅 prod 域名 + 云同步启用才上传线上云存储，避免 dev/联调污染线上
+  if (isProductionTarget()) {
     import('./cloudbaseStorage').then(({ uploadGameFiles }) => {
       // 将文件内容统一转换为正确的格式：
       // - string：直接使用（文本文件）
@@ -1024,12 +1278,10 @@ export async function saveGameFiles(
           console.log(`[PublishedGame] 游戏文件已上传到云存储: ${gameId}, ${result.uploaded} 个文件`);
           // 将 cloudFileID 清单写入 published_games 文档，使跨浏览器可下载
           if (result.fileManifest.length > 0) {
-            writeQueue.enqueue({
-              collection: 'published_games',
-              operation: 'upsert',
-              where: { id: gameId },
-              data: { id: gameId, cloudFileManifest: result.fileManifest, _cloudFilesUpdatedAt: Date.now() },
-            });
+            patchGameOnBackend(gameId, {
+              cloudFileManifest: result.fileManifest,
+              _cloudFilesUpdatedAt: Date.now(),
+            }).catch(() => {});
           }
         } else {
           console.warn(`[PublishedGame] 云存储上传部分失败: ${result.errors.join(', ')}`);
@@ -1043,16 +1295,10 @@ export async function saveGameFiles(
         return name.endsWith('.html') || name.endsWith('.htm');
       });
       if (htmlFile) {
-        writeQueue.enqueue({
-          collection: 'published_games',
-          operation: 'upsert',
-          where: { id: gameId },
-          data: {
-            id: gameId,
-            entryHtmlContent: typeof htmlFile.content === 'string' ? htmlFile.content : String(htmlFile.content),
-            _entryHtmlUpdatedAt: Date.now(),
-          },
-        });
+        patchGameOnBackend(gameId, {
+          entryHtmlContent: typeof htmlFile.content === 'string' ? htmlFile.content : String(htmlFile.content),
+          _entryHtmlUpdatedAt: Date.now(),
+        }).catch(() => {});
       }
     }).catch(() => {});
   }
@@ -1077,6 +1323,28 @@ export async function saveGameFiles(
       `[PublishedGame] 游戏文件已缓存到 IndexedDB: ${gameId}, ${storableFiles.length} 个文件`,
     );
   }
+
+  // ③ 同步写后端 game_files 集合（跨浏览器匿名直读，绕开云存储权限限制）
+  //    文本直接存；二进制以 __BINARY_BASE64__ 前缀的 base64 字符串存，
+  //    云函数端用 Buffer.from(content,'utf8') 还原为原字节。
+  const backendFiles = storableFiles.map((f) => ({ path: f.path, name: f.name, content: f.content }));
+  fetch(`${GAMES_API_BASE}/__files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gameId, files: backendFiles }),
+  })
+    .then(async (r) => {
+      if (r.ok) {
+        console.log(`[PublishedGame] 游戏文件已写入后端 game_files: ${gameId}, ${backendFiles.length} 个文件`);
+      } else {
+        const t = await r.text().catch(() => '');
+        console.warn(`[PublishedGame] 写后端 game_files 失败(${r.status}):`, t);
+      }
+    })
+    .catch((e) => {
+      console.warn(`[PublishedGame] 写后端 game_files 网络失败:`, e instanceof Error ? e.message : String(e));
+    });
+
   return { saved: storableFiles.length, skipped: 0, warnings };
 }
 
@@ -1651,12 +1919,8 @@ export function updateGameSkillConfigs(
   // 更新本地缓存
   saveGamesToCache(games);
 
-  // 同步到 CloudBase（非阻塞）
-  writeQueue.enqueue({
-    collection: 'published_games',
-    operation: 'upsert',
-    data: games[gameIndex] as any,
-  });
+  // 同步到后端（非阻塞）
+  upsertGameToBackend(games[gameIndex] as any).catch(() => {});
 
   return games[gameIndex];
 }

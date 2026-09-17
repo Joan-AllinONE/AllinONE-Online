@@ -10,6 +10,7 @@
  */
 
 let cachedToken: string | null = null;
+let cachedTokenUserId: string | null = null; // 记录 token 对应的 userId，供 getCachedToken 校验
 let tokenExpiry: number = 0;
 const TOKEN_TTL_MS = 50 * 60 * 1000; // 50 分钟
 
@@ -36,6 +37,8 @@ export function getCurrentUserId(): string {
  * 2. 尝试通过 dev-token 端点获取新 token
  * 3. 返回 null 表示无可用 token（调用方应降级处理）
  */
+import { getApiBase } from './apiBase';
+
 export async function getToken(): Promise<string | null> {
   // 检查缓存
   if (cachedToken && Date.now() < tokenExpiry) {
@@ -45,7 +48,7 @@ export async function getToken(): Promise<string | null> {
   // 尝试获取新 token
   try {
     const userId = getCurrentUserId();
-    const resp = await fetch('/api/v1/games/dev-token', {
+    const resp = await fetch(`${getApiBase()}/dev-token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId }),
@@ -55,6 +58,7 @@ export async function getToken(): Promise<string | null> {
       const token = data?.data?.token || null;
       if (token) {
         cachedToken = token;
+        cachedTokenUserId = userId;
         tokenExpiry = Date.now() + TOKEN_TTL_MS;
         return token;
       }
@@ -71,7 +75,7 @@ export async function getToken(): Promise<string | null> {
  * 如果缓存中没有或已过期，返回 null
  */
 export function getCachedToken(): string | null {
-  if (cachedToken && Date.now() < tokenExpiry) {
+  if (cachedToken && Date.now() < tokenExpiry && cachedTokenUserId === getCurrentUserId()) {
     return cachedToken;
   }
   return null;
@@ -82,6 +86,7 @@ export function getCachedToken(): string | null {
  */
 export function clearToken(): void {
   cachedToken = null;
+  cachedTokenUserId = null;
   tokenExpiry = 0;
 }
 

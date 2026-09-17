@@ -42,6 +42,7 @@ export interface AllinONEConfig {
     achievements?: boolean;
     cloudSave?: boolean;
     analytics?: boolean;
+    quest?: boolean;
   };
   /** 兑换道具清单（提供后将自动注入兑换条） */
   redeemItems?: RedeemItemConfig[];
@@ -172,6 +173,9 @@ export class AllinONEGame {
     if (this.config.skills?.analytics) {
       this.analytics = new AnalyticsAPI(this);
     }
+    if (this.config.skills?.quest) {
+      this.quest = new QuestAPI(this);
+    }
 
     // 自动初始化
     if (this.config.autoInit) {
@@ -248,6 +252,11 @@ export class AllinONEGame {
       if (this.analytics) {
         await this.analytics.initialize();
         this.emit('skill:ready', { skill: 'analytics' });
+      }
+
+      if (this.quest) {
+        await this.quest.initialize();
+        this.emit('skill:ready', { skill: 'quest' });
       }
 
       // 初始化协议客户端 (Mode B 自动握手)
@@ -781,4 +790,5 @@ export * from './types';
 export { ProtocolClient } from './protocol/ProtocolClient';
 export type { ProtocolClientConfig } from './protocol/ProtocolClient';
 
+// 默认导出主类（兼容 `import AllinONEGame from '@allinone/standard-sdk'` 的用法）
 export default AllinONEGame;

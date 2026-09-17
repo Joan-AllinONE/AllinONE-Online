@@ -73,13 +73,24 @@ const ItemWorkshop: React.FC = () => {
 
   // 加载游戏列表
   useEffect(() => {
-    try {
-      const publishedGames = getPublishedGames();
-      setGames(publishedGames);
-    } catch (e) {
-      console.warn('加载游戏列表失败:', e);
-    }
-    setLoadingGames(false);
+    const loadGames = () => {
+      try {
+        const publishedGames = getPublishedGames();
+        setGames(publishedGames);
+      } catch (e) {
+        console.warn('加载游戏列表失败:', e);
+      }
+      setLoadingGames(false);
+    };
+    loadGames();
+    // ⚠️ 首次挂载时后端游戏列表可能仍在异步刷新（缓存为空 → 列表空白不自动补），
+    // 必须监听刷新完成事件重读，再加延迟兜底（刷新较慢 / 事件早于挂载）
+    window.addEventListener('games-list-updated', loadGames);
+    const timer = window.setTimeout(loadGames, 1200);
+    return () => {
+      window.removeEventListener('games-list-updated', loadGames);
+      window.clearTimeout(timer);
+    };
   }, []);
 
   // 选择游戏后加载能力声明

@@ -4,6 +4,7 @@
 
 import type { AllinONEGame } from '../index';
 import { getCachedToken } from './tokenManager';
+import { getFeatureApiBase } from '../../../../services/apiBase';
 
 export interface LeaderboardEntry {
   rank: number;
@@ -42,7 +43,7 @@ export class LeaderboardAPI {
    */
   async getLeaderboard(leaderboardId: string = 'global', limit: number = 100): Promise<LeaderboardData | null> {
     try {
-      const response = await fetch(`/api/leaderboard/${leaderboardId}?gameId=${this.getGameId()}&limit=${limit}`);
+      const response = await fetch(`${getFeatureApiBase('leaderboard')}/${leaderboardId}?gameId=${this.getGameId()}&limit=${limit}`);
       const result = await response.json();
 
       if (result.success) {
@@ -65,7 +66,7 @@ export class LeaderboardAPI {
       const token = this.getToken();
       if (!token) return false;
 
-      const response = await fetch(`/api/leaderboard/${leaderboardId}/submit`, {
+      const response = await fetch(`${getFeatureApiBase('leaderboard')}/${leaderboardId}/submit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -100,7 +101,7 @@ export class LeaderboardAPI {
       const token = this.getToken();
       if (!token) return null;
 
-      const response = await fetch(`/api/leaderboard/${leaderboardId}/rank`, {
+      const response = await fetch(`${getFeatureApiBase('leaderboard')}/${leaderboardId}/rank`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -127,7 +128,7 @@ export class LeaderboardAPI {
       const token = this.getToken();
       if (!token) return null;
 
-      const response = await fetch(`/api/leaderboard/${leaderboardId}/friends?gameId=${this.getGameId()}`, {
+      const response = await fetch(`${getFeatureApiBase('leaderboard')}/${leaderboardId}/friends?gameId=${this.getGameId()}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },

@@ -269,14 +269,24 @@ export class ExtensionVoucherService {
     try {
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
     } catch { /* 缓存空间不足 */ }
-    // ✅ CloudBase 双写（通过写入队列，保证零丢失）
-    import('../../services/writeQueue').then(({ writeQueue }) => {
-      writeQueue.enqueue({
-        collection: 'extension_vouchers',
-        operation: 'upsert',
-        data: voucher as any,
-      });
+    // ✅ 后端 upsert（云函数 admin SDK，跨浏览器共享）
+    // ⚠️ dev（import.meta.env.DEV）不写后端：本地 server 无集合同步路由，
+    // 裸调会产生 404 噪音（曾致 extension_vouchers POST 404 刷屏）。与全项目
+    // 「dev 不写云由 isCloudSyncEnabled() 总控」的约定对齐。
+    import('../../services/cloudbase').then(({ isCloudSyncEnabled }) => {
+      if (!isCloudSyncEnabled()) return undefined;
+      return import('../../services/backendSync').then(({ saveToBackend }) =>
+        saveToBackend('extension_vouchers', voucher as any).catch(() => {}),
+      );
     }).catch(() => {});
+  }
+
+  /** 从本地缓存移除凭证（用于兑换失败时清理本轮创建的记录，防垃圾数据） */
+  static remove(voucherId: string): void {
+    const all = this.getAll().filter(v => v.id !== voucherId);
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(all));
+    } catch { /* 缓存空间不足 */ }
   }
 
   static get(voucherId: string): ExtensionVoucher | undefined {
@@ -292,18 +302,19 @@ export class ExtensionVoucherService {
     }
   }
 
-  /** 异步从 CloudBase 刷新缓存（云端数据覆盖本地） */
+  /** 异步从后端刷新缓存（云端数据覆盖本地），走 gamesApi 云函数（admin SDK，无浏览器端 auth 限制） */
   static async refreshFromCloud(): Promise<ExtensionVoucher[]> {
     try {
-      const { isCloudBaseReady, getCloudBaseApp } = await import('../../services/cloudbase');
-      if (!isCloudBaseReady()) return this.getAll();
-      const res = await getCloudBaseApp().database().collection('extension_vouchers').limit(500).get();
-      if (res.data.length === 0) return this.getAll();
+      const { loadFromBackend } = await import('../../services/backendSync');
+      const { isCloudSyncEnabled } = await import('../../services/cloudbase');
+      if (!isCloudSyncEnabled()) return this.getAll();
+      const cloud = await loadFromBackend<ExtensionVoucher>('extension_vouchers');
+      if (cloud.length === 0) return this.getAll();
       const local = this.getAll();
-      // ✅ CloudBase 数据覆盖本地同名 ID
-      const cloudMap = new Map(res.data.map(d => [d.id, d]));
+      // 云端数据覆盖本地同名 ID
+      const cloudMap = new Map(cloud.map(d => [d.id, d]));
       const localOnly = local.filter(v => !cloudMap.has(v.id));
-      const merged = [...res.data as ExtensionVoucher[], ...localOnly];
+      const merged = [...cloud, ...localOnly];
       try {
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(merged));
       } catch { /* 缓存空间不足 */ }

@@ -12,3 +12,4 @@ export { LeaderboardAPI } from './LeaderboardAPI';
 export { AchievementAPI } from './AchievementAPI';
 export { CloudSaveAPI } from './CloudSaveAPI';
 export { AnalyticsAPI } from './AnalyticsAPI';
+export { QuestAPI } from './QuestAPI';

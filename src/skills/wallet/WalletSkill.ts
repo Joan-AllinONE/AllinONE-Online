@@ -17,6 +17,9 @@ import { BaseSkill } from '../BaseSkill';
 import type { SkillContext } from '../types';
 import { getCloudBaseApp, isCloudBaseReady } from '../../services/cloudbase';
 import { writeQueue } from '../../services/writeQueue';
+import { loadFromBackend } from '../../services/backendSync';
+import { getApiBase } from '../../services/apiBase';
+import { getToken } from '../../services/authTokenService';
 
 // ==================== 类型定义 ====================
 
@@ -95,6 +98,41 @@ function writeLocalTransaction(userId: string, tx: WalletTransaction): void {
   } catch { /* localStorage 不可用 */ }
 }
 
+// ==================== 后端只读同步（跨浏览器） ====================
+// users / transactions 为只读同步集合：仅读取走后端云函数，
+// 写入维持现状（writeQueue / CloudBase 直写），避免公开无鉴权写端点被篡改。
+
+async function readBalanceFromBackend(userId: string): Promise<WalletBalance | null> {
+  try {
+    const rows = await loadFromBackend<any>('users');
+    // 兼容历史重复文档（旧版任务奖励发放曾按 _id=userId 误建副本）：取 updatedAt 最新的为准
+    const candidates = rows.filter(r => r && (r._openid === userId || r.id === userId));
+    const doc = candidates
+      .slice()
+      .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0))[0];
+    if (!doc) return null;
+    return {
+      gameCoins: doc.gameCoins || 0,
+      instantVouchers: doc.instantVouchers || 0,
+      algorithmVouchers: doc.algorithmVouchers || 0,
+      lastUpdated: doc.updatedAt || Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function readTransactionsFromBackend(userId: string): Promise<WalletTransaction[]> {
+  try {
+    const rows = await loadFromBackend<any>('transactions');
+    return rows
+      .filter(r => r && r.userId === userId)
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) as WalletTransaction[];
+  } catch {
+    return [];
+  }
+}
+
 // ==================== Skill 实现 ====================
 
 export class WalletSkill extends BaseSkill {
@@ -149,6 +187,19 @@ export class WalletSkill extends BaseSkill {
       },
     });
 
+    this.registerAction('recordTransaction', this.recordTransaction.bind(this), {
+      description: '只记录交易流水，不修改 gameCoins 余额（用于 A币凭证支付等非钱包账本的消费，保证钱包交易记录完整可见）',
+      params: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['income', 'expense'] },
+          amount: { type: 'number' },
+          description: { type: 'string' },
+        },
+        required: ['type', 'amount', 'description'],
+      },
+    });
+
     this.registerAction('getStats', this.getStats.bind(this), {
       description: '获取钱包统计',
       params: { type: 'object', properties: {} },
@@ -170,9 +221,12 @@ export class WalletSkill extends BaseSkill {
       }
       const app = getCloudBaseApp();
       const db = app.database();
-      const res = await db.collection('users').where({ _openid: userId }).limit(1).get();
+      const res = await db.collection('users').where({ _openid: userId }).limit(10).get();
       if (res.data.length > 0) {
-        const doc = res.data[0];
+        // 兼容历史重复文档（旧版任务奖励发放曾按 _id=userId 误建副本）：取 updatedAt 最新的为准
+        const doc = res.data
+          .slice()
+          .sort((a: any, b: any) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0))[0];
         const cloudBalance: WalletBalance = {
           gameCoins: doc.gameCoins || 0,
           instantVouchers: doc.instantVouchers || 0,
@@ -215,8 +269,13 @@ export class WalletSkill extends BaseSkill {
       writeLocalWallet(userId, defaultBalance);
       return defaultBalance;
     } catch {
-      // CloudBase 不可用，从 localStorage 回退读取
-      console.log(`[WalletSkill] CloudBase 不可用，尝试 localStorage 回退 (userId=${userId})`);
+      // CloudBase SDK 不可用 → 先尝试后端只读同步（跨浏览器），再回退 localStorage
+      console.log(`[WalletSkill] CloudBase 不可用，尝试后端只读同步 (userId=${userId})`);
+      const remote = await readBalanceFromBackend(userId);
+      if (remote && (!cachedBalance || remote.lastUpdated >= cachedBalance.lastUpdated)) {
+        writeLocalWallet(userId, remote);
+        return remote;
+      }
       if (cachedBalance) {
         return cachedBalance;
       }
@@ -253,7 +312,9 @@ export class WalletSkill extends BaseSkill {
     const userId = context.userId;
     try {
       if (!isCloudBaseReady()) {
-        // CloudBase 不可用 → 从本地 localStorage 读取
+        // CloudBase SDK 不可用 → 先尝试后端只读同步（跨浏览器），失败再回退本地
+        const remoteTxs = await readTransactionsFromBackend(userId);
+        if (remoteTxs.length > 0) return remoteTxs.slice(0, params.limit || 50);
         const localTxs = readLocalTransactions(userId);
         return localTxs.slice(0, params.limit || 50);
       }
@@ -272,6 +333,44 @@ export class WalletSkill extends BaseSkill {
       // 任何错误 → 回退到本地
       return readLocalTransactions(userId).slice(0, params.limit || 50);
     }
+  }
+
+  /**
+   * 只记录交易流水，不修改 gameCoins 余额。
+   *
+   * 背景：A币凭证支付走 voucherService.transferVoucher（凭证系统自己的账本），
+   * 此前钱包交易记录完全看不到这笔支出。凭证购买道具时由 voucherItemService
+   * 调用本 action，把「净支出/找零」同步写入钱包流水，保证钱包页交易记录完整。
+   */
+  async recordTransaction(
+    params: { type: 'income' | 'expense'; amount: number; description: string },
+    context: SkillContext
+  ): Promise<{ success: boolean }> {
+    const userId = context.userId;
+    if (!userId || !(Number(params.amount) > 0)) {
+      return { success: false };
+    }
+    const cached = readLocalWallet(userId);
+    const balanceAfter: WalletBalance = cached || {
+      gameCoins: 0,
+      instantVouchers: 0,
+      algorithmVouchers: 0,
+      lastUpdated: Date.now(),
+    };
+    const tx: WalletTransaction = {
+      id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      userId,
+      type: params.type,
+      amount: params.amount,
+      description: params.description,
+      balanceAfter,
+      timestamp: Date.now(),
+    };
+    writeLocalTransaction(userId, tx);
+    // 云端落库与其他钱包流水一致（走写入队列；CloudBase 不可用时由队列重试，不影响本地展示）
+    writeQueue.enqueue({ collection: 'transactions', operation: 'upsert', data: { ...tx, createdAt: tx.timestamp } });
+    console.log(`[WalletSkill] recordTransaction(${params.type}, ${params.amount}): ${params.description}`);
+    return { success: true };
   }
 
   async getStats(_params: any, context: SkillContext): Promise<WalletStats> {
@@ -316,15 +415,60 @@ export class WalletSkill extends BaseSkill {
     const delta = type === 'income' ? amount : -amount;
     let balance: WalletBalance = { gameCoins: 0, instantVouchers: 0, algorithmVouchers: 0, lastUpdated: Date.now() };
 
+    // ============ 主路径：后端平台钱包隧道（跨浏览器落库） ============
+    // users 为 READ_ONLY 集合，公开 backendSync 端点会拦截；故走 __wallet/platform/adjust
+    // （云函数 handler 内直写 users + transactions，仅信任 token 解析的 userId）。
+    const txId = `tx_${userId}_${type}_${amount}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const token = await getToken();
+      if (token) {
+        const resp = await fetch(`${getApiBase()}/__wallet/platform/adjust`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ delta, description, txId }),
+        });
+        if (resp.ok) {
+          const json = await resp.json();
+          const b = json?.data?.balance;
+          if (b) {
+            balance = {
+              gameCoins: Number(b.gameCoins) || 0,
+              instantVouchers: Number(b.instantVouchers) || 0,
+              algorithmVouchers: Number(b.algorithmVouchers) || 0,
+              lastUpdated: b.lastUpdated || Date.now(),
+            };
+            writeLocalWallet(userId, balance);
+            writeLocalTransaction(userId, {
+              id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              userId,
+              type,
+              amount,
+              description,
+              balanceAfter: { ...balance },
+              timestamp: Date.now(),
+            });
+            return balance;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[WalletSkill] 后端平台钱包隧道不可用，回退本地:', (e && e.message) || e);
+    }
+
+    // ============ 回退：CloudBase SDK / localStorage ============
+    // CloudBase JS SDK 浏览器端 auth 已损坏（auth.call is not a function），仅作兼容回退。
     try {
       if (!isCloudBaseReady()) {
         throw new Error('CloudBase not ready');
       }
       const app = getCloudBaseApp();
       const db = app.database();
-      const res = await db.collection('users').where({ _openid: userId }).limit(1).get();
+      const res = await db.collection('users').where({ _openid: userId }).limit(10).get();
       if (res.data.length > 0) {
-        const doc = res.data[0];
+        // 兼容历史重复文档：扣款必须落在 updatedAt 最新的那份钱包上
+        const doc = res.data
+          .slice()
+          .sort((a: any, b: any) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0))[0];
         balance = {
           gameCoins: doc.gameCoins || 0,
           instantVouchers: doc.instantVouchers || 0,
@@ -332,26 +476,16 @@ export class WalletSkill extends BaseSkill {
           lastUpdated: doc.updatedAt || Date.now(),
         };
         const newGameCoins = balance.gameCoins + delta;
-        const updateData = {
-          updatedAt: Date.now(),
-          gameCoins: newGameCoins,
-        };
-        // 🔑 方案C：关键余额直接写 CloudBase，失败时降级到 writeQueue 重试
+        const updateData = { updatedAt: Date.now(), gameCoins: newGameCoins };
         try {
           await db.collection('users').doc(doc._id).update(updateData);
         } catch (writeErr) {
           console.warn('[WalletSkill] CloudBase 直接写入失败，降级到 writeQueue:', writeErr);
-          writeQueue.enqueue({
-            collection: 'users',
-            operation: 'update',
-            docId: doc._id,
-            data: updateData,
-          });
+          writeQueue.enqueue({ collection: 'users', operation: 'update', docId: doc._id, data: updateData });
         }
         balance.gameCoins = newGameCoins;
         balance.lastUpdated = Date.now();
       } else {
-        // 用户文档不存在：以默认余额（1000 gameCoins）为基准执行扣款，创建文档
         const defaultCoins = 1000;
         const newGameCoins = defaultCoins + delta;
         const now = Date.now();
@@ -363,24 +497,17 @@ export class WalletSkill extends BaseSkill {
           createdAt: now,
           updatedAt: now,
         };
-        // 🔑 方案C：直接创建用户文档，失败时降级到 writeQueue
         try {
           await db.collection('users').add(newDocData);
         } catch (writeErr) {
           console.warn('[WalletSkill] CloudBase 创建用户文档失败，降级到 writeQueue:', writeErr);
-          writeQueue.enqueue({
-            collection: 'users',
-            operation: 'upsert',
-            where: { _openid: userId },
-            data: newDocData,
-          });
+          writeQueue.enqueue({ collection: 'users', operation: 'upsert', where: { _openid: userId }, data: newDocData });
         }
         balance.gameCoins = newGameCoins;
         balance.lastUpdated = now;
         console.log(`[WalletSkill] 用户 ${userId} 文档不存在，已创建并扣款: ${newGameCoins} gameCoins`);
       }
     } catch {
-      // CloudBase 不可用，从 localStorage 读写
       const localBalance = readLocalWallet(userId) || { gameCoins: 1000, instantVouchers: 0, algorithmVouchers: 0, lastUpdated: Date.now() };
       localBalance.gameCoins += delta;
       localBalance.lastUpdated = Date.now();
@@ -388,8 +515,6 @@ export class WalletSkill extends BaseSkill {
       writeLocalWallet(userId, localBalance);
     }
 
-    // 🔑 关键修复：无论走 CloudBase 还是 localStorage 路径，都同步更新 localStorage 缓存
-    // 这样 getBalance 的 localStorage 回退路径始终能读到最新余额
     try {
       writeLocalWallet(userId, { ...balance });
     } catch { /* localStorage 不可用，忽略 */ }
@@ -403,16 +528,8 @@ export class WalletSkill extends BaseSkill {
       balanceAfter: { ...balance },
       timestamp: Date.now(),
     };
-
-    // 🔑 本地持久化交易记录（保证 CloudBase 不可用时也能读取明细）
     writeLocalTransaction(userId, tx);
-
-    // 通过写入队列入队交易记录（upsert，保证重试 + 零丢失 + 不重复）
-    writeQueue.enqueue({
-      collection: 'transactions',
-      operation: 'upsert',
-      data: { ...tx, createdAt: tx.timestamp },
-    });
+    writeQueue.enqueue({ collection: 'transactions', operation: 'upsert', data: { ...tx, createdAt: tx.timestamp } });
 
     return balance;
   }

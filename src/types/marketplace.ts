@@ -12,6 +12,18 @@ import type { PricingCurrency } from './common';
 /** 市场挂牌状态 */
 export type ListingStatus = 'active' | 'sold' | 'cancelled';
 
+/**
+ * 作品快照（作品类道具如 perler-artwork 的紧凑编码）。
+ * 上架时从凭证 customData.gameEffect.itemData.params 提取，
+ * 让市场卡片在任何浏览器都能重绘作品图（凭证库可能不在本机）。
+ */
+export interface ListingArtwork {
+  w: number;
+  h: number;
+  palette: string[];
+  cells: string;
+}
+
 /** 市场挂牌 */
 export interface MarketListing {
   id: string;                        // listing_xxxx
@@ -23,6 +35,7 @@ export interface MarketListing {
   itemDescription: string;
   itemType: string;                  // consumable | permanent | currency | buff | package
   rarity?: string;                   // legendary | epic | rare | uncommon | common
+  artwork?: ListingArtwork;          // 作品快照（作品类道具有，用于市场卡片渲染图片）
   gameId: string;                    // 来源游戏ID
   gameName?: string;                 // 来源游戏名称
 

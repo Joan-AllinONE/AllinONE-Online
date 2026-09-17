@@ -1,5 +1,5 @@
 import { PlatformParameter } from '@/types/platformManagement';
-import { writeQueue } from '@/services/writeQueue';
+import { saveToBackend, loadFromBackend } from '@/services/backendSync';
 
 /**
  * 平台参数配置服务
@@ -54,23 +54,40 @@ class PlatformConfigService {
   }
 
   private syncFromCloud(): void {
-    import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-      if (!isCloudBaseReady()) return;
-      // 从 saveConfig 写入的同一集合读取
-      getCloudBaseApp().database().collection('platform_treasury').where({ id: 'platform_config' }).limit(1).get().then(res => {
-        if (res.data.length > 0) {
-          const cloudDoc = res.data[0] as any;
-          // saveConfig 存储结构为 { id, config, _createdAt, _updatedAt }
-          const cloudConfig = cloudDoc.config || cloudDoc;
-          delete cloudConfig._id;
-          delete cloudConfig._createdAt;
-          delete cloudConfig._updatedAt;
-          delete cloudConfig.id;
-          localStorage.setItem(this.STORAGE_KEY, JSON.stringify(cloudConfig));
-          console.log('[PlatformConfig] 已从 CloudBase 同步配置');
-        }
-      }).catch(() => {});
+    // ✅ 从独立集合 platform_config 读取（不再与金库流水 platform_treasury 混用）
+    loadFromBackend<any>('platform_config').then(rows => {
+      const cloudDoc = rows.find(r => r && r.id === 'platform_config');
+      if (!cloudDoc) return this.migrateFromLegacyTreasury();
+      // saveConfig 存储结构为 { id, config, _updatedAt }
+      const cloudConfig = cloudDoc.config || cloudDoc;
+      delete cloudConfig._id;
+      delete cloudConfig._createdAt;
+      delete cloudConfig._updatedAt;
+      delete cloudConfig.id;
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(cloudConfig));
+      console.log('[PlatformConfig] 已从后端同步配置');
     }).catch(() => {});
+  }
+
+  /**
+   * 向后兼容：旧版本把配置写进了 platform_treasury 集合。
+   * 一次性迁移到独立集合 platform_config（避免污染资金流水集合）。
+   */
+  private async migrateFromLegacyTreasury(): Promise<void> {
+    try {
+      const rows = await loadFromBackend<any>('platform_treasury');
+      const legacy = rows.find(r => r && r.id === 'platform_config');
+      if (!legacy) return;
+      const cloudConfig = legacy.config || legacy;
+      delete cloudConfig._id;
+      delete cloudConfig._createdAt;
+      delete cloudConfig._updatedAt;
+      delete cloudConfig.id;
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(cloudConfig));
+      // 写入新集合（旧文档保留无妨，金库只读取 localStorage）
+      saveToBackend('platform_config', { id: 'platform_config', config: cloudConfig, _updatedAt: Date.now() }).catch(() => {});
+      console.log('[PlatformConfig] 已从 platform_treasury 迁移配置到 platform_config');
+    } catch { /* ignore */ }
   }
 
   /**
@@ -216,12 +233,8 @@ class PlatformConfigService {
    */
   private saveConfig(config: Record<string, any>): void {
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(config));
-    // CloudBase 双写（通过写入队列，upsert by id='platform_config'）
-    writeQueue.enqueue({
-      collection: 'platform_treasury',
-      operation: 'upsert',
-      data: { id: 'platform_config', config, _updatedAt: Date.now() },
-    });
+    // 后端 upsert（by id='platform_config'，独立集合，跨浏览器共享）
+    saveToBackend('platform_config', { id: 'platform_config', config, _updatedAt: Date.now() }).catch(() => {});
   }
 
   /**

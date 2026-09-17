@@ -4,6 +4,7 @@
 
 import type { AllinONEGame } from '../index';
 import { getCachedToken } from './tokenManager';
+import { getFeatureApiBase } from '../../../../services/apiBase';
 
 export interface SaveData {
   slot: number;
@@ -49,7 +50,7 @@ export class CloudSaveAPI {
         checksum: this.generateChecksum(data),
       };
 
-      const response = await fetch('/api/cloudsave/save', {
+      const response = await fetch(`${getFeatureApiBase('cloudsave')}/save`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -93,7 +94,7 @@ export class CloudSaveAPI {
         return this.loadLocal(slot);
       }
 
-      const response = await fetch(`/api/cloudsave/load?gameId=${this.getGameId()}&slot=${slot}`, {
+      const response = await fetch(`${getFeatureApiBase('cloudsave')}/load?gameId=${this.getGameId()}&slot=${slot}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -140,7 +141,7 @@ export class CloudSaveAPI {
     try {
       const token = this.getToken();
       if (token) {
-        const response = await fetch(`/api/cloudsave/slots?gameId=${this.getGameId()}`, {
+        const response = await fetch(`${getFeatureApiBase('cloudsave')}/slots?gameId=${this.getGameId()}`, {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -180,7 +181,7 @@ export class CloudSaveAPI {
       const token = this.getToken();
       if (!token) return true;
 
-      const response = await fetch('/api/cloudsave/delete', {
+      const response = await fetch(`${getFeatureApiBase('cloudsave')}/delete`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -208,7 +209,7 @@ export class CloudSaveAPI {
       const token = this.getToken();
       if (!token) return;
 
-      const response = await fetch(`/api/cloudsave/sync?gameId=${this.getGameId()}`, {
+      const response = await fetch(`${getFeatureApiBase('cloudsave')}/sync?gameId=${this.getGameId()}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },

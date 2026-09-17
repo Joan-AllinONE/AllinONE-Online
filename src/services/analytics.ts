@@ -12,6 +12,7 @@
  *   - 无后端可达时静默失败，不影响正常游戏体验
  */
 import { getToken } from './authTokenService';
+import { getFeatureApiBase } from './apiBase';
 
 export type AnalyticsEventType =
   | 'register'
@@ -36,7 +37,7 @@ export interface AnalyticsEvent extends AnalyticsEventInput {
   date: string;
 }
 
-const ENDPOINT = '/api/v1/analytics/events';
+const ENDPOINT = `${getFeatureApiBase('analytics')}/events`;
 const QUEUE_KEY = 'allinone_analytics_queue';
 const ANON_KEY = 'allinone_analytics_anon';
 const FLUSH_THRESHOLD = 10;
@@ -159,7 +160,7 @@ export async function fetchAnalytics<T = any>(
   try {
     const token = await getToken();
     if (!token) return null;
-    const res = await fetch(`/api/v1/analytics/${path}`, {
+    const res = await fetch(`${getFeatureApiBase('analytics')}/${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;

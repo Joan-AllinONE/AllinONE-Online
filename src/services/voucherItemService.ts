@@ -99,6 +99,16 @@ export interface RedeemItemVoucherRequest {
   userName: string;
   voucherId: string;
   gameId: string;
+  /**
+   * 跨游戏兑换结果（由 crossGameExchange 计算）
+   * - 未提供：跨游戏场景直接返回 needsConversion = true，由上层引导用户选择兑换方式
+   * - 提供：按 mode 执行语义映射 / 原样搬运
+   */
+  conversion?: {
+    mode: 'SEMANTIC' | 'RAW';
+    targetSchemaName: string;
+    itemData: Record<string, any>;
+  };
 }
 
 // ==================== 存储工具 ====================
@@ -569,6 +579,27 @@ class VoucherItemService {
             `${template.gameName || '游戏'} 开发者`
           );
         }
+
+        // 🆕 同步记录玩家钱包交易流水（2026-09-13 修复「凭证购买道具钱包无交易记录」）：
+        // 凭证支付走 voucherService.transferVoucher（凭证系统账本），此前钱包交易记录
+        // 完全看不到这笔支出。这里把净支出与找零同步写入钱包流水（recordTransaction
+        // 只记流水不改 gameCoins 余额——A币凭证与游戏币是两套账本，余额不混记）。
+        try {
+          await skillGateway.execute('wallet', 'recordTransaction', {
+            type: 'expense',
+            amount: voucherPrice,
+            description: `用A币凭证购买道具: ${template.name}`,
+          }, { userId: request.userId, sessionId: 'web' });
+          if (change > 0) {
+            await skillGateway.execute('wallet', 'recordTransaction', {
+              type: 'income',
+              amount: change,
+              description: `凭证支付找零（购买 ${template.name}）`,
+            }, { userId: request.userId, sessionId: 'web' });
+          }
+        } catch (txErr) {
+          console.warn('[VoucherItem] 记录钱包交易流水失败（不影响购买）:', txErr);
+        }
       } else if (request.paymentMethod === 'wallet') {
         // ===== 钱包支付 =====
         const spendResult = await skillGateway.execute('wallet', 'spend', {
@@ -728,6 +759,12 @@ class VoucherItemService {
     gameInfo?: { itemId?: string; schemaName?: string; itemData?: Record<string, any>; quantity: number; metadata?: Record<string, any> };
     /** Schema 模式下是否已下发到游戏 */
     dispatchedToGame?: boolean;
+    /** 跨游戏道具但未提供兑换方式：上层需引导用户走 crossGameExchange 选择兑换路径 */
+    needsConversion?: boolean;
+    /** needsConversion 时回传源游戏 ID */
+    sourceGameId?: string;
+    /** 标识这是内容凭证（内容工坊），上层应引导走游戏页「内容凭证」菜单 */
+    isContentVoucher?: boolean;
   } {
     // 检查凭证
     const voucher = voucherService.getVoucherById(request.voucherId);
@@ -754,6 +791,35 @@ class VoucherItemService {
     }
 
     const gameEffect = customData.gameEffect;
+
+    // 内容凭证（内容工坊）守卫：走 CONTENT_PACK_APPLY 专用通道（游戏页「内容凭证」菜单），
+    // 不走道具兑换链路——其 schemaName 'content' 未注册，混进来只会报「Schema 未注册」
+    if (
+      gameEffect.schemaName === 'content' ||
+      gameEffect.effectType === 'content' ||
+      (customData as any).contentId ||
+      (gameEffect.itemData as any)?.contentId
+    ) {
+      return {
+        success: false,
+        message: '这是内容凭证（内容包），请在对应游戏页顶部「内容凭证」菜单中使用',
+        isContentVoucher: true,
+      };
+    }
+
+    // ⚠️ 跨游戏守卫（主入口级）：无论 Schema 模式还是传统 itemId 模式，
+    // 别的游戏的道具凭证都不能直接在本游戏核销。
+    // 传统模式此前没有拦截 → 会把 A 游戏的 itemId 直接核销给 B 游戏（无效兑换）。
+    if (customData.gameId !== request.gameId && !request.conversion) {
+      return {
+        success: false,
+        message: `「${voucher.metadata?.name || '未知道具'}」来自游戏 ${customData.gameId}，不能直接在本游戏使用，请选择兑换方式（推荐等值兑换为本游戏道具）。`,
+        needsConversion: true,
+        sourceGameId: customData.gameId,
+      };
+    }
+    // 带 conversion 的语义映射/原样搬运只对 Schema 模式有意义：传统模式忽略 conversion
+    // （crossGameExchange 只会为 Schema 模式凭证生成 B/C 选项，此处仅为纵深防御）。
 
     // === 模式判断：Schema 模式 vs 传统模式 ===
     if (gameEffect.schemaName && gameEffect.itemData) {
@@ -807,6 +873,8 @@ class VoucherItemService {
     message: string;
     gameInfo?: { schemaName?: string; itemData?: Record<string, any>; quantity: number; metadata?: Record<string, any> };
     dispatchedToGame?: boolean;
+    needsConversion?: boolean;
+    sourceGameId?: string;
   } {
     // 基础验证
     const voucher = voucherService.getVoucherById(request.voucherId);
@@ -832,6 +900,15 @@ class VoucherItemService {
       return { success: false, message: '凭证缺少游戏信息' };
     }
 
+    // 🆕 P2a 高价值道具审核流：待审核/被驳回的凭证禁止兑换进游戏
+    const reviewStatus = (customData as any).reviewStatus;
+    if (reviewStatus === 'pending') {
+      return { success: false, message: '高价值道具审核中，审核通过后即可使用' };
+    }
+    if (reviewStatus === 'rejected') {
+      return { success: false, message: '该道具未通过平台审核，无法使用' };
+    }
+
     const gameEffect = customData.gameEffect;
     const { schemaName, itemData } = gameEffect;
 
@@ -842,25 +919,106 @@ class VoucherItemService {
       return { success: false, message: `Schema "${schemaName}" 未注册，请联系游戏开发者` };
     }
 
-    // 生成扩展凭证
-    const extensionVoucher = ExtensionVoucherService.create({
-      schemaName,
-      sourceGameId: customData.gameId,
-      targetGameId: request.gameId,
-      data: itemData,
-      signature: ExtensionVoucherService.sign(itemData),
-      expiresIn: 365 * 24 * 60 * 60 * 1000, // 1年有效
-    });
+    // 🆕 跨游戏兑换：A 游戏提取的凭证 → 经 crossGameExchange 转换后进 B 游戏使用
+    // ⚠️ 旧实现在此处做「猜目标 schema」（取 capabilities[0] + 原样搬运 effect），
+    //    而各游戏的 effect 是私有 EFFECT_HANDLERS key，必然报「未找到效果」。
+    //    现改为：跨游戏必须由 request.conversion 提供已算好的转换方案，
+    //    否则直接把「需要选择兑换方式」回给上层（P0 止血，不再瞎猜）。
+    const isCrossGame = customData.gameId !== request.gameId;
+    let extensionVoucher: ReturnType<typeof ExtensionVoucherService.create>;
+    let adaptNote = '';
+    // 本轮创建的 extension_vouchers（下发失败时清理，防垃圾数据累积）
+    const createdVoucherIds: string[] = [];
+    // 跨游戏转换后的目标 schema（同游戏恒等于原 schema；声明在块外供下发 payload / gameInfo 引用）
+    let adaptedSchemaName = schemaName;
+    // 实际下发到游戏的道具数据（跨游戏时为转换后的数据）
+    let targetItemData: Record<string, any> = itemData;
+
+    if (isCrossGame) {
+      const conversion = request.conversion;
+      if (!conversion) {
+        return {
+          success: false,
+          message: `「${itemData?.name || schemaName}」来自游戏 ${customData.gameId}，不能直接在本游戏使用，请选择兑换方式（推荐等值兑换为本游戏道具）。`,
+          needsConversion: true,
+          sourceGameId: customData.gameId,
+        };
+      }
+
+      // 安全闸门：含自定义代码的道具禁止原样搬运（跨游戏执行必然崩）
+      if (itemData?.effectCode && conversion.mode !== 'SEMANTIC') {
+        return { success: false, message: '该道具含自定义代码，不支持跨游戏直接搬运，请改用等值兑换' };
+      }
+
+      const targetSchema = registry.getSchema(conversion.targetSchemaName);
+      if (!targetSchema) {
+        return { success: false, message: `目标 Schema "${conversion.targetSchemaName}" 未注册，请重新选择兑换方式` };
+      }
+
+      adaptedSchemaName = conversion.targetSchemaName;
+      // ⚠️ adaptedSchemaName 必须写进数据里（adaptForGame 内部会复制源凭证的 schemaName，
+      //    不会自动使用转换结果），并在下发 payload 时覆盖 schemaName 字段
+      targetItemData = {
+        ...(conversion.itemData || {}),
+        name: conversion.itemData?.name || itemData?.name || '跨游戏道具',
+        schemaName: adaptedSchemaName,
+        adaptedFrom: customData.gameId,
+      };
+      adaptNote = `（${conversion.mode === 'SEMANTIC' ? '语义映射' : '原样搬运'}：${schemaName} → ${adaptedSchemaName}）`;
+
+      // ① 源凭证（代表 A 游戏侧的原道具，仅在平台侧留痕，不下发）
+      const sourceVoucher = ExtensionVoucherService.create({
+        schemaName,
+        sourceGameId: customData.gameId,
+        targetGameId: customData.gameId,
+        data: itemData,
+        signature: ExtensionVoucherService.sign(itemData),
+        expiresIn: 365 * 24 * 60 * 60 * 1000,
+      });
+      // ② 跨游戏转换凭证：不修改原凭证，history 记录 adapted 链路
+      const adapted = ExtensionVoucherService.adaptForGame(
+        sourceVoucher.id,
+        request.gameId,
+        targetItemData,
+        ExtensionVoucherService.sign(targetItemData),
+      );
+      if (!adapted) {
+        return { success: false, message: '跨游戏兑换失败，请稍后再试' };
+      }
+      extensionVoucher = adapted;
+      createdVoucherIds.push(sourceVoucher.id, adapted.id);
+    } else {
+      extensionVoucher = ExtensionVoucherService.create({
+        schemaName,
+        sourceGameId: customData.gameId,
+        targetGameId: request.gameId,
+        data: targetItemData,
+        signature: ExtensionVoucherService.sign(targetItemData),
+        expiresIn: 365 * 24 * 60 * 60 * 1000, // 1年有效
+      });
+      createdVoucherIds.push(extensionVoucher.id);
+    }
 
     // 通过协议引擎下发给游戏（sendToGame 是同步方法，直接调用可避免 Promise 包裹）
     const protocolEngine = getDefaultEngine();
     const dispatched = protocolEngine.sendToGame(request.gameId, {
       type: 'EXTENSION_VOUCHER',
-      voucher: ExtensionVoucherService.toPayload(extensionVoucher),
+      voucher: {
+        ...ExtensionVoucherService.toPayload(extensionVoucher),
+        // 跨游戏适配：payload.schemaName 覆盖为映射后的目标 schema
+        ...(isCrossGame ? { schemaName: adaptedSchemaName } : {}),
+        data: {
+          ...extensionVoucher.data,
+          ...(isCrossGame ? { adapted: true, sourceGameId: customData.gameId } : {}),
+        },
+      },
       timestamp: Date.now(),
     });
 
     if (!dispatched) {
+      // 下发失败（典型场景：商店页无游戏 iframe/通道）→ 清理本轮创建的
+      // extension_vouchers，凭证保持 ACTIVE，用户可从游戏页自动下发重新兑换
+      createdVoucherIds.forEach(id => ExtensionVoucherService.remove(id));
       return { success: false, message: '游戏通道不可用，请确认游戏正在运行' };
     }
 
@@ -869,7 +1027,9 @@ class VoucherItemService {
       request.voucherId,
       request.userId,
       request.userName,
-      `Schema兑换: ${schemaName} → ${customData.gameId}`
+      isCrossGame
+        ? `跨游戏适配兑换: ${customData.gameId} → ${request.gameId} (${adaptNote || '通用适配'})`
+        : `Schema兑换: ${schemaName} → ${customData.gameId}`
     );
 
     // 更新购买记录
@@ -882,20 +1042,318 @@ class VoucherItemService {
     }
 
     const gameInfo = {
-      schemaName,
-      itemData,
+      schemaName: isCrossGame ? adaptedSchemaName : schemaName,
+      itemData: targetItemData,
       quantity: gameEffect.quantity,
       metadata: gameEffect.metadata,
     };
 
-    console.log(`[VoucherItem] ✅ Schema 兑换成功: ${schemaName} → ${request.gameId}, 道具: ${itemData?.name || '未知'}`);
+    console.log(`[VoucherItem] ✅ ${isCrossGame ? '跨游戏兑换' : 'Schema 兑换'}成功: ${schemaName} → ${request.gameId}, 道具: ${targetItemData?.name || '未知'}${adaptNote}`);
 
     return {
       success: true,
-      message: `道具「${itemData?.name || schemaName}」已发送到游戏，即刻生效！`,
+      message: isCrossGame
+        ? `跨游戏道具「${itemData?.name || schemaName}」已转换到本游戏并发送，即刻生效！${adaptNote}`
+        : `道具「${itemData?.name || schemaName}」已发送到游戏，即刻生效！`,
       gameInfo,
       dispatchedToGame: true,
     };
+  }
+
+  // ============ 内容工坊：内容凭证（按次使用、可交易） ============
+
+  /**
+   * 铸造内容凭证（内容工坊专用分支）
+   * 与 mintItemVouchers 同构：凭证走现有凭证系统（可交易/转赠），
+   * customData.contentPack 记录内容包 manifest（轻量，不含大资产本体）。
+   * @param params.contentId 后端 mint 返回的内容资产 ID
+   * @param params.manifest  内容包 manifest（assets 为 path/size/mimeType 清单）
+   * @param params.assetBase 相对游戏文件根的内容资产命名空间（content/{contentId}/）
+   */
+  mintContentVouchers(params: {
+    gameId: string;
+    gameName?: string;
+    contentId: string;
+    manifest: any;
+    assetBase: string;
+    name: string;
+    description?: string;
+    type: string;
+    slot: string;
+    price: number;
+    count: number;
+    recipientId?: string;
+    recipientName?: string;
+    authorId?: string;
+    authorName?: string;
+    /** 是否同步上架到该游戏商店「道具凭证」tab（创建/复用内容模板，凭证进平台池库存） */
+    listOnStore?: boolean;
+  }): { success: boolean; vouchers: Voucher[]; message: string } {
+    const toPool = !!params.listOnStore;
+    // 上架模式：凭证进平台池作商店库存；否则发给 recipient（创作者自持，保持原行为）
+    const recipientId = toPool ? PLATFORM_POOL_ID : (params.recipientId || PLATFORM_POOL_ID);
+    const recipientName = toPool ? PLATFORM_POOL_NAME : (params.recipientName || PLATFORM_POOL_NAME);
+    const price = Number(params.price) || 0;
+
+    // 上架商店：创建/复用「内容模板」（ItemVoucherTemplate），凭证带 itemTemplateId 供 purchaseItemVoucher 匹配库存
+    let storeTemplate: ItemVoucherTemplate | undefined;
+    if (toPool) {
+      const templates = loadTemplates();
+      storeTemplate = templates.find(t =>
+        t.gameId === params.gameId && t.isActive && t.attributes?.contentId === params.contentId
+      );
+      if (!storeTemplate) {
+        storeTemplate = this.createItemTemplate({
+          gameId: params.gameId,
+          gameName: params.gameName,
+          name: params.name,
+          description: params.description || '内容凭证（按次使用，1 张 = 1 次游戏会话）',
+          itemType: 'content',
+          supplyPolicy: ItemSupplyPolicy.OPEN,
+          pricing: { price, currency: 'ACOIN', acceptVoucher: true, voucherPrice: price },
+          gameEffect: {
+            schemaName: 'content',
+            quantity: 1,
+            effectType: 'content',
+            itemData: {
+              contentId: params.contentId,
+              contentType: params.type,
+              contentSlot: params.slot,
+              assetBase: params.assetBase,
+            },
+          },
+          attributes: {
+            contentId: params.contentId,
+            contentType: params.type,
+            contentSlot: params.slot,
+            assetBase: params.assetBase,
+            // 持久化内容包清单，供管理页「道具凭证」tab 持续铸造时复用
+            manifest: params.manifest,
+            contentAuthorId: params.authorId,
+            contentAuthorName: params.authorName,
+          },
+          consumable: true,
+          stackable: false,
+          source: 'player_ugc',
+          createdBy: params.authorName || '内容工坊',
+          isActive: true,
+        });
+      } else if (!storeTemplate.attributes?.manifest) {
+        // 兼容旧模板：补齐 manifest/assetBase，供「道具凭证」tab 持续铸造复用
+        this.updateItemTemplate(storeTemplate.id, {
+          attributes: {
+            ...storeTemplate.attributes,
+            assetBase: params.assetBase,
+            manifest: params.manifest,
+          },
+        });
+      }
+    }
+
+    const metadata: VoucherMetadata = {
+      sourceType: VoucherSourceType.ITEM,
+      name: params.name,
+      description: params.description || '内容凭证（按次使用）',
+      category: 'content',
+      tags: ['content_voucher', params.gameId, params.type],
+      issuer: params.gameId,
+      customData: {
+        gameId: params.gameId,
+        contentType: params.type,
+        contentSlot: params.slot,
+        contentId: params.contentId,
+        contentPack: params.manifest,
+        assetBase: params.assetBase,
+        consumable: true,          // 1 张 = 1 次使用
+        authorId: params.authorId,
+        authorName: params.authorName,
+        ...(storeTemplate ? { itemTemplateId: storeTemplate.id } : {}),
+      },
+    };
+
+    const vouchers: Voucher[] = [];
+    for (let i = 0; i < params.count; i++) {
+      try {
+        const voucher = voucherService.createVoucher(
+          {
+            denomination: price,
+            recipientId,
+            recipientName,
+            metadata,
+            note: `铸造内容凭证: ${params.name}`,
+          },
+          'SYSTEM',
+          '内容工坊'
+        );
+        (voucher as any).sourceType = VoucherSourceType.ITEM;
+        vouchers.push(voucher);
+      } catch (error) {
+        console.error(`[VoucherItem] 铸造第 ${i + 1} 张内容凭证失败:`, error);
+      }
+    }
+    // 上架模式：铸造数量计入模板 mintedCount（与道具工坊一致）
+    if (storeTemplate && vouchers.length > 0) {
+      this.updateItemTemplate(storeTemplate.id, {
+        mintedCount: (storeTemplate.mintedCount || 0) + vouchers.length,
+      });
+    }
+
+    // 上架模式：额外赠送创作者 1 张自用（保持「铸造完即可在游戏里使用」的体验）
+    let selfVoucher: Voucher | undefined;
+    if (toPool && params.recipientId && vouchers.length > 0) {
+      try {
+        selfVoucher = voucherService.createVoucher(
+          {
+            denomination: price,
+            recipientId: params.recipientId,
+            recipientName: params.recipientName || PLATFORM_POOL_NAME,
+            metadata: {
+              ...metadata,
+              name: `${params.name}（自用）`,
+              customData: { ...metadata.customData, itemTemplateId: undefined },
+            },
+            note: `铸造内容凭证自用: ${params.name}`,
+          },
+          'SYSTEM',
+          '内容工坊'
+        );
+        (selfVoucher as any).sourceType = VoucherSourceType.ITEM;
+      } catch (error) {
+        console.error('[VoucherItem] 赠送创作者自用内容凭证失败:', error);
+      }
+    }
+
+    console.log(`[VoucherItem] 内容凭证铸造完成: ${params.name} x ${vouchers.length} 张 (contentId=${params.contentId}${toPool ? ', 已上架商店' : ''})`);
+    return {
+      success: vouchers.length > 0,
+      vouchers,
+      message: toPool
+        ? `已铸造 ${vouchers.length} 张内容凭证并上架到商店「道具凭证」tab（单价 ${price} A币）${selfVoucher ? '，同时赠送您 1 张自用' : ''}`
+        : `成功铸造 ${vouchers.length} 张内容凭证`,
+    };
+  }
+
+  /**
+   * 从内容模板持续铸造内容凭证（A币凭证系统「道具凭证」tab 使用，与 mintItemVouchers 对齐）
+   * 基于模板铸造，凭证进平台池作商店库存，可反复铸造持续运营。
+   * manifest 优先读模板 attributes.manifest（内容工坊上架时写入），
+   * 兼容旧模板：从平台池已铸造凭证复制 contentPack。
+   */
+  mintContentVouchersFromTemplate(templateId: string, count: number): { success: boolean; vouchers: Voucher[]; message: string } {
+    const template = this.getItemTemplate(templateId);
+    if (!template) return { success: false, vouchers: [], message: '内容模板不存在' };
+    if (template.gameEffect?.schemaName !== 'content') {
+      return { success: false, vouchers: [], message: '该模板不是内容凭证模板' };
+    }
+    const contentId = template.attributes?.contentId;
+    if (!contentId) return { success: false, vouchers: [], message: '模板缺少内容资产 ID（contentId）' };
+
+    // manifest：优先模板内嵌，否则从平台池已铸造凭证复制（兼容旧模板）
+    let manifest = template.attributes?.manifest;
+    if (!manifest) {
+      const poolVouchers = voucherService.getUserVouchers(PLATFORM_POOL_ID);
+      const sample = poolVouchers.find(v =>
+        v.status === VoucherStatus.ACTIVE &&
+        v.metadata?.customData?.itemTemplateId === templateId &&
+        v.metadata?.customData?.contentPack
+      );
+      manifest = sample?.metadata?.customData?.contentPack;
+    }
+    if (!manifest) {
+      return { success: false, vouchers: [], message: '缺少内容包清单（manifest），请先在内容工坊铸造并上架后再持续铸造' };
+    }
+
+    return this.mintContentVouchers({
+      gameId: template.gameId,
+      gameName: template.gameName,
+      contentId,
+      manifest,
+      assetBase: template.attributes?.assetBase || template.gameEffect?.itemData?.assetBase || `content/${contentId}/`,
+      name: template.name.replace(/（自用）$/, ''),
+      description: template.description,
+      type: template.attributes?.contentType || template.gameEffect?.itemData?.contentType || 'custom',
+      slot: template.attributes?.contentSlot || template.gameEffect?.itemData?.contentSlot || 'inject',
+      price: template.pricing.price,
+      count: Math.max(1, Math.floor(count) || 1),
+      authorId: template.attributes?.contentAuthorId,
+      authorName: template.attributes?.contentAuthorName,
+      listOnStore: true,
+    });
+  }
+
+  /**
+   * 使用内容凭证（按次消费，会话级）
+   * 兑换 → 凭证 REDEEMED（消耗）→ 返回内容包信息，由 GamePlay 通过
+   * postMessage CONTENT_PACK_APPLY 交给游戏内 AllinONE_ContentLoader 按次应用。
+   */
+  redeemContentVoucher(request: RedeemItemVoucherRequest): {
+    success: boolean;
+    message: string;
+    content?: {
+      contentId: string;
+      gameId: string;
+      type: string;
+      slot: string;
+      name: string;
+      description?: string;
+      manifest: any;
+      assetBase: string;
+    };
+  } {
+    const voucher = voucherService.getVoucherById(request.voucherId);
+    if (!voucher) return { success: false, message: '凭证不存在' };
+    if (voucher.currentHolderId !== request.userId) return { success: false, message: '您不是该凭证的持有者' };
+    if (voucher.status !== VoucherStatus.ACTIVE) return { success: false, message: '凭证不可用' };
+
+    const sourceType = (voucher as any).sourceType;
+    if (sourceType !== VoucherSourceType.ITEM) return { success: false, message: '该凭证不是道具/内容凭证' };
+
+    const customData = voucher.metadata?.customData;
+    if (!customData?.contentPack || !customData?.contentId) {
+      return { success: false, message: '该凭证不是内容凭证' };
+    }
+
+    // 标记凭证已使用（消耗 1 张）
+    voucherService.redeemVoucher(
+      request.voucherId,
+      request.userId,
+      request.userName,
+      `使用内容凭证: ${voucher.metadata?.name || '未知'} → ${request.gameId}`
+    );
+
+    // 更新购买记录
+    const purchases = loadPurchases();
+    const purchaseIndex = purchases.findIndex(p => p.voucherId === request.voucherId);
+    if (purchaseIndex >= 0) {
+      purchases[purchaseIndex].status = 'redeemed';
+      purchases[purchaseIndex].redeemedAt = Date.now();
+      savePurchases(purchases);
+    }
+
+    const content = {
+      contentId: customData.contentId,
+      gameId: request.gameId,
+      type: customData.contentType || 'custom',
+      slot: customData.contentSlot || 'inject',
+      name: voucher.metadata?.name || '内容',
+      description: voucher.metadata?.description,
+      manifest: customData.contentPack,
+      assetBase: customData.assetBase || `content/${customData.contentId}/`,
+    };
+
+    console.log(`[VoucherItem] ✅ 内容凭证使用成功: ${content.name} (${content.contentId}) → ${request.gameId}`);
+    return { success: true, message: `内容「${content.name}」已激活，本次游戏会话生效！`, content };
+  }
+
+  /** 获取用户持有的内容凭证（未使用） */
+  getUserContentVouchers(userId: string, gameId?: string): Voucher[] {
+    return voucherService.getUserVouchers(userId).filter(v => {
+      if (v.status !== VoucherStatus.ACTIVE) return false;
+      if ((v as any).sourceType !== VoucherSourceType.ITEM) return false;
+      if (v.metadata?.category !== 'content') return false;
+      if (gameId && v.metadata?.customData?.gameId !== gameId) return false;
+      return true;
+    });
   }
 
   // ============ 查询方法 ============
@@ -1147,11 +1605,16 @@ class VoucherItemService {
 
       } else if (proposal.proposalType === GameProposalType.MINT_ITEM && proposal.payload.mintData) {
         const mintData = proposal.payload.mintData;
-        const mintResult = this.mintItemVouchers({
-          gameId: proposal.gameId,
-          templateId: mintData.templateId,
-          count: mintData.count,
-        });
+        const tmpl = this.getItemTemplate(mintData.templateId);
+        // 内容凭证模板（内容工坊 UGC）与道具凭证一致纳入社区投票治理，执行时走内容铸造分支
+        const isContent = tmpl?.gameEffect?.schemaName === 'content';
+        const mintResult = isContent
+          ? this.mintContentVouchersFromTemplate(mintData.templateId, mintData.count)
+          : this.mintItemVouchers({
+              gameId: proposal.gameId,
+              templateId: mintData.templateId,
+              count: mintData.count,
+            });
 
         gameProposalService.executeProposal(proposalId);
 

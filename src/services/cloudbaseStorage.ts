@@ -89,7 +89,7 @@ export async function uploadGameFiles(
       // 验证上传结果
       if (result?.fileID) {
         console.log(`[CloudStorage] 上传成功: ${cloudPath} → fileID=${result.fileID}`);
-        fileManifest.push({ fileName, cloudFileID: result.fileID });
+        fileManifest.push({ fileName, cloudFileID: result.fileID, cloudPath });
       } else {
         console.warn(`[CloudStorage] 上传返回异常: ${JSON.stringify(result)}`);
       }

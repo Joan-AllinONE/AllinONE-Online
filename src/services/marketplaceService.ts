@@ -23,10 +23,11 @@ import type {
   PurchaseResult,
   ListItemResult,
   ListingStatus,
+  ListingArtwork,
 } from '@/types/marketplace';
 import { MARKET_COMMISSION_RATE } from '@/types/marketplace';
 import { platformTreasuryService } from '@/services/platformTreasuryService';
-import { writeQueue } from './writeQueue';
+import { saveBatchToBackend, loadFromBackend } from './backendSync';
 import { track } from './analytics';
 
 // ==================== 存储键 ====================
@@ -49,19 +50,17 @@ function loadListings(): MarketListing[] {
   }
 }
 
-/** 从 CloudBase 拉取权威数据并覆盖本地缓存（云端为准） */
+/** 从后端拉取权威数据并覆盖本地缓存（云端为准，分页全量不截断） */
 async function syncListingsFromCloud(): Promise<void> {
   try {
-    const { waitForCloudBase } = await import('./cloudbase');
-    const app = await waitForCloudBase();
-    const res = await app.database().collection('market_listings').limit(500).get();
-    if (res.data.length === 0) return;
+    const cloud = await loadFromBackend<MarketListing>('market_listings');
+    if (cloud.length === 0) return;
     const freshRaw = localStorage.getItem(LISTINGS_KEY);
     const fresh: MarketListing[] = freshRaw ? JSON.parse(freshRaw) : [];
-    // ✅ CloudBase 数据覆盖本地同名 ID（云端为准）
-    const cloudMap = new Map(res.data.map(d => [d.id, d]));
+    // ✅ 云端数据覆盖本地同名 ID（云端为准）
+    const cloudMap = new Map(cloud.map(d => [d.id, d]));
     const localOnly = fresh.filter(l => !cloudMap.has(l.id));
-    const merged = [...res.data as MarketListing[], ...localOnly];
+    const merged = [...cloud, ...localOnly];
     localStorage.setItem(LISTINGS_KEY, JSON.stringify(merged));
   } catch {
     // CloudBase 不可用 — 允许下次重试
@@ -87,13 +86,7 @@ function syncListingsToCloud(listings: MarketListing[]): void {
     (l.soldAt && l.soldAt > now - 7 * DAY) ||
     (l.cancelledAt && l.cancelledAt > now - DAY)
   );
-  for (const listing of toSync) {
-    writeQueue.enqueue({
-      collection: 'market_listings',
-      operation: 'upsert',
-      data: listing as any,
-    });
-  }
+  saveBatchToBackend('market_listings', toSync as any[]).catch(() => {});
 }
 
 function generateId(): string {
@@ -155,6 +148,21 @@ class MarketplaceService {
     const customData = meta.customData || {};
 
     // 5. 创建挂牌
+    // 作品类凭证（如 perler-artwork）：快照作品数据，市场卡片跨浏览器可渲染
+    let artwork: ListingArtwork | undefined;
+    try {
+      const p = (customData.gameEffect?.itemData?.params || {}) as Record<string, any>;
+      const w = parseInt(p.w, 10);
+      const h = parseInt(p.h, 10);
+      if (
+        w > 0 && w <= 59 && h > 0 && h <= 59 &&
+        Array.isArray(p.palette) && p.palette.length > 0 &&
+        typeof p.cells === 'string' && p.cells.length === w * h
+      ) {
+        artwork = { w, h, palette: p.palette, cells: p.cells };
+      }
+    } catch { /* 非作品类凭证，忽略 */ }
+
     const listing: MarketListing = {
       id: generateId(),
       voucherId,
@@ -163,6 +171,7 @@ class MarketplaceService {
       itemDescription: meta.description || '',
       itemType: customData.itemType || 'consumable',
       rarity: customData.rarity || 'common',
+      artwork,
       gameId: (meta.gameId || meta.gameSource || 'unknown') as string,
       gameName: meta.gameName || '',
       price,
@@ -516,6 +525,15 @@ class MarketplaceService {
     // 必须是道具凭证
     if (voucher.sourceType !== VoucherSourceType.ITEM) {
       return { ok: false, reason: '非道具凭证，不能上架' };
+    }
+
+    // 🆕 P2a 高价值道具审核流：待审核/被驳回的凭证禁止上架
+    const reviewStatus = (voucher.metadata?.customData as any)?.reviewStatus;
+    if (reviewStatus === 'pending') {
+      return { ok: false, reason: '高价值道具审核中，暂不能上架，请等待平台审核' };
+    }
+    if (reviewStatus === 'rejected') {
+      return { ok: false, reason: '该道具未通过平台审核，不能上架' };
     }
 
     // 必须是持有者

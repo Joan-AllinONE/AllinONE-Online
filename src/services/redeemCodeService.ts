@@ -21,6 +21,7 @@ import {
   RedeemCodePurchase,
 } from '@/types/redeemCode';
 import { getToken } from './authTokenService';
+import { saveBatchToBackend, loadFromBackend } from './backendSync';
 
 // ==================== 工具函数 ====================
 
@@ -66,51 +67,43 @@ const STORAGE_KEYS = {
   PURCHASES: 'allinone_redeem_purchases',
 };
 
-// ==================== CloudBase 同步工具（writeQueue 优先） ====================
+// ==================== 后端同步工具（gamesApi 云函数） ====================
 
-import { writeQueue } from './writeQueue';
+import { saveBatchToBackend, loadFromBackend, deleteFromBackend, type SyncCollection } from './backendSync';
 
-/** 通过 writeQueue 将数据同步到 CloudBase（保证零丢失 + 重试） */
+/** 批量 upsert 到后端集合（云函数 admin SDK，跨浏览器共享） */
 function syncToCloudBase(collection: string, items: any[]): void {
-  for (const item of items) {
-    writeQueue.enqueue({
-      collection,
-      operation: 'upsert',
-      data: item,
-    });
-  }
+  saveBatchToBackend(collection as SyncCollection, items).catch(() => {});
 }
 
 let _cloudSyncInitiated = false;
 
 /**
- * 从 CloudBase 加载增量数据到本地缓存（首次调用时异步执行一次）
- * CloudBase 数据覆盖本地缓存（权威数据源）
+ * 从后端加载数据到本地缓存（首次调用时异步执行一次）
+ * 云端数据覆盖本地缓存（权威数据源），分页全量不截断
  */
 function initCloudSyncIfNeeded(): void {
   if (_cloudSyncInitiated) return;
   _cloudSyncInitiated = true;
-  import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-    if (!isCloudBaseReady()) return;
-    const db = getCloudBaseApp().database();
-    const collections = [
+  {
+    const collections: { key: string; name: SyncCollection }[] = [
       { key: STORAGE_KEYS.HOSTED_ITEMS, name: 'redeem_hosted_items' },
       { key: STORAGE_KEYS.REDEEM_CODES, name: 'redeem_codes' },
       { key: STORAGE_KEYS.PURCHASES, name: 'redeem_purchases' },
     ];
     for (const col of collections) {
-      db.collection(col.name).limit(500).get().then(res => {
-        if (res.data.length === 0) return;
+      loadFromBackend<any>(col.name).then(cloud => {
+        if (cloud.length === 0) return;
         const localRaw = localStorage.getItem(col.key);
         const local: any[] = localRaw ? JSON.parse(localRaw) : [];
-        // ✅ CloudBase 数据覆盖本地同名 ID（云端为准）
-        const cloudMap = new Map(res.data.map((d: any) => [d.id, d]));
+        // ✅ 云端数据覆盖本地同名 ID（云端为准）
+        const cloudMap = new Map(cloud.map((d: any) => [d.id, d]));
         const localOnly = local.filter((x: any) => !cloudMap.has(x.id));
-        const merged = [...res.data, ...localOnly];
+        const merged = [...cloud, ...localOnly];
         localStorage.setItem(col.key, JSON.stringify(merged));
       }).catch(() => {});
     }
-  }).catch(() => {});
+  }
 }
 
 // ==================== 兑换码服务类 ====================
@@ -218,13 +211,9 @@ class RedeemCodeService {
     const filtered = items.filter(i => i.id !== itemId);
     localStorage.setItem(STORAGE_KEYS.HOSTED_ITEMS, JSON.stringify(filtered));
     
-    // ✅ 同步删除 CloudBase 中的数据（防止下次云端同步拉回已删除的数据）
+    // ✅ 同步删除云端数据（防止下次云端同步拉回已删除的数据）
     if (itemToDelete) {
-      writeQueue.enqueue({
-        collection: 'redeem_hosted_items',
-        operation: 'delete',
-        where: { id: itemId },
-      });
+      deleteFromBackend('redeem_hosted_items', itemId).catch(() => {});
     }
     
     // 同时删除关联的兑换码
@@ -234,11 +223,7 @@ class RedeemCodeService {
     localStorage.setItem(STORAGE_KEYS.REDEEM_CODES, JSON.stringify(filteredCodes));
     // ✅ 同步删除关联兑换码
     for (const code of relatedCodes) {
-      writeQueue.enqueue({
-        collection: 'redeem_codes',
-        operation: 'delete',
-        where: { id: code.id },
-      });
+      deleteFromBackend('redeem_codes', code.id).catch(() => {});
     }
     
     return true;
@@ -724,25 +709,12 @@ class RedeemCodeService {
         updatedAt: i.updatedAt,
       }));
 
-      // 获取 JWT token 用于认证（通过集中式 token 服务）
-      let token: string | null = null;
-      try {
-        token = await getToken();
-      } catch { /* 获取 token 失败，继续无认证请求 */ }
+      // ✅ 走 gamesApi 云函数 /api/v1/games/<collection> 隧道（admin SDK，无浏览器端 auth 限制）
+      // redeem_codes / redeem_hosted_items 已在云函数白名单中
+      await saveBatchToBackend('redeem_codes', codeRecords as any[]);
+      await saveBatchToBackend('redeem_hosted_items', itemRecords as any[]);
 
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const response = await fetch(`${this.getApiBaseUrl()}/api/redeem/sync`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ codes: codeRecords, items: itemRecords }),
-      });
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const result = await response.json();
-
-      console.log('[RedeemService] 同步到后端:', result.data);
+      console.log('[RedeemService] 同步到后端成功');
       return { success: true, message: '同步成功' };
     } catch (error) {
       console.warn('[RedeemService] 后端同步失败（离线模式）:', error);
@@ -752,28 +724,17 @@ class RedeemCodeService {
 
   /**
    * 通过后端 API 验证兑换码（游戏方 SDK 使用）
+   * ✅ 改为从后端 redeem_codes 集合拉取权威数据后在本地校验（云函数白名单已含 redeem_codes）
    */
   async verifyCodeViaApi(params: { code: string; gameId: string; apiKey?: string }): Promise<VerifyCodeResponse> {
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (params.apiKey) {
-        headers['Authorization'] = `Bearer ${params.apiKey}`;
+      const cloudCodes = await loadFromBackend<any>('redeem_codes');
+      const match = cloudCodes.find(c => c.code?.toUpperCase() === params.code.toUpperCase() && c.gameId === params.gameId);
+      if (!match) {
+        return { valid: false, message: '兑换码不存在' };
       }
-
-      const response = await fetch(`${this.getApiBaseUrl()}/api/redeem/verify`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ code: params.code, gameId: params.gameId }),
-      });
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const result = await response.json();
-
-      if (!result.success) {
-        return { valid: false, message: result.error || 'API 调用失败' };
-      }
-
-      return result.data as VerifyCodeResponse;
+      // 复用本地校验逻辑
+      return this.verifyCode({ code: match.code, gameId: params.gameId, userId: 'api-call' });
     } catch (error) {
       console.warn('[RedeemService] API 验证失败，回退到本地:', error);
       return this.verifyCode({ code: params.code, gameId: params.gameId, userId: 'api-call' });
@@ -782,39 +743,17 @@ class RedeemCodeService {
 
   /**
    * 通过后端 API 核销兑换码（游戏方 SDK 使用）
+   * ✅ 改为从后端 redeem_codes 集合拉取权威数据后本地核销（云函数白名单已含 redeem_codes）
    */
   async useCodeViaApi(params: { code: string; gameId: string; userId: string; apiKey?: string }): Promise<UseCodeResponse> {
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (params.apiKey) {
-        headers['Authorization'] = `Bearer ${params.apiKey}`;
+      const cloudCodes = await loadFromBackend<any>('redeem_codes');
+      const match = cloudCodes.find(c => c.code?.toUpperCase() === params.code.toUpperCase() && c.gameId === params.gameId);
+      if (!match) {
+        return { success: false, code: params.code, usedAt: new Date().toISOString(), message: '兑换码不存在' };
       }
-
-      const response = await fetch(`${this.getApiBaseUrl()}/api/redeem/use`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ code: params.code, gameId: params.gameId, userId: params.userId }),
-      });
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const result = await response.json();
-
-      if (!result.success) {
-        return { success: false, code: params.code, usedAt: new Date().toISOString(), message: result.error || 'API 调用失败' };
-      }
-
-      const data = result.data as UseCodeResponse;
-
-      // 同时更新本地状态
-      const localCode = this.getAllCodes().find(c => c.code.toUpperCase() === params.code.toUpperCase());
-      if (localCode) {
-        localCode.status = RedeemCodeStatus.USED;
-        localCode.usedAt = data.usedAt;
-        localCode.usedBy = params.userId;
-        this.updateCode(localCode);
-      }
-
-      return data;
+      // 复用本地核销逻辑（会同步写入后端 syncToBackend）
+      return this.useCode({ code: match.code, gameId: params.gameId, userId: params.userId });
     } catch (error) {
       console.warn('[RedeemService] API 核销失败，回退到本地:', error);
       return this.useCode({ code: params.code, gameId: params.gameId, userId: params.userId });

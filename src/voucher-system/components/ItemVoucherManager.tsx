@@ -10,7 +10,7 @@ import {
   Package, Plus, Edit3, Trash2, Copy, Coins, AlertCircle,
   CheckCircle, X, Sparkles, TrendingUp, Shield,
   ChevronDown, ChevronUp, Search, Database, Gamepad2,
-  BarChart3, RefreshCw, ExternalLink, Vote, Bug, Hammer
+  BarChart3, RefreshCw, ExternalLink, Vote, Bug, Hammer, Boxes
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { voucherItemService, type ItemVoucherPurchase } from '@/services/voucherItemService';
@@ -75,12 +75,24 @@ const ItemVoucherManager: React.FC<ItemVoucherManagerProps> = ({
 
   // 加载游戏列表
   useEffect(() => {
-    const publishedGames = getPublishedGames();
-    setGames(publishedGames);
-    if (!selectedGameId && publishedGames.length > 0) {
-      setSelectedGameId(publishedGames[0].id);
-    }
-    setLoading(false);
+    const loadGames = () => {
+      const publishedGames = getPublishedGames();
+      setGames(publishedGames);
+      if (!selectedGameId && publishedGames.length > 0) {
+        setSelectedGameId(publishedGames[0].id);
+      }
+      setLoading(false);
+    };
+    loadGames();
+    // ⚠️ 首次挂载时后端游戏列表可能仍在异步刷新（缓存为空 → 列表空白不自动补），
+    // 必须监听刷新完成事件重读，再加延迟兜底（刷新较慢 / 事件早于挂载）
+    window.addEventListener('games-list-updated', loadGames);
+    const timer = window.setTimeout(loadGames, 1200);
+    return () => {
+      window.removeEventListener('games-list-updated', loadGames);
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 加载模板数据
@@ -228,14 +240,18 @@ const ItemVoucherManager: React.FC<ItemVoucherManagerProps> = ({
     const formData = new FormData(e.currentTarget);
     const count = parseInt(formData.get('count') as string) || 1;
 
-    const result = voucherItemService.mintItemVouchers({
-      gameId: selectedGameId!,
-      templateId: showMintForm.template.id,
-      count,
-    });
+    // 内容凭证模板（内容工坊 UGC）走内容铸造分支，持续运营铸造内容凭证；其余走道具铸造
+    const isContent = showMintForm.template.gameEffect?.schemaName === 'content';
+    const result = isContent
+      ? voucherItemService.mintContentVouchersFromTemplate(showMintForm.template.id, count)
+      : voucherItemService.mintItemVouchers({
+          gameId: selectedGameId!,
+          templateId: showMintForm.template.id,
+          count,
+        });
 
     if (result.success) {
-      showAction('success', `成功铸造 ${count} 张「${showMintForm.template.name}」凭证`);
+      showAction('success', `成功铸造 ${count} 张「${showMintForm.template.name}」${isContent ? '内容' : ''}凭证`);
       setShowMintForm(null);
       refreshTemplates();
     } else {
@@ -324,6 +340,17 @@ const ItemVoucherManager: React.FC<ItemVoucherManagerProps> = ({
               >
                 <Hammer className="w-4 h-4" />
                 道具工坊
+              </Link>
+
+              {/* 🆕 内容工坊入口（与道具工坊并列，升级版） */}
+              <Link
+                to="/content-workshop"
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600
+                           hover:from-cyan-500 hover:to-blue-500 text-white rounded-lg font-medium
+                           transition-all shadow-lg shadow-cyan-500/25 text-sm"
+              >
+                <Boxes className="w-4 h-4" />
+                内容工坊
               </Link>
 
               {voteMode ? (
@@ -461,6 +488,8 @@ const ItemVoucherManager: React.FC<ItemVoucherManagerProps> = ({
                 template.rarity === 'rare' ? 'from-purple-500 to-pink-500' :
                 template.rarity === 'uncommon' ? 'from-blue-500 to-cyan-500' :
                 'from-slate-500 to-slate-600';
+              // 内容凭证模板（内容工坊 UGC）：铸造走 mintContentVouchersFromTemplate，不参与投票治理
+              const isContentTemplate = template.gameEffect?.schemaName === 'content';
 
               return (
                 <motion.div
@@ -508,7 +537,11 @@ const ItemVoucherManager: React.FC<ItemVoucherManagerProps> = ({
                           <span>·</span>
                           <span>铸造: {template.mintedCount}{template.totalSupply ? ` / ${template.totalSupply}` : ''}</span>
                           <span>·</span>
-                          <span>ID: {template.gameEffect?.itemId ?? '-'}</span>
+                          <span>
+                            {isContentTemplate
+                              ? `内容: ${template.attributes?.contentId?.slice(0, 12) ?? '-'}`
+                              : `ID: ${template.gameEffect?.itemId ?? '-'}`}
+                          </span>
                           <span>·</span>
                           <span className={`font-medium ${
                             template.supplyPolicy === ItemSupplyPolicy.LIMITED ? 'text-amber-400' : 'text-green-400'
@@ -538,7 +571,9 @@ const ItemVoucherManager: React.FC<ItemVoucherManagerProps> = ({
                           }
                         }}
                         className="p-2 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-700 transition-colors"
-                        title={voteMode ? '发起铸造提案' : '铸造凭证'}
+                        title={voteMode
+                          ? '发起铸造提案（社区投票通过后铸造）'
+                          : (isContentTemplate ? '铸造内容凭证' : '铸造凭证')}
                       >
                         <Database className="w-4 h-4" />
                       </button>
@@ -783,6 +818,11 @@ const ItemVoucherManager: React.FC<ItemVoucherManagerProps> = ({
                 <div className="p-4 bg-slate-700/30 rounded-lg">
                   <p className="text-white font-medium">{showMintForm.template.name}</p>
                   <p className="text-xs text-slate-400 mt-1">{showMintForm.template.description}</p>
+                  {showMintForm.template.gameEffect?.schemaName === 'content' && (
+                    <p className="text-xs text-violet-300 mt-1.5">
+                      内容凭证：铸造后作为商店「道具凭证」库存，持续运营可反复铸造。
+                    </p>
+                  )}
                   <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
                     <span>已铸造: {showMintForm.template.mintedCount}</span>
                     {showMintForm.template.totalSupply && <span>总量: {showMintForm.template.totalSupply}</span>}

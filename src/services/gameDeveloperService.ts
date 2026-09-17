@@ -18,10 +18,11 @@ import {
 } from '@/types/gameDeveloper';
 import { platformTreasuryService } from './platformTreasuryService';
 import { getCachedToken } from './authTokenService';
+import { getFeatureApiBase } from './apiBase';
 
 // ==================== 常量 ====================
 
-const API_BASE = '/api/v1/game-developers';
+const API_BASE = getFeatureApiBase('game-developers');
 const DEFAULT_REVENUE_SHARE = 10;
 const DAY_MS = 86400000;
 
@@ -433,7 +434,7 @@ class GameDeveloperService {
     txCache.push(full);
     if (!isApiAvailable()) return;
     try {
-      await apiFetch(`/${full.accountId}/transaction`, { method: 'POST', body: JSON.stringify(full) });
+      await apiFetch(`/${full.accountId}/transactions`, { method: 'POST', body: JSON.stringify(full) });
     } catch (e) {
       console.warn('[GameDev] 交易记录 API 保存失败（仅内存）:', e);
     }

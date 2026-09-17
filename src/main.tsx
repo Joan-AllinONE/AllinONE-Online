@@ -63,9 +63,13 @@ initCloudBase()
 async function syncApiConfigToSW() {
   const base =
     (window as any).__API_BASE_URL || (import.meta.env.VITE_API_BASE_URL as string | undefined) || '';
-  if (!base) return;
   try {
     const cache = await caches.open('allinone-config');
+    if (!base) {
+      // dev 模式：清除旧配置，让 SW 放行走 vite 代理到本地 server.js
+      await cache.delete('/api-config');
+      return;
+    }
     await cache.put(
       '/api-config',
       new Response(JSON.stringify({ apiBaseUrl: String(base).replace(/\/$/, '') })),
@@ -82,7 +86,7 @@ if ('serviceWorker' in navigator) {
   // 立即注册（不等待 load），配合 skipWaiting + clients.claim，
   // 让 SW 激活后尽快接管当前页面，缩小首屏 /api 请求命中静态托管 rewrite 的竞态窗口。
   navigator.serviceWorker
-    .register('/gameFileServiceWorker-v9.js')
+    .register('/gameFileServiceWorker-v17.js')
     .then((reg) => {
       console.log('[SW] 游戏文件 Service Worker 已注册:', reg.scope);
       void syncApiConfigToSW();
@@ -106,6 +110,16 @@ if (typeof requestIdleCallback !== 'undefined') {
 } else {
   setTimeout(() => initGameAccounts(), 0);
 }
+
+// ⚠️ initGameAccounts 首次执行时后端游戏列表可能仍在异步刷新（内存缓存为空 → 0 个游戏漏建
+// 游戏商账户，跨浏览器场景下该浏览器无人发布过游戏，发布时自动建账户的兜底也不存在）。
+// 监听刷新完成事件补跑一次（ensureAccount 幂等，重复执行安全）
+let gameAccountsRetried = false;
+window.addEventListener('games-list-updated', () => {
+  if (gameAccountsRetried) return;
+  gameAccountsRetried = true;
+  initGameAccounts();
+});
 
 async function initGameAccounts(): Promise<void> {
   try {

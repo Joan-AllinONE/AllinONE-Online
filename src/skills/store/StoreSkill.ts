@@ -10,7 +10,8 @@ import {
   JSONSchema,
 } from '../types';
 import { SkillErrors } from '../errors';
-import { writeQueue } from '../../services/writeQueue';
+import { saveBatchToBackend, loadFromBackend } from '../../services/backendSync';
+import { isCloudSyncEnabled } from '../../services/cloudbase';
 
 // ==================== 类型定义 ====================
 
@@ -694,6 +695,24 @@ export class StoreSkill extends BaseSkill {
           order.purchasedAt = new Date(order.purchasedAt);
         });
       }
+
+      // ✅ 跨浏览器：从后端 store_products 集合合并商品（云端权威，不覆盖本地未上云的新增）
+      if (isCloudSyncEnabled()) {
+        loadFromBackend<any>('store_products').then(cloudProducts => {
+          if (!cloudProducts || cloudProducts.length === 0) return;
+          let changed = false;
+          for (const cp of cloudProducts) {
+            if (!this.products.has(cp.id)) {
+              // 恢复日期对象
+              cp.createdAt = cp.createdAt ? new Date(cp.createdAt) : new Date();
+              cp.updatedAt = cp.updatedAt ? new Date(cp.updatedAt) : new Date();
+              this.products.set(cp.id, cp);
+              changed = true;
+            }
+          }
+          if (changed) this.saveToStorage();
+        }).catch(() => {});
+      }
     } catch (error) {
       console.error('[StoreSkill] 加载数据失败:', error);
     }
@@ -707,15 +726,10 @@ export class StoreSkill extends BaseSkill {
         updatedAt: new Date().toISOString(),
       };
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data));
-      // CloudBase 双写（通过写入队列，全量入队不再截断）
+      // 后端批量 upsert（云函数 admin SDK，跨浏览器共享；全量不截断）
+      // ✅ 商品存到独立的 store_products 集合，避免污染 purchases（购买记录）集合
       const products = Array.from(this.products.values());
-      for (const product of products) {
-        writeQueue.enqueue({
-          collection: 'purchases',
-          operation: 'upsert',
-          data: product as any,
-        });
-      }
+      saveBatchToBackend('store_products', products as any[]).catch(() => {});
     } catch (error) {
       console.error('[StoreSkill] 保存数据失败:', error);
     }

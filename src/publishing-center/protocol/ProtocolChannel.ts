@@ -206,6 +206,8 @@ export interface CreationTiers {
     customEffectAllowed: boolean;
     /** 🆕 是否启用 effectCode 自定义效果函数 */
     effectCodeEnabled?: boolean;
+    /** effectCode 沙箱变量声明（变量名 → 描述，描述可含 window.xxx 桥接对象名） */
+    effectCodeSandbox?: Record<string, string>;
     /** effectScript 允许的操作符 */
     allowedOperators?: string[];
     /** 最大脚本嵌套深度 */
@@ -232,6 +234,12 @@ export interface AIGuide {
   forbidden?: string[];
   /** 🆕 3级创作模式配置 */
   creationTiers?: CreationTiers;
+  /**
+   * 🆕 跨游戏语义标签声明：effect 名 → 平台语义标签（EffectTags.CANONICAL_TAGS）
+   * 由游戏方在注册 Schema 时可选提供；未提供时平台用内置字典兜底。
+   * 例：{ remove_area: ['CLEAR_AREA'], add_time: ['ADD_TIME'] }
+   */
+  effectTags?: Record<string, string[]>;
   /** 用户上传的 SOP 原始 Markdown（优先于自动生成） */
   rawMarkdown?: string;
 }

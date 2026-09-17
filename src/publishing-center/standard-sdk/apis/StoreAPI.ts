@@ -4,6 +4,7 @@
 
 import type { AllinONEGame } from '../index';
 import { getCachedToken } from './tokenManager';
+import { getFeatureApiBase } from '../../../../services/apiBase';
 
 export interface StoreProduct {
   id: string;
@@ -160,7 +161,7 @@ export class StoreAPI {
         return { success: false, error: '请先登录' };
       }
 
-      const response = await fetch('/api/store/purchase', {
+      const response = await fetch(`${getFeatureApiBase('store')}/purchase`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -210,7 +211,7 @@ export class StoreAPI {
         return { success: false, error: '请先登录' };
       }
 
-      const response = await fetch('/api/store/checkout', {
+      const response = await fetch(`${getFeatureApiBase('store')}/checkout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -261,7 +262,7 @@ export class StoreAPI {
 
   private async loadProducts(): Promise<void> {
     try {
-      const response = await fetch(`/api/store/products?gameId=${this.getGameId()}`);
+      const response = await fetch(`${getFeatureApiBase('store')}/products?gameId=${this.getGameId()}`);
       const result = await response.json();
 
       if (result.success && result.products) {

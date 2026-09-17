@@ -1,6 +1,11 @@
 /**
  * 统一写入重试队列
  *
+ * @deprecated 仅保留给 users / transactions / inventories 三个「只读同步」集合
+ * 作为本地/dev 兜底。浏览器端 CloudBase JS SDK auth 已损坏
+ * （auth.call is not a function），线上经此队列的写入永不落库。
+ * 需要跨浏览器共享的写入，请一律使用 `services/backendSync.ts`（走 gamesApi 云函数 admin SDK）。
+ *
  * 设计目标：
  * - 零数据丢失：所有写入请求要么成功，要么进入持久化队列等待重试
  * - 自动恢复：页面刷新后自动处理未完成的写入

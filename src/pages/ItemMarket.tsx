@@ -66,24 +66,35 @@ const ItemMarketPage: React.FC = () => {
   const [adaptResult, setAdaptResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
-    const publishedGames = getPublishedGames();
-    setGames(publishedGames);
+    const loadItems = () => {
+      const publishedGames = getPublishedGames();
+      setGames(publishedGames);
 
-    const allItems: MarketItem[] = [];
-    for (const game of publishedGames) {
-      const templates = voucherItemService.getItemTemplates(game.id);
-      for (const tpl of templates) {
-        const schemaName = tpl.gameEffect.schemaName || tpl.gameEffect.itemId || '';
-        const compatibleGames = schemaName
-          ? schemaRegistry.getCompatibleGames(schemaName)
-          : [game.id];
-        if (!compatibleGames.includes(game.id)) compatibleGames.unshift(game.id);
-        allItems.push({ template: tpl, game, compatibleGames });
+      const allItems: MarketItem[] = [];
+      for (const game of publishedGames) {
+        const templates = voucherItemService.getItemTemplates(game.id);
+        for (const tpl of templates) {
+          const schemaName = tpl.gameEffect.schemaName || tpl.gameEffect.itemId || '';
+          const compatibleGames = schemaName
+            ? schemaRegistry.getCompatibleGames(schemaName)
+            : [game.id];
+          if (!compatibleGames.includes(game.id)) compatibleGames.unshift(game.id);
+          allItems.push({ template: tpl, game, compatibleGames });
+        }
       }
-    }
 
-    setItems(allItems);
-    setLoading(false);
+      setItems(allItems);
+      setLoading(false);
+    };
+    loadItems();
+    // ⚠️ 首次挂载时后端游戏列表可能仍在异步刷新（缓存为空 → 列表空白不自动补），
+    // 必须监听刷新完成事件重读，再加延迟兜底（刷新较慢 / 事件早于挂载）
+    window.addEventListener('games-list-updated', loadItems);
+    const timer = window.setTimeout(loadItems, 1200);
+    return () => {
+      window.removeEventListener('games-list-updated', loadItems);
+      window.clearTimeout(timer);
+    };
   }, []);
 
   const filteredItems = items.filter(item => {

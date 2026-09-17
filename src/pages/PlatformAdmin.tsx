@@ -14,7 +14,7 @@ import type { GameDeveloperOverview } from '@/types/gameDeveloper';
 import PlatformGameStoreManager from '@/components/PlatformGameStoreManager';
 import { PoolFundPanel } from '@/voucher-system/components/PoolFundPanel';
 import {
-  Shield, Coins, TrendingUp, Calendar, History, Store, ArrowLeft,
+  Shield, ShieldCheck, Coins, TrendingUp, Calendar, History, Store, ArrowLeft,
   Wallet, Landmark, Receipt, BarChart3, FileText, Package, Ticket,
   Gift, Gamepad2, Percent, Users, RefreshCw,
 } from 'lucide-react';
@@ -772,6 +772,14 @@ export default function PlatformAdmin() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate('/game-review')}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/60 hover:bg-slate-600 rounded-lg text-sm font-medium text-slate-200 transition-colors"
+              title="前往游戏审核后台（审核流程独立于发布流程）"
+            >
+              <ShieldCheck className="w-4 h-4 text-green-400" />
+              游戏审核
+            </button>
             <button
               onClick={() => navigate('/platform-data-center')}
               className="flex items-center gap-1.5 px-3 py-2 bg-slate-700/60 hover:bg-slate-600 rounded-lg text-sm font-medium text-slate-200 transition-colors"

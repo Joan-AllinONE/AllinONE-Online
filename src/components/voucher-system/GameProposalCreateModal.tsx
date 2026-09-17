@@ -399,15 +399,15 @@ const GameProposalCreateModal: React.FC<GameProposalCreateModalProps> = ({
                             if (tpl) {
                               setItemName(tpl.name);
                               setTitle(`【铸造凭证】${tpl.name}`);
-                              setDescription(`为道具「${tpl.name}」铸造凭证`);
+                              setDescription(`为${tpl.gameEffect?.schemaName === 'content' ? '内容' : '道具'}「${tpl.name}」铸造凭证`);
                             }
                           }}
                           className="w-full px-3 py-1.5 rounded-lg border border-slate-600 bg-slate-700 text-white text-sm"
                         >
-                          <option value="">-- 请选择道具 --</option>
+                          <option value="">-- 请选择模板 --</option>
                           {gameTemplates.map(t => (
                             <option key={t.id} value={t.id}>
-                              {t.name}（已铸造 {t.mintedCount}{t.totalSupply ? ` / ${t.totalSupply}` : ''}）
+                              {t.name}（{t.gameEffect?.schemaName === 'content' ? '内容·' : ''}已铸造 {t.mintedCount}{t.totalSupply ? ` / ${t.totalSupply}` : ''}）
                             </option>
                           ))}
                         </select>

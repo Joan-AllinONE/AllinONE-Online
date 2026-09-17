@@ -23,7 +23,9 @@ import {
   UploadedFile,
 } from '../types';
 import { SkillInitializer, type SkillInitializationResult } from './SkillInitializer';
+import { getApiBase } from '@/services/apiBase';
 import { savePublishedGame, saveGameFiles, type PublishedGame, type RedeemItemConfig } from '@/services/publishedGameService';
+import { submitGameForReview } from '@/services/gameReviewService';
 import { gameDeveloperService } from '@/services/gameDeveloperService';
 import { getToken } from '@/services/authTokenService';
 
@@ -547,14 +549,18 @@ export class PublishingPipeline {
         // Mode A (默认): 注入适配 — 完整 Effect Engine + SDK
         const protocolLayer = this.generateProtocolLayer(gameId, redeemItems);
         const sdkScript = this.generateAllinoneSDK(gameId, redeemItems);
+        // 🆕 注入 window.__ALLINONE_CONFIG__（游戏侧 isPlatformMode 判定依据）。
+        // 历史问题：管线从不注入该变量 → 游戏 init() 判定恒为 false，
+        // 依赖它的功能（如 Match3 连击掉落）被静默关闭。已存在则不覆盖。
+        const configScript = /__ALLINONE_CONFIG__/.test(content) ? '' : this.generateConfigScript(gameId);
         if (content.includes('<head>')) {
           const headStartIndex = content.indexOf('<head>') + '<head>'.length;
-          content = content.slice(0, headStartIndex) + '\n' + protocolLayer + content.slice(headStartIndex);
+          content = content.slice(0, headStartIndex) + '\n' + configScript + '\n' + protocolLayer + content.slice(headStartIndex);
         } else if (content.includes('<html')) {
           const htmlEnd = content.indexOf('>', content.indexOf('<html'));
-          content = content.slice(0, htmlEnd + 1) + '\n<head>' + protocolLayer + '</head>\n' + content.slice(htmlEnd + 1);
+          content = content.slice(0, htmlEnd + 1) + '\n<head>' + configScript + '\n' + protocolLayer + '</head>\n' + content.slice(htmlEnd + 1);
         } else {
-          content = protocolLayer + '\n' + content;
+          content = configScript + '\n' + protocolLayer + '\n' + content;
         }
         if (content.includes('</body>')) {
           content = content.replace('</body>', `${sdkScript}\n</body>`);
@@ -570,6 +576,21 @@ export class PublishingPipeline {
     }
 
     return cloned;
+  }
+
+  /**
+   * 🆕 生成平台配置注入脚本（Mode A）。
+   * 游戏以 typeof window.__ALLINONE_CONFIG__ === 'object' 判定平台模式；
+   * 协议层/SDK 只设置 window.AllinONE（不含该变量），故必须单独注入。
+   */
+  private generateConfigScript(gameId: string): string {
+    const config = {
+      gameId,
+      platform: 'allinone',
+      sdkVersion: '1.0.0',
+      injectedAt: new Date().toISOString(),
+    };
+    return `<script>window.__ALLINONE_CONFIG__ = ${JSON.stringify(config)};</script>`;
   }
 
   /** 将 UploadedFile.content 统一读为字符串（与 stepBuild 一致） */
@@ -697,7 +718,7 @@ export class PublishingPipeline {
           };
         });
 
-        const resp = await fetch(`/api/v1/games/${config.gameId}/upload`, {
+        const resp = await fetch(`${getApiBase()}/${config.gameId}/upload`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -732,7 +753,7 @@ export class PublishingPipeline {
 
     // ── 3. 设置托管模式 ──
     if (serverUploadOk) {
-      const baseUrl = `/api/v1/games/${config.gameId}/files/`;
+      const baseUrl = `${getApiBase()}/${config.gameId}/files/`;
       context.data.set('hostingType', 'server');
       context.data.set('baseUrl', baseUrl);
       context.data.set('cdnUrl', `${baseUrl}${entryPoint}`);
@@ -797,12 +818,32 @@ export class PublishingPipeline {
       hostingType: hostingType as 'server' | 'inline' | 'external',
       baseUrl,
       isModular: config.analysisResult.fileStructure.isModular || false,
+      summary: config.summary,
+      coverImage: config.coverImage,
     };
 
     logger.info('保存游戏数据...', PublishStep.PUBLISH);
     
     // 保存到平台
     const saved = await savePublishedGame(publishedGame);
+
+    // 审核机制：发布完成后自动提交审核（进入 pending 待审核状态）
+    // 审核流程独立于发布流程——发布成功 ≠ 上架，须管理员在审核后台通过后才公开展示
+    // ⚠️ 管线 Logger 只有 info/success/error/warning（没有 warn），误用会让发布整体失败
+    try {
+      const submitResult = await submitGameForReview(config.gameId, { gameName: publishedGame.name });
+      if (submitResult.success) {
+        const fails = (submitResult.autoChecks || []).filter(c => !c.passed);
+        if (fails.length > 0) {
+          logger.warning(`自动预检发现 ${fails.length} 项待人工复核：${fails.map(f => f.label).join('、')}`, PublishStep.PUBLISH);
+        }
+        logger.info('已提交平台审核，等待管理员审核通过后上架', PublishStep.PUBLISH);
+      } else {
+        logger.warning(`自动提交审核失败（${submitResult.error}），可稍后重新提交审核`, PublishStep.PUBLISH);
+      }
+    } catch {
+      logger.warning('提交审核失败（审核后端可能未运行），游戏暂未进入审核队列', PublishStep.PUBLISH);
+    }
     
     logger.info('配置访问权限...', PublishStep.PUBLISH);
     await this.delay(300);
@@ -822,12 +863,12 @@ export class PublishingPipeline {
     await this.delay(300);
 
     if (config.gameType === GameType.STANDARD) {
-      logger.success('标准游戏已通过自动审核', PublishStep.PUBLISH);
+      logger.success('标准游戏发布流程完成', PublishStep.PUBLISH);
     } else {
-      logger.info('通用游戏已提交审核', PublishStep.PUBLISH);
+      logger.info('通用游戏发布流程完成', PublishStep.PUBLISH);
     }
 
-    logger.success('游戏已正式上线！', PublishStep.PUBLISH);
+    logger.success('游戏已进入待审核状态，管理员审核通过后即可正式上架！', PublishStep.PUBLISH);
     context.data.set('activated', true);
   }
 

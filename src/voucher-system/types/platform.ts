@@ -253,25 +253,25 @@ export const TRIGGER_MODE_OPTIONS: { value: TriggerMode; label: string; descript
   {
     value: TriggerMode.ON_GAME_COMPLETE,
     label: '游戏完成时',
-    description: '玩家完成游戏（通关/结束）时自动发放',
+    description: '游戏上报通关/胜利/过关/分数里程碑事件时发放（需游戏集成奖励上报，见发布指南 4.7 代码段 E）',
     applicableTypes: [GameType.NATIVE, GameType.PUBLISHED],
   },
   {
     value: TriggerMode.ON_CLICK,
     label: '点击游玩时',
-    description: '玩家点击"开始游戏"按钮时立即发放（适合外部游戏）',
-    applicableTypes: [GameType.EXTERNAL],
+    description: '玩家从游戏中心点击「游玩」进入时立即发放（无需游戏改造，立即可用）',
+    applicableTypes: [GameType.NATIVE, GameType.EXTERNAL, GameType.PUBLISHED],
   },
   {
     value: TriggerMode.ON_ACHIEVEMENT,
     label: '成就解锁时',
-    description: '玩家解锁特定成就时发放',
+    description: '游戏上报成就解锁事件时发放（需游戏集成奖励上报，见发布指南 4.7 代码段 E）',
     applicableTypes: [GameType.NATIVE, GameType.PUBLISHED],
   },
   {
     value: TriggerMode.MANUAL,
     label: '手动触发',
-    description: '由管理员或特定条件手动触发',
+    description: '不参与自动发放，仅供管理端手动调用',
     applicableTypes: [GameType.NATIVE, GameType.EXTERNAL, GameType.PUBLISHED],
   },
 ];

@@ -4,6 +4,7 @@
 
 import type { AllinONEGame } from '../index';
 import { getCachedToken } from './tokenManager';
+import { getFeatureApiBase } from '../../../../services/apiBase';
 
 export interface Currency {
   type: string;
@@ -71,7 +72,7 @@ export class WalletAPI {
    */
   async reward(params: RewardParams): Promise<void> {
     try {
-      const response = await fetch('/api/wallet/reward', {
+      const response = await fetch(`${getFeatureApiBase('wallet')}/reward`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -107,7 +108,7 @@ export class WalletAPI {
    */
   async spend(currency: string, amount: number, reason?: string): Promise<boolean> {
     try {
-      const response = await fetch('/api/wallet/spend', {
+      const response = await fetch(`${getFeatureApiBase('wallet')}/spend`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -140,7 +141,7 @@ export class WalletAPI {
    */
   async exchange(fromCurrency: string, toCurrency: string, amount: number): Promise<boolean> {
     try {
-      const response = await fetch('/api/wallet/exchange', {
+      const response = await fetch(`${getFeatureApiBase('wallet')}/exchange`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -168,7 +169,7 @@ export class WalletAPI {
    */
   async getTransactions(limit: number = 20): Promise<Transaction[]> {
     try {
-      const response = await fetch(`/api/wallet/transactions?limit=${limit}`, {
+      const response = await fetch(`${getFeatureApiBase('wallet')}/transactions?limit=${limit}&gameId=${encodeURIComponent((this.game as any).getConfig().gameId)}`, {
         headers: {
           'Authorization': `Bearer ${this.getToken()}`,
         },
@@ -189,7 +190,7 @@ export class WalletAPI {
       const token = this.getToken();
       if (!token) return;
 
-      const response = await fetch('/api/wallet/balance', {
+      const response = await fetch(`${getFeatureApiBase('wallet')}/balance?gameId=${encodeURIComponent((this.game as any).getConfig().gameId)}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },

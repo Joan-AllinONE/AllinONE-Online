@@ -7,8 +7,7 @@
 
 import { BaseSkill } from '../BaseSkill';
 import type { SkillContext } from '../types';
-import { getCloudBaseApp } from '../../services/cloudbase';
-import { writeQueue } from '../../services/writeQueue';
+import { saveToBackend } from '../../services/backendSync';
 
 // ==================== 类型 ====================
 
@@ -113,10 +112,6 @@ export class ProposalSkill extends BaseSkill {
       updatedAt: Date.now(),
     };
     this.saveLocalProposal(proposal);
-    try {
-      const app = getCloudBaseApp();
-      await app.database().collection('proposals').add(proposal);
-    } catch { /* local only */ }
     return { success: true, data: proposal };
   }
 
@@ -135,11 +130,6 @@ export class ProposalSkill extends BaseSkill {
     proposal.votes.push({ userId: context.userId, decision: params.decision, weight, timestamp: Date.now() });
     proposal.updatedAt = Date.now();
     this.saveLocalProposal(proposal);
-
-    try {
-      const app = getCloudBaseApp();
-      await app.database().collection('proposals').where({ id: params.proposalId }).update({ votes: proposal.votes, updatedAt: proposal.updatedAt });
-    } catch { /* best effort */ }
 
     return { success: true, data: { voted: true, weight } };
   }
@@ -177,11 +167,6 @@ export class ProposalSkill extends BaseSkill {
     proposal.status = 'executed';
     proposal.updatedAt = Date.now();
     this.saveLocalProposal(proposal);
-
-    try {
-      const app = getCloudBaseApp();
-      await app.database().collection('proposals').where({ id: params.proposalId }).update({ status: 'executed', updatedAt: proposal.updatedAt });
-    } catch { /* best effort */ }
 
     return { success: true, data: proposal };
   }
@@ -240,12 +225,8 @@ export class ProposalSkill extends BaseSkill {
     const all = this.getLocalProposals().filter(x => x.id !== p.id);
     all.push(p);
     localStorage.setItem('proposals', JSON.stringify(all));
-    // CloudBase 双写（通过写入队列）
-    writeQueue.enqueue({
-      collection: 'proposals',
-      operation: 'upsert',
-      data: p as any,
-    });
+    // 后端 upsert（云函数 admin SDK，跨浏览器共享）
+    saveToBackend('proposals', p as any).catch(() => {});
   }
 }
 

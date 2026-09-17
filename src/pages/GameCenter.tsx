@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect, useContext } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getPublishedGames, type PublishedGame } from '@/services/publishedGameService';
-import { platformBindingService, GameType, type PlatformBindingConfig } from '@/voucher-system';
+import { isGamePubliclyVisible } from '@/services/gameReviewService';
+import { platformBindingService, GameType, TriggerMode, type PlatformBindingConfig } from '@/voucher-system';
 import { AuthContext } from '@/contexts/authContext';
 import { isCloudBaseReady } from '@/services/cloudbase';
 import { writeQueue, type QueueStatus } from '@/services/writeQueue';
@@ -22,6 +23,8 @@ interface GameCard {
   status: 'available' | 'coming-soon' | 'maintenance';
   externalUrl?: string; // 外部游戏链接
   isPublished?: boolean; // 标记是否为通过发布中心发布的游戏
+  coverImage?: string; // 游戏封面（base64 data URL）
+  summary?: string; // 游戏简介（开发商填写，优先于 description 展示）
 }
 
 const games: GameCard[] = [
@@ -152,7 +155,10 @@ export default function GameCenter() {
   useEffect(() => {
     const loadPublishedGames = () => {
       try {
-        const published = getPublishedGames();
+        const allPublished = getPublishedGames();
+        // 审核机制：公开游戏中心仅展示已通过审核的游戏
+        // （approved 或旧数据缺省；pending/rejected/changes_required/removed 一律不对外展示）
+        const published = allPublished.filter(pg => isGamePubliclyVisible(pg.reviewStatus));
         // 诊断：判断数据来源
         let source: 'cloudbase' | 'cache' | 'indexeddb' | 'none' = 'none';
         if (published.length > 0) {
@@ -173,9 +179,13 @@ export default function GameCenter() {
           difficulty: 'medium',
           rewards: { computingPower: 50, gameCoins: 50 },
           players: pg.players || 0,
-          status: pg.status,
+          // status 缺失回退为 available：发布元数据 413 部分失败时文档可能只有 cloudFileManifest，
+          // 此时不应显示「维护中」锁死入口（GamePlay 侧有完整的加载失败提示）
+          status: pg.status || 'available',
           isPublished: true,
           externalUrl: pg.externalUrl,
+          coverImage: pg.coverImage,
+          summary: pg.summary,
         }));
         setPublishedGames(formattedGames);
       } catch (error) {
@@ -243,7 +253,7 @@ export default function GameCenter() {
   /**
    * 触发游戏奖励（外部游戏：点击即得）
    */
-  const triggerGameReward = useCallback(async (gameId: string, gameName: string, gameType: GameType, extraData?: Record<string, any>) => {
+  const triggerGameReward = useCallback(async (gameId: string, gameName: string, gameType: GameType, extraData?: Record<string, any>, persistForGamePlay = false) => {
     // 获取用户ID（优先 currentUser，回退到凭证系统的 guest ID / 默认 ID）
     let userId: string | null = null;
     let userName: string = '玩家';
@@ -277,7 +287,8 @@ export default function GameCenter() {
 
     try {
       // 查找该游戏的活跃绑定配置
-      const bindings = platformBindingService.getActiveBindingsForGame(gameId);
+      // 点击入口只触发「点击游玩时」类型的绑定（与绑定页触发方式语义一致）
+      const bindings = platformBindingService.getActiveBindingsForGame(gameId, TriggerMode.ON_CLICK);
       
       if (bindings.length === 0) {
         console.log(`[GameCenter] 游戏 ${gameName} 没有配置奖励规则`);
@@ -305,10 +316,35 @@ export default function GameCenter() {
 
         if (result.success && result.record) {
           showRewardToast(true, `获得 ${result.record.amount} A币奖励！`, result.record.amount);
+          // 平台托管游戏跳转场景：本页即将 unmount，Toast 看不见——把发放结果写入
+          // sessionStorage，由 GamePlay 挂载时读取并弹出「游戏奖励已发放」弹窗
+          // （key 与 GamePlay.tsx 的 PENDING_GAME_REWARD_KEY 保持一致）
+          if (persistForGamePlay) {
+            try {
+              sessionStorage.setItem('allinone_pending_game_reward', JSON.stringify({
+                success: true,
+                message: `来自游戏中心 · ${gameName}`,
+                amount: result.record.amount,
+                gameName,
+                ts: Date.now(),
+              }));
+            } catch (e) { /* 存储失败忽略 */ }
+          }
           console.log(`[GameCenter] 奖励发放成功:`, result.record);
         } else if (result.error) {
           // 显示所有错误信息给用户（配置错误、奖池余额不足等）
           showRewardToast(false, result.error, 0);
+          // 失败原因同样传递给 GamePlay 弹窗展示（避免静默失败让玩家困惑）
+          if (persistForGamePlay) {
+            try {
+              sessionStorage.setItem('allinone_pending_game_reward', JSON.stringify({
+                success: false,
+                message: result.error,
+                gameName,
+                ts: Date.now(),
+              }));
+            } catch (e) { /* 存储失败忽略 */ }
+          }
           console.log(`[GameCenter] 奖励未发放: ${result.error}`);
         }
       }
@@ -331,6 +367,19 @@ export default function GameCenter() {
     // 打开新窗口
     window.open(autoLoginUrl, '_blank', 'noopener,noreferrer');
   }, [getAutoLoginUrl, triggerGameReward]);
+
+  /**
+   * 处理平台托管/原生游戏进入（2026-09-12 修复）：
+   * 之前只有外链游戏点击触发 GAME_CLICK 奖励，server/inline 托管的已发布游戏
+   * 走 <Link> 直接跳转 GamePlay，若游戏 HTML 未集成平台 SDK 上报 GAME_COMPLETE
+   * 等事件，绑定奖励永远不会发放。现在点击进入时也触发一次（fire-and-forget，
+   * 不阻塞跳转），与外链「点击即得」行为一致；游戏内通关事件仍可叠加触发，
+   * 由绑定的每日/总量/冷却限制防刷。
+   */
+  const handlePlatformGameClick = useCallback((game: GameCard) => {
+    // persistForGamePlay=true：发放结果写入 sessionStorage，跳转后 GamePlay 弹出奖励弹窗
+    triggerGameReward(game.id, game.name, game.isPublished ? GameType.PUBLISHED : GameType.NATIVE, undefined, true);
+  }, [triggerGameReward]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 relative">
@@ -390,6 +439,13 @@ export default function GameCenter() {
             </div>
             
             <div className="flex items-center gap-4">
+              <Link
+                to="/quests"
+                className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-indigo-600 to-violet-600 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 flex items-center gap-2"
+              >
+                <i className="fa-solid fa-list-check"></i>
+                任务广场
+              </Link>
               <Link
                 to="/publishing-center"
                 className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg shadow-md hover:shadow-lg hover:from-purple-700 hover:to-pink-700 transition-all transform hover:-translate-y-0.5 flex items-center gap-2"
@@ -493,11 +549,21 @@ export default function GameCenter() {
               transition={{ delay: index * 0.1 }}
               className="bg-white dark:bg-slate-800 rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden group"
             >
+              {game.coverImage ? (
+                <div className="h-40 w-full overflow-hidden bg-slate-200 dark:bg-slate-700">
+                  <img
+                    src={game.coverImage}
+                    alt={`${game.name} 封面`}
+                    className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                </div>
+              ) : (
+                <div className="h-40 w-full flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-4xl">
+                  <i className={game.icon}></i>
+                </div>
+              )}
               <div className="p-6">
                 <div className="flex items-start justify-between mb-4">
-                  <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-2xl group-hover:scale-110 transition-transform">
-                    <i className={game.icon}></i>
-                  </div>
                   <div className="flex flex-col gap-2">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[game.status]}`}>
                       {game.status === 'coming-soon' ? statusText['coming-soon'] : statusText[game.status]}
@@ -508,8 +574,8 @@ export default function GameCenter() {
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
                   {game.name}
                 </h3>
-                <p className="text-slate-600 dark:text-slate-300 text-sm mb-4 line-clamp-2">
-                  {game.description}
+                <p className="text-slate-600 dark:text-slate-300 text-sm mb-4 line-clamp-3">
+                  {game.summary || game.description}
                 </p>
                 {game.isPublished && (
                   <span className="inline-block px-2 py-1 mb-2 text-xs font-medium text-purple-600 bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400 rounded-full">
@@ -542,6 +608,7 @@ export default function GameCenter() {
                         <>
                           <Link
                             to={`/game/${game.id}`}
+                            onClick={() => handlePlatformGameClick(game)}
                             className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-center py-2 px-4 rounded-lg font-medium transition-colors"
                           >
                             游玩 ▶

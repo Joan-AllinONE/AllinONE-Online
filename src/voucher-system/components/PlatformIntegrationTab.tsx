@@ -115,11 +115,18 @@ export const PlatformIntegrationTab: React.FC<PlatformIntegrationTabProps> = ({
     const handleGamePublished = () => {
       loadData();
     };
+    // 监听游戏列表后台刷新完成（publishedGameService 从后端拉取成功后派发）：
+    // 首次打开页面时游戏列表可能仍在异步加载，刷新完成后补一次 loadData
+    const handleGamesListUpdated = () => {
+      loadData();
+    };
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('game-published', handleGamePublished);
+    window.addEventListener('games-list-updated', handleGamesListUpdated);
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('game-published', handleGamePublished);
+      window.removeEventListener('games-list-updated', handleGamesListUpdated);
     };
   }, []);
 
@@ -542,7 +549,14 @@ export const PlatformIntegrationTab: React.FC<PlatformIntegrationTabProps> = ({
                     return (
                       <button
                         key={game.id}
-                        onClick={() => isPlayable && setFormData({ ...formData, gameId: game.id })}
+                        onClick={() => {
+                          if (!isPlayable) return;
+                          // 切换游戏后若当前触发方式不适用于新游戏类型，自动回落到第一个可用项
+                          const available = getAvailableTriggerModes(game.type);
+                          const stillValid = available.some(o => o.value === formData.triggerMode);
+                          const triggerMode = stillValid ? formData.triggerMode : (available[0]?.value ?? TriggerMode.ON_GAME_COMPLETE);
+                          setFormData({ ...formData, gameId: game.id, triggerMode });
+                        }}
                         disabled={!!editingBinding || !isPlayable}
                         title={!isPlayable ? (game.status === 'coming-soon' ? '该游戏尚未上线，暂不可绑定' : '该游戏正在维护中，暂不可绑定') : ''}
                         className={`p-4 rounded-xl border text-left transition-all ${
@@ -1325,6 +1339,16 @@ export const PlatformIntegrationTab: React.FC<PlatformIntegrationTabProps> = ({
                         {TriggerModeIcons[binding.triggerMode]}
                         {TRIGGER_MODE_OPTIONS.find(o => o.value === binding.triggerMode)?.label}
                       </span>
+                      {/* 触发方式依赖提醒：行为类触发需游戏已集成平台奖励上报（发布指南 4.7 代码段 E） */}
+                      {binding.gameType !== GameType.EXTERNAL &&
+                       (binding.triggerMode === TriggerMode.ON_GAME_COMPLETE || binding.triggerMode === TriggerMode.ON_ACHIEVEMENT) && (
+                        <span
+                          className="text-amber-400/90"
+                          title="该触发方式需要游戏已集成平台奖励上报（发布指南 4.7 代码段 E）并重新发布，否则不会发放。如需「进入即发」，请编辑绑定改选「点击游玩时」。"
+                        >
+                          需游戏集成上报，未集成请改选「点击游玩时」
+                        </span>
+                      )}
                       {/* 奖池来源标签 */}
                       {(binding as any).poolSource === 'user' ? (
                         <span className="flex items-center gap-1 text-purple-400">

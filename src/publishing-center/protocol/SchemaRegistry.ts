@@ -10,7 +10,8 @@
  * v2 重构：从"平台硬编码 3 种通用 Schema"转向"游戏方自行注册 SOP"
  */
 
-import type { ExtensionSchema, JSONSchema, CreationTiers } from './ProtocolChannel';
+import type { ExtensionSchema, JSONSchema } from './ProtocolChannel';
+import { registerSchemaEffectTags, resolveEffectTags, type EffectTag } from './EffectTags';
 
 // ==================== 内部类型 ====================
 
@@ -68,6 +69,11 @@ export class SchemaRegistry {
       compatibleGames: new Set(),
     });
 
+    // 🆕 注册 Schema 声明的效果语义标签（跨游戏兑换的语义层依据）
+    if (schema.aiGuide?.effectTags) {
+      registerSchemaEffectTags(key, schema.aiGuide.effectTags);
+    }
+
     console.log(`[SchemaRegistry] Schema 已注册: "${key}" v${schema.version}`);
   }
 
@@ -90,6 +96,22 @@ export class SchemaRegistry {
    */
   searchSchemasByTag(tag: string): ExtensionSchema[] {
     return this.getAllSchemas().filter(s => s.tags?.includes(tag));
+  }
+
+  /**
+   * 🆕 按语义标签搜索 Schema 内实现了该标签的效果列表
+   * 用于跨游戏语义映射候选查找
+   */
+  findEffectsByTag(schemaName: string, tag: EffectTag): string[] {
+    const schema = this.getSchema(schemaName);
+    if (!schema) return [];
+
+    const effects = new Set([
+      ...(schema.aiGuide?.availableEffects || []),
+      ...(schema.aiGuide?.creationTiers?.preset?.items || []).map(i => i.effect),
+    ]);
+
+    return Array.from(effects).filter(e => resolveEffectTags(e, schemaName).includes(tag));
   }
 
   /**
@@ -625,6 +647,19 @@ export class SchemaRegistry {
       lines.push('');
     }
 
+    // 🆕 跨游戏语义标签
+    if (guide?.effectTags && Object.keys(guide.effectTags).length > 0) {
+      lines.push(`## 跨游戏语义标签`);
+      lines.push(`声明本游戏效果对应的平台语义标签，跨游戏兑换时可据此找到语义等价道具：`);
+      lines.push('');
+      lines.push('| 效果 | 语义标签 |');
+      lines.push('|------|----------|');
+      for (const [effect, tags] of Object.entries(guide.effectTags)) {
+        lines.push(`| ${effect} | ${tags.join(', ')} |`);
+      }
+      lines.push('');
+    }
+
     // 约束条件
     if (guide?.constraints) {
       lines.push(`## 约束条件`);
@@ -947,6 +982,21 @@ export class SchemaRegistry {
       aiGuide: {
         prompt: '消消乐(Match3)游戏道具创作系统。游戏是一个8×8的棋盘，宝石有6种颜色(red/blue/green/yellow/purple/orange)。玩家通过匹配3个或更多同色宝石来消除它们获得分数。道具可以增强消除能力或改变游戏状态。',
         availableEffects: ['remove_area', 'remove_row', 'remove_col', 'remove_color', 'add_time', 'add_moves', 'replace_color', 'shuffle', 'bomb', 'lightning', 'rainbow'],
+        // 🆕 跨游戏语义标签声明（用于跨游戏兑换的语义等价映射）
+        effectTags: {
+          remove_area: ['CLEAR_AREA'],
+          bomb: ['CLEAR_AREA'],
+          remove_row: ['CLEAR_ROWCOL'],
+          remove_col: ['CLEAR_ROWCOL'],
+          lightning: ['CLEAR_ROWCOL'],
+          remove_color: ['CLEAR_COLOR'],
+          rainbow: ['CLEAR_COLOR'],
+          add_time: ['ADD_TIME'],
+          add_moves: ['ADD_MOVES'],
+          replace_color: ['TRANSFORM'],
+          randomize_cell: ['TRANSFORM'],
+          shuffle: ['SHUFFLE'],
+        },
         constraints: {
           maxCellsPerEffect: 20,
           maxTimeAdd: 30,
@@ -1153,6 +1203,17 @@ export class SchemaRegistry {
       aiGuide: {
         prompt: '祖玛(Zuma)游戏道具创作系统。这是一个经典的祖玛游戏：一条由彩色弹珠组成的链沿着蜿蜒路径向终点洞穴移动。玩家控制中央的青蛙射手，发射弹珠插入链中，3个或更多同色弹珠相邻时会消除。如果弹珠链到达终点则游戏结束。道具有助于减缓弹珠链、消除弹珠或获得额外分数。',
         availableEffects: ['add_score', 'clear_color', 'slow_chain', 'remove_tail', 'reverse_chain', 'score_multiplier', 'freeze_all'],
+        // 🆕 跨游戏语义标签声明
+        effectTags: {
+          add_score: ['ADD_SCORE'],
+          clear_color: ['CLEAR_COLOR'],
+          clear_green: ['CLEAR_COLOR'],
+          slow_chain: ['SLOW'],
+          remove_tail: ['CLEAR_TAIL'],
+          reverse_chain: ['REVERSE'],
+          score_multiplier: ['MULTIPLY_SCORE'],
+          freeze_all: ['FREEZE'],
+        },
         constraints: {
           maxScoreAdd: 50,
           maxTailRemove: 10,
@@ -1202,6 +1263,89 @@ export class SchemaRegistry {
             maxScriptDepth: 5,
           },
         },
+      },
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // PERLER 拼豆作品 Schema（作品收藏类：提取→凭证→市场交易→兑换重绘）
+    // ═══════════════════════════════════════════════════════════════
+    this.registerSchema({
+      name: 'perler-artwork',
+      version: '1.0.0',
+      description: '拼豆像素作品 — 玩家创作的拼豆图案（收藏/交易类，非效果道具）。作品以「调色板 + 网格索引串」紧凑编码，整体序列化 ≤ 8KB',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '作品名称' },
+          effect: {
+            type: 'string',
+            description: '效果类型（作品类固定为 display，无游戏内效果）',
+            enum: ['display'],
+          },
+          params: {
+            type: 'object',
+            description: '作品数据（紧凑编码）',
+            properties: {
+              w: { type: 'number', description: '画布宽（格数，2-59）', minimum: 2, maximum: 59 },
+              h: { type: 'number', description: '画布高（格数，2-59）', minimum: 2, maximum: 59 },
+              palette: { type: 'array', description: '调色板色值数组（#rrggbb，按 cells 索引顺序，≤36 色）' },
+              cells: { type: 'string', description: '网格索引串：行优先（先遍历行再列），每格一个字符 — base36 调色板索引，"." 为空格' },
+            },
+          },
+          description: { type: 'string', description: '作品描述' },
+        },
+        required: ['name', 'effect'],
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          effect: { type: 'string' },
+          params: {
+            type: 'object',
+            properties: {
+              w: { type: 'number' },
+              h: { type: 'number' },
+              palette: { type: 'array' },
+              cells: { type: 'string' },
+            },
+          },
+          description: { type: 'string' },
+        },
+      },
+      adapters: {},
+      examples: [
+        {
+          name: '小心心',
+          effect: 'display',
+          params: {
+            w: 5, h: 5,
+            palette: ['#e63946'],
+            cells: '.aa.a..aaa.a.....a...a.....',
+          },
+          description: '5×5 红色爱心图案',
+        },
+      ],
+      tags: ['perler', 'artwork', 'collectible'],
+      aiGuide: {
+        prompt: '拼豆作品收藏系统。作品不是效果道具，而是玩家创作的像素图案（如 21×21 拼豆画）。作品用调色板（palette 色值数组，≤36 色）+ 网格索引串（cells，行优先，每格一个 base36 字符，"." 表示空格）紧凑编码。此 Schema 用于把作品提取为道具凭证进行收藏和市场交易；兑换后作品会在游戏中重绘并进入收藏馆。',
+        availableEffects: ['display'],
+        effectRules: [
+          'display: 展示型作品，无游戏内战斗/增益效果；兑换后进入游戏收藏馆重绘展示',
+        ],
+        // 🆕 收藏展示类：无通用玩法语义，跨游戏只能走等值兑换
+        effectTags: {
+          display: ['DISPLAY'],
+        },
+        constraints: {
+          canvasMax: 59,
+          paletteMax: 36,
+        },
+        forbidden: [
+          'palette 不要超过 36 种颜色（cells 每格只有一个 base36 字符）',
+          'cells 长度必须等于 w×h，且不要包含 base36 与 "." 之外的字符',
+          '不要上传与拼豆创作无关的大体积数据（整体序列化必须 ≤ 8KB）',
+        ],
       },
     });
 

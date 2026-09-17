@@ -16,7 +16,7 @@ import {
 import { voucherItemService, type PurchaseItemVoucherRequest } from '@/services/voucherItemService';
 import { skillGateway } from '@/skills';
 import type { ItemVoucherTemplate } from '@/voucher-system/types';
-import { writeQueue } from './writeQueue';
+import { saveBatchToBackend, loadFromBackend } from './backendSync';
 
 // ==================== 存储工具 ====================
 
@@ -26,18 +26,15 @@ function loadStores(): ExternalGameStore[] {
     const data = raw ? JSON.parse(raw) : [];
     if (!_storesCloudSyncInitiated) {
       _storesCloudSyncInitiated = true;
-      import('./cloudbase').then(({ isCloudBaseReady, getCloudBaseApp }) => {
-        if (!isCloudBaseReady()) return;
-        getCloudBaseApp().database().collection('game_stores').limit(500).get().then(res => {
-          if (res.data.length === 0) return;
-          const freshRaw = localStorage.getItem(PLATFORM_GAME_STORES_KEY);
-          const fresh: ExternalGameStore[] = freshRaw ? JSON.parse(freshRaw) : [];
-          // ✅ CloudBase 数据覆盖本地同名 ID（云端为准）
-          const cloudMap = new Map(res.data.map(d => [d.id, d]));
-          const localOnly = fresh.filter(s => !cloudMap.has(s.id));
-          const merged = [...res.data as ExternalGameStore[], ...localOnly];
-          localStorage.setItem(PLATFORM_GAME_STORES_KEY, JSON.stringify(merged));
-        }).catch(() => {});
+      loadFromBackend<ExternalGameStore>('game_stores').then(cloud => {
+        if (cloud.length === 0) return;
+        const freshRaw = localStorage.getItem(PLATFORM_GAME_STORES_KEY);
+        const fresh: ExternalGameStore[] = freshRaw ? JSON.parse(freshRaw) : [];
+        // ✅ 云端数据覆盖本地同名 ID（云端为准）
+        const cloudMap = new Map(cloud.map(d => [d.id, d]));
+        const localOnly = fresh.filter(s => !cloudMap.has(s.id));
+        const merged = [...cloud, ...localOnly];
+        localStorage.setItem(PLATFORM_GAME_STORES_KEY, JSON.stringify(merged));
       }).catch(() => {});
     }
     return data;
@@ -50,14 +47,8 @@ let _storesCloudSyncInitiated = false;
 
 function saveStores(stores: ExternalGameStore[]): void {
   localStorage.setItem(PLATFORM_GAME_STORES_KEY, JSON.stringify(stores));
-  // CloudBase 双写（通过写入队列，全量入队不再截断）
-  for (const store of stores) {
-    writeQueue.enqueue({
-      collection: 'game_stores',
-      operation: 'upsert',
-      data: store as any,
-    });
-  }
+  // 后端批量 upsert（云函数 admin SDK，跨浏览器共享；全量不截断）
+  saveBatchToBackend('game_stores', stores as any[]).catch(() => {});
 }
 
 // ==================== 服务类 ====================

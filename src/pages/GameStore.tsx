@@ -20,14 +20,17 @@ import type { ItemVoucherTemplate, Voucher } from '@/voucher-system/types';
 import { isCurrencyVoucher } from '@/voucher-system/types';
 import { AuthContext } from '@/contexts/authContext';
 import PlatformGameStore from '@/components/PlatformGameStore';
+import { ItemDataArtwork } from '@/components/ItemDataArtwork';
 import GameDeveloperPanel from '@/components/GameDeveloperPanel';
+import QuestCreateModal from '@/components/quest/QuestCreateModal';
+import CrossGameExchangeModal from '@/components/CrossGameExchangeModal';
 import {
   Store, Ticket, Settings, ExternalLink, Package,
   TrendingUp, Users, Coins, ChevronRight, Gamepad2,
   CreditCard, Wallet, ShieldCheck, ShoppingBag,
   Copy, CheckCircle, ArrowLeft, Gem, ShoppingCart,
   LayoutGrid, FlaskConical, Sword, Shield, Crown,
-  X, Trash2, PackageOpen, Check, Zap, Wine, Tag,
+  X, Trash2, PackageOpen, Check, Zap, Wine, Tag, Target,
 } from 'lucide-react';
 
 interface StoreProduct {
@@ -147,6 +150,7 @@ const ITEM_TYPE_LABEL: Record<string, string> = {
   currency: '货币',
   buff: '增益',
   package: '礼包',
+  content: '内容凭证',
 };
 
 export default function GameStore() {
@@ -175,8 +179,13 @@ export default function GameStore() {
   const [itemTemplates, setItemTemplates] = useState<ItemVoucherTemplate[]>([]);
   const [myItemVouchers, setMyItemVouchers] = useState<Voucher[]>([]);
   const [myPurchases, setMyPurchases] = useState<ItemVoucherPurchase[]>([]);
+  // 🆕 P2b 跨游戏适配：来自其他游戏的道具凭证（可适配到本游戏使用）
+  const [crossGameVouchers, setCrossGameVouchers] = useState<Voucher[]>([]);
   const [activeTab, setActiveTab] = useState<'products' | 'itemShop' | 'myItems'>('products');
   const [pendingRedeemVoucherId, setPendingRedeemVoucherId] = useState<string | null>(null);
+  const [showQuestCreate, setShowQuestCreate] = useState(false);
+  // 跨游戏兑换：待选择兑换方式的来自其他游戏的道具凭证
+  const [exchangeVoucher, setExchangeVoucher] = useState<Voucher | null>(null);
 
   useEffect(() => {
     if (!gameId) return;
@@ -252,6 +261,13 @@ export default function GameStore() {
         setMyItemVouchers(userItemVouchers);
         const purchases = voucherItemService.getUserPurchases(userId, gameId);
         setMyPurchases(purchases);
+
+        // 🆕 P2b 跨游戏适配：加载来自其他游戏的道具凭证（sourceGameId ≠ 当前游戏）
+        const allItemVouchers = voucherItemService.getUserItemVouchers(userId);
+        setCrossGameVouchers(allItemVouchers.filter(v => {
+          const cd = (v.metadata?.customData || {}) as Record<string, any>;
+          return cd.gameId && cd.gameId !== gameId && v.status === 'active' && !cd.contentId;
+        }));
       } catch (error) {
         console.error('加载游戏商店失败:', error);
       } finally {
@@ -268,6 +284,20 @@ export default function GameStore() {
       loadVoucherBalance();
     }
   }, [currentUser?.id]);
+
+  // 🆕 P2b 跨游戏凭证：随登录态/游戏刷新（loadGameAndProducts 只依赖 gameId，
+  // 登录完成晚于首次加载时会用 'current-user' 假用户读到空列表，这里兜底刷新）
+  useEffect(() => {
+    if (!currentUser?.id || !gameId) {
+      setCrossGameVouchers([]);
+      return;
+    }
+    const all = voucherItemService.getUserItemVouchers(currentUser.id);
+    setCrossGameVouchers(all.filter(v => {
+      const cd = (v.metadata?.customData || {}) as Record<string, any>;
+      return cd.gameId && cd.gameId !== gameId && v.status === 'active' && !cd.contentId;
+    }));
+  }, [currentUser?.id, gameId]);
 
   // 监听游戏内兑换码兑换事件，自动标记凭证为已使用
   // 支持同页面（CustomEvent）和跨标签页（storage event）两种场景
@@ -610,6 +640,18 @@ export default function GameStore() {
     window.open(url.toString(), '_blank');
   };
 
+  // 刷新「我的道具凭证」/「已购记录」/「来自其他游戏的道具」三张列表
+  const refreshItemData = () => {
+    if (!currentUser?.id || !gameId) return;
+    setMyItemVouchers(voucherItemService.getUserItemVouchers(currentUser.id, gameId));
+    setMyPurchases(voucherItemService.getUserPurchases(currentUser.id, gameId));
+    const allItemVouchers = voucherItemService.getUserItemVouchers(currentUser.id);
+    setCrossGameVouchers(allItemVouchers.filter(v => {
+      const cd = (v.metadata?.customData || {}) as Record<string, any>;
+      return cd.gameId && cd.gameId !== gameId && v.status === 'active' && !cd.contentId;
+    }));
+  };
+
   // 兑换道具凭证到游戏
   const handleRedeemItemVoucher = async (voucher: Voucher) => {
     if (purchaseState.isPurchasing) return;
@@ -631,13 +673,19 @@ export default function GameStore() {
       });
 
       if (!result.success) {
+        // 🆕 跨游戏道具：不再瞎猜适配，改为弹出「选择兑换方式」引导用户
+        if (result.needsConversion) {
+          setPurchaseState({ isPurchasing: false, productId: null, success: false, error: null });
+          setExchangeVoucher(voucher);
+          return;
+        }
         // 游戏通道不可用时，提供跳转游戏页面的选项
         if (result.message?.includes('游戏通道不可用') || result.message?.includes('游戏未运行')) {
           setPurchaseState({
             isPurchasing: false,
             productId: voucher.id,
             success: false,
-            error: `游戏未在运行中。请先打开游戏，或点击下方按钮跳转到游戏页面自动下发道具。`,
+            error: `游戏通道不可用（商店页无法直接下发）。点击下方按钮打开游戏，道具将自动适配下发。`,
           });
           // 存储待下发的 voucherId 供跳转按钮使用
           setPendingRedeemVoucherId(voucher.id);
@@ -647,11 +695,8 @@ export default function GameStore() {
         return;
       }
 
-      // 刷新数据
-      const userItemVouchers = voucherItemService.getUserItemVouchers(currentUser.id, gameId!);
-      setMyItemVouchers(userItemVouchers);
-      const purchases = voucherItemService.getUserPurchases(currentUser.id, gameId!);
-      setMyPurchases(purchases);
+      // 刷新列表（含 P2b 跨游戏凭证列表：已用凭证从「来自其他游戏」区消失）
+      refreshItemData();
 
       setPurchaseState({
         isPurchasing: false,
@@ -817,6 +862,15 @@ export default function GameStore() {
             </div>
 
             <div className="flex items-center gap-4">
+              {/* 🆕 任务发布入口 */}
+              <button
+                onClick={() => setShowQuestCreate(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-lg font-medium transition-all shadow-lg shadow-indigo-500/25 text-sm"
+              >
+                <Target className="w-4 h-4" />
+                任务发布
+              </button>
+
               {/* 开发者管理入口 */}
               <button
                 onClick={() => navigate(`/voucher-system?tab=item-vouchers&gameId=${gameId}`)}
@@ -1283,12 +1337,25 @@ export default function GameStore() {
                         {/* 兑换信息 */}
                         {item.gameEffect && (
                           <div className="flex items-center gap-2 text-xs text-slate-500 mb-4">
-                            <span className="px-2 py-1 bg-slate-700 rounded">
-                              兑换 {item.gameEffect.quantity} 个
-                            </span>
-                            <span className="px-2 py-1 bg-slate-700 rounded">
-                              ID: {item.gameEffect.itemId}
-                            </span>
+                            {item.gameEffect.schemaName === 'content' ? (
+                              <>
+                                <span className="px-2 py-1 bg-violet-500/20 text-violet-300 rounded">
+                                  内容凭证
+                                </span>
+                                <span className="px-2 py-1 bg-slate-700 rounded">
+                                  1 张 = 1 次游戏会话
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="px-2 py-1 bg-slate-700 rounded">
+                                  兑换 {item.gameEffect.quantity} 个
+                                </span>
+                                <span className="px-2 py-1 bg-slate-700 rounded">
+                                  ID: {item.gameEffect.itemId}
+                                </span>
+                              </>
+                            )}
                           </div>
                         )}
 
@@ -1343,7 +1410,7 @@ export default function GameStore() {
         {/* 我的道具标签页 */}
         {activeTab === 'myItems' && (
           <>
-            {myItemVouchers.length === 0 && myPurchases.length === 0 ? (
+            {myItemVouchers.length === 0 && myPurchases.length === 0 && crossGameVouchers.length === 0 ? (
               <div className="text-center py-16">
                 <Package className="w-16 h-16 mx-auto mb-4 text-slate-600" />
                 <h3 className="text-xl font-bold text-white mb-2">还没有道具凭证</h3>
@@ -1358,6 +1425,7 @@ export default function GameStore() {
             ) : (
               <>
                 {/* 说明卡片 */}
+                {(myItemVouchers.length > 0 || myPurchases.length > 0) && (
                 <div className="mb-8 p-4 bg-green-500/10 border border-green-500/20 rounded-xl">
                   <div className="flex items-start gap-4">
                     <div className="p-3 bg-green-500/20 rounded-lg">
@@ -1385,6 +1453,67 @@ export default function GameStore() {
                     </div>
                   </div>
                 </div>
+                )}
+
+                {/* 🆕 P2b 跨游戏道具凭证（适配到本游戏使用） */}
+                {crossGameVouchers.length > 0 && (
+                  <div className="mb-8 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
+                    <div className="flex items-start gap-4 mb-3">
+                      <div className="p-3 bg-indigo-500/20 rounded-lg">
+                        <i className="fa-solid fa-shuffle text-indigo-300"></i>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-white mb-1">来自其他游戏的道具（可跨游戏适配使用）</h3>
+                        <p className="text-sm text-slate-400">
+                          这些道具凭证来自其他游戏，直接在本游戏使用会因效果不同而失败。点击「兑换到本游戏」，
+                          可选择<b className="text-emerald-300">等值兑换</b>（推荐，换成本游戏原生道具，100% 生效）、
+                          语义映射或原样搬运。
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {crossGameVouchers.map(v => {
+                        const cd = (v.metadata?.customData || {}) as Record<string, any>;
+                        const reviewStatus = cd.reviewStatus;
+                        const reviewBlocked = reviewStatus === 'pending' || reviewStatus === 'rejected';
+                        return (
+                          <div key={v.id} className="bg-slate-800/70 border border-slate-700 rounded-lg px-4 py-2.5">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-white truncate">
+                                  {v.metadata?.name || '未知道具'}
+                                  <span className="ml-2 text-xs text-indigo-300">来自 {String(cd.gameId).slice(0, 16)}</span>
+                                </p>
+                                {reviewStatus === 'pending' && <p className="text-xs text-amber-400">高价值道具审核中，暂不能使用</p>}
+                                {reviewStatus === 'rejected' && <p className="text-xs text-red-400">未通过平台审核，不能使用</p>}
+                              </div>
+                              <button
+                                  onClick={() => setExchangeVoucher(v)}
+                                disabled={reviewBlocked || purchaseState.isPurchasing}
+                                className="shrink-0 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg transition-colors"
+                              >
+                                {reviewBlocked ? '不可用' : '兑换到本游戏'}
+                              </button>
+                            </div>
+                            {/* 商店页没有游戏通道，适配需在游戏页完成：失败后给出明确引导 */}
+                            {purchaseState.error && purchaseState.productId === v.id && pendingRedeemVoucherId === v.id && (
+                              <div className="mt-2.5 pt-2.5 border-t border-slate-700/60 space-y-2">
+                                <p className="text-xs text-amber-400">{purchaseState.error}</p>
+                                <Link
+                                  to={`/game/${gameId}?itemVoucher=${v.id}`}
+                                  className="w-full flex items-center justify-center gap-2 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-lg text-xs font-medium transition-all"
+                                >
+                                  <Gamepad2 className="w-4 h-4" />
+                                  打开游戏并自动适配下发
+                                </Link>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* 道具凭证列表 */}
                 <div className="space-y-4">
@@ -1414,9 +1543,11 @@ export default function GameStore() {
                           >
                             <div className="flex items-start justify-between flex-wrap gap-4">
                               <div className="flex items-center gap-4">
-                                <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white text-xl font-bold ${RARITY_GRADIENTS[rarity] || RARITY_GRADIENTS.common}`}>
-                                  {voucher.metadata?.name?.charAt(0) || '?'}
-                                </div>
+                                <ItemDataArtwork
+                                  voucher={voucher}
+                                  name={voucher.metadata?.name}
+                                  className={`w-12 h-12 rounded-xl flex items-center justify-center text-white text-xl font-bold ${RARITY_GRADIENTS[rarity] || RARITY_GRADIENTS.common}`}
+                                />
                                 <div>
                                   <h4 className="font-semibold text-white">{voucher.metadata?.name || '未知道具'}</h4>
                                   <p className="text-sm text-slate-400">{voucher.metadata?.description}</p>
@@ -1589,9 +1720,11 @@ export default function GameStore() {
                           >
                             <div className="flex items-start justify-between flex-wrap gap-4">
                               <div className="flex items-center gap-4">
-                                <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white text-xl font-bold opacity-50 ${RARITY_GRADIENTS[rarity] || RARITY_GRADIENTS.common}`}>
-                                  {voucher.metadata?.name?.charAt(0) || '?'}
-                                </div>
+                                <ItemDataArtwork
+                                  voucher={voucher}
+                                  name={voucher.metadata?.name}
+                                  className={`w-12 h-12 rounded-xl flex items-center justify-center text-white text-xl font-bold opacity-50 ${RARITY_GRADIENTS[rarity] || RARITY_GRADIENTS.common}`}
+                                />
                                 <div>
                                   <h4 className="font-semibold text-slate-400 line-through">{voucher.metadata?.name || '未知道具'}</h4>
                                   <p className="text-sm text-slate-500">{voucher.metadata?.description}</p>
@@ -1684,6 +1817,36 @@ export default function GameStore() {
           </>
         )}
       </main>
+
+      {/* 任务发布弹窗 */}
+      <AnimatePresence>
+        {showQuestCreate && (
+          <QuestCreateModal
+            defaultGameId={gameId}
+            defaultGameName={game?.name || ''}
+            onClose={() => setShowQuestCreate(false)}
+            onCreated={() => {
+              setShowQuestCreate(false);
+              navigate('/quests');
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* 跨游戏道具兑换弹窗 */}
+      <AnimatePresence>
+        {exchangeVoucher && currentUser?.id && gameId && (
+          <CrossGameExchangeModal
+            voucher={exchangeVoucher}
+            targetGameId={gameId}
+            targetGameName={game?.name}
+            userId={currentUser.id}
+            userName={currentUser.username || '玩家'}
+            onClose={() => setExchangeVoucher(null)}
+            onConverted={() => refreshItemData()}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -4,6 +4,7 @@
 
 import type { AllinONEGame } from '../index';
 import { getCachedToken } from './tokenManager';
+import { getFeatureApiBase } from '../../../../services/apiBase';
 
 export interface Achievement {
   id: string;
@@ -84,7 +85,7 @@ export class AchievementAPI {
       const token = this.getToken();
       if (!token) return false;
 
-      const response = await fetch('/api/achievements/unlock', {
+      const response = await fetch(`${getFeatureApiBase('achievements')}/unlock`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -166,7 +167,7 @@ export class AchievementAPI {
     if (this.achievements.size > 0) return;
 
     try {
-      const response = await fetch(`/api/achievements?gameId=${this.getGameId()}`);
+      const response = await fetch(`${getFeatureApiBase('achievements')}?gameId=${this.getGameId()}`);
       const result = await response.json();
 
       if (result.success && result.achievements) {

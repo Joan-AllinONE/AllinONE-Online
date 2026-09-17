@@ -42,6 +42,40 @@ export function isCloudSyncEnabled(): boolean {
 }
 
 /**
+ * 显式环境标识（区分「dev 预览部署」与「prod 正式」）。
+ *
+ * 仅靠 hostname(tcloudbaseapp.com) 判断 prod 不可靠：
+ *   dev 分支 / 预览版也可能部署到 tcloudbaseapp.com 域名，运行在 prod 域名即会被误判为 prod，
+ *   导致 dev 测试数据写进线上共享存储。
+ *
+ * 判定优先级：
+ *   1. VITE_APP_ENV 显式设置（推荐由部署脚本注入，勿写进 .env 全局）：
+ *      - 'development' / 'dev'           → development（即使 hostname 是 tcloudbaseapp.com 也不写线上）
+ *      - 'production' / 'prod'           → production
+ *   2. 未显式设置：按 hostname 推断（tcloudbaseapp.com → production，其余 development）
+ */
+export function getAppEnv(): 'development' | 'production' {
+  const explicit = import.meta.env.VITE_APP_ENV;
+  if (explicit === 'development' || explicit === 'dev') return 'development';
+  if (explicit === 'production' || explicit === 'prod') return 'production';
+  if (typeof window !== 'undefined' && /tcloudbaseapp\.com$/.test(window.location.hostname)) {
+    return 'production';
+  }
+  return 'development';
+}
+
+/**
+ * 远程写目标判定（环境隔离铁律的核心）：
+ * 仅当「显式/推断为 prod 环境」且「启用云同步」时才允许写入共享远程存储。
+ * dev（localhost 或 VITE_APP_ENV=development 预览部署）一律不写线上，避免污染。
+ *
+ * 等价于 publishedGameService 内的 isProductionTarget，统一在此导出供全项目复用。
+ */
+export function isProductionTarget(): boolean {
+  return getAppEnv() === 'production' && isCloudSyncEnabled();
+}
+
+/**
  * 确保 localStorage 有足够空间存储 CloudBase 认证凭据
  *
  * CloudBase 匿名登录需要将 credentials 写入 localStorage，

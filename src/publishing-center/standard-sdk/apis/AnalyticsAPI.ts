@@ -3,6 +3,7 @@
  */
 
 import type { AllinONEGame } from '../index';
+import { getFeatureApiBase } from '../../../../services/apiBase';
 
 export interface AnalyticsEvent {
   name: string;
@@ -124,7 +125,7 @@ export class AnalyticsAPI {
     this.eventQueue = [];
 
     try {
-      const response = await fetch('/api/analytics/track', {
+      const response = await fetch(`${getFeatureApiBase('analytics')}/track`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

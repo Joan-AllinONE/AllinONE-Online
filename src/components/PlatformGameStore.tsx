@@ -11,6 +11,7 @@ import { platformGameStoreService } from '@/services/platformGameStoreService';
 import { voucherItemService } from '@/services/voucherItemService';
 import { skillGateway } from '@/skills';
 import { AuthContext } from '@/contexts/authContext';
+import { ItemDataArtwork } from '@/components/ItemDataArtwork';
 import type {
   ExternalGameStore,
   PlatformStoreItem,
@@ -305,9 +306,11 @@ function MyItemsPanel() {
                 >
                   <div className="flex items-start justify-between flex-wrap gap-3">
                     <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-lg font-bold ${RARITY_GRADIENTS[rarity] || RARITY_GRADIENTS.common}`}>
-                        {voucher.metadata?.name?.charAt(0) || '?'}
-                      </div>
+                      <ItemDataArtwork
+                        voucher={voucher}
+                        name={voucher.metadata?.name}
+                        className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-lg font-bold ${RARITY_GRADIENTS[rarity] || RARITY_GRADIENTS.common}`}
+                      />
                       <div>
                         <h4 className="font-semibold text-white text-sm">{voucher.metadata?.name || '未知道具'}</h4>
                         <p className="text-xs text-slate-400">{voucher.metadata?.description}</p>

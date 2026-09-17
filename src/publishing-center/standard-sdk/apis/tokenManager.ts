@@ -5,6 +5,8 @@
  * Token 仅缓存在内存中。
  */
 
+import { getApiBase } from '../../../../services/apiBase';
+
 let cachedToken: string | null = null;
 let tokenExpiry: number = 0;
 const TOKEN_TTL_MS = 50 * 60 * 1000; // 50 分钟
@@ -37,7 +39,7 @@ export async function getToken(): Promise<string | null> {
       userId = user.uid || user.id || 'anonymous';
     }
 
-    const resp = await fetch('/api/v1/games/dev-token', {
+    const resp = await fetch(`${getApiBase()}/dev-token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId }),

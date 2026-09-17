@@ -4,6 +4,7 @@
 
 import type { AllinONEGame } from '../index';
 import { getCachedToken } from './tokenManager';
+import { getFeatureApiBase } from '../../../../services/apiBase';
 
 export interface InventoryItem {
   id: string;
@@ -166,7 +167,7 @@ export class InventoryAPI {
       const token = this.getToken();
       if (!token) return;
 
-      const response = await fetch(`/api/inventory?gameSource=${this.getGameId()}`, {
+      const response = await fetch(`${getFeatureApiBase('inventory')}?gameSource=${this.getGameId()}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -196,7 +197,7 @@ export class InventoryAPI {
       const token = this.getToken();
       if (!token) return;
 
-      await fetch('/api/inventory/sync', {
+      await fetch(`${getFeatureApiBase('inventory')}/sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

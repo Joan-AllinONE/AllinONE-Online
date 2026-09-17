@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { SkillErrors } from '../errors';
 import { writeQueue } from '../../services/writeQueue';
+import { loadFromBackend } from '../../services/backendSync';
 
 // ==================== 类型定义 ====================
 
@@ -748,6 +749,26 @@ export class InventorySkill extends BaseSkill {
     } catch (error) {
       console.error('[InventorySkill] 加载数据失败:', error);
     }
+    // 只读同步：从后端拉取云端库存，云端为准覆盖同 itemId（写入维持现状）
+    this.syncFromBackend().catch(() => {});
+  }
+
+  /** 只读同步：从后端拉取库存并合并（云端优先） */
+  private async syncFromBackend(): Promise<void> {
+    try {
+      const cloud = await loadFromBackend<InventoryItem>('inventories');
+      if (cloud.length === 0) return;
+      for (const item of cloud) {
+        if (item && item.itemId) this.items.set(item.itemId, item);
+      }
+      // 仅刷新本地缓存，不触发云端写入
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify({
+        items: Object.fromEntries(this.items),
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch {
+      // 后端不可达 — 保持本地数据
+    }
   }
 
   private async saveToStorage(): Promise<void> {
@@ -757,7 +778,8 @@ export class InventorySkill extends BaseSkill {
         updatedAt: new Date().toISOString(),
       };
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data));
-      // CloudBase 双写（通过写入队列，全量入队不再截断）
+      // ⚠️ inventories 为只读同步集合：写入维持现状（writeQueue，本地/dev 有效），
+      // 不走公开后端写端点，避免资产被无鉴权篡改。
       const items = Array.from(this.items.values());
       for (const item of items) {
         writeQueue.enqueue({

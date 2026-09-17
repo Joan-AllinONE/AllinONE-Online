@@ -3,6 +3,7 @@
  */
 
 import type { AllinONEGame } from '../index';
+import { getFeatureApiBase } from '../../../../services/apiBase';
 
 export interface User {
   id: string;
@@ -47,7 +48,7 @@ export class AuthAPI {
   async login(username: string, password: string): Promise<LoginResult> {
     try {
       // 调用平台登录API
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch(`${getFeatureApiBase('auth')}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -78,7 +79,7 @@ export class AuthAPI {
    */
   async register(username: string, password: string, email?: string): Promise<LoginResult> {
     try {
-      const response = await fetch('/api/auth/register', {
+      const response = await fetch(`${getFeatureApiBase('auth')}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, email }),

@@ -10,4 +10,8 @@
 //   window.__API_BASE_URL = 'http://c647c55bf7ac4a28be18134cc8890844.codebuddy.cloudstudio.run:5000/api';
 //
 // 注意：CloudStudio 预览 URL 在每次重新部署后可能变化，请同步更新此处。
-window.__API_BASE_URL = 'https://allinonegaming-d4gmsmrzz573264f6.service.tcloudbase.com/api';
+// dev（localhost）留空，让 Service Worker 放行走 vite 代理到本地 server.js；
+// 生产（CloudBase 静态托管）使用云函数永久 URL。
+window.__API_BASE_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? ''
+  : 'https://allinonegaming-d4gmsmrzz573264f6.service.tcloudbase.com/api';

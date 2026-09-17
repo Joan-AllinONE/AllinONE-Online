@@ -1,6 +1,10 @@
 /**
  * 双写渐进迁移工具
  *
+ * @deprecated 已无调用方（2026-08-04 核查）。写入依赖 writeQueue，
+ * 而浏览器端 CloudBase JS SDK auth 已损坏（auth.call is not a function），
+ * 线上写入永不落库。新代码请使用 `services/backendSync.ts`（走 gamesApi 云函数）。
+ *
  * 写入时：同时写 localStorage 和 CloudBase（通过写入队列，保证重试 + 零丢失）
  * 读取时：CloudBase 优先，失败回退 localStorage
  */

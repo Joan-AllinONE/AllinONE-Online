@@ -481,6 +481,25 @@ export class ProtocolEngine {
   }
 
   /**
+   * 🆕 单例配置补挂：getDefaultEngine() 首次创建后 config 固定，
+   * GamePlay 等宿主后续传入的 onRedeem/skillGateway 等回调需要补挂到
+   * 已存在的单例上（模块级 protocolEngine = getDefaultEngine() 会在
+   * import 时就创建无配置单例，首参 config 会被忽略）。
+   */
+  ensureConfig(config: ProtocolEngineConfig): void {
+    this.config = { ...this.config, ...config };
+  }
+
+  /**
+   * 🆕 仅释放指定游戏的通道（单例模式下宿主组件卸载时使用；
+   * 绝不能调用 destroy() —— 那会清空全局 channels/listeners，
+   * 且 defaultEngine 仍指向该实例，后续拿到的是空壳引擎）。
+   */
+  releaseChannel(gameId: string): void {
+    this.channels.delete(gameId);
+  }
+
+  /**
    * 销毁引擎
    */
   destroy(): void {

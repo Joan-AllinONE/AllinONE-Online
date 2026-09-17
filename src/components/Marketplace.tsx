@@ -5,12 +5,14 @@
  * 支持 gameCoins + aCoins 两种标价
  * 面额溢价/折价标注，aCoins 支付走凭证系统
  */
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthContext } from '@/contexts/authContext';
 import { marketplaceService } from '@/services/marketplaceService';
 import { voucherService } from '@/voucher-system/services/VoucherService';
+import { voucherDB } from '@/voucher-system';
+import { ItemDataArtwork, extractArtworkFromVoucher } from '@/components/ItemDataArtwork';
 import { useWallet } from '@/hooks/useWallet';
 import { MARKET_COMMISSION_RATE, loadTreasury } from '@/types/marketplace';
 import type { MarketListing, PlatformTreasury } from '@/types/marketplace';
@@ -456,6 +458,13 @@ function ListingCard({
     ? Math.round((priceDiff / listing.denomination) * 100)
     : 0;
 
+  // 作品图：优先挂牌快照（上架时固化，跨浏览器可显示），否则反查本机凭证库
+  const artwork = useMemo(() => {
+    if (listing.artwork) return listing.artwork;
+    try { return extractArtworkFromVoucher(voucherDB.getVoucherById(listing.voucherId)); }
+    catch { return null; }
+  }, [listing.artwork, listing.voucherId]);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -464,7 +473,11 @@ function ListingCard({
     >
       {/* 道具图标区域 */}
       <div className="aspect-square bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center relative">
-        <Package className="w-12 h-12 text-slate-500" />
+        {artwork ? (
+          <ItemDataArtwork itemData={artwork} name={listing.itemName} className="w-full h-full p-3 rounded-lg" />
+        ) : (
+          <Package className="w-12 h-12 text-slate-500" />
+        )}
         {/* 状态标签 */}
         {listing.status !== 'active' && (
           <div className={`absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-medium ${

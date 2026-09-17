@@ -16,7 +16,8 @@ import {
   Gamepad2, Coins, ShoppingCart, Trophy, Users,
   Cloud, Globe, Bell, Languages, Sparkles, X, Wand2,
   Ticket, Plus, Trash2, ExternalLink,
-  BookOpen, HelpCircle, ChevronDown, Info
+  BookOpen, HelpCircle, ChevronDown, Info, Boxes, Check, FileText,
+  ImagePlus, Image as ImageIcon
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -48,6 +49,8 @@ import { redeemCodeService } from '@/services/redeemCodeService';
 import { voucherItemService } from '@/services/voucherItemService';
 import { effectTypeRegistry, type EffectTypeDefinition, type EffectParameter } from '../effects/EffectTypeRegistry';
 import type { GameItemSop } from '@/services/publishedGameService';
+import type { GameContentSop } from '@/types/quest';
+import { isProductionTarget, getAppEnv } from '@/services/cloudbase';
 
 // ==================== SOP 模板数据 ====================
 
@@ -171,6 +174,8 @@ interface PublishingCenterProps {
     size?: number;
     itemSop?: GameItemSop;
     sopDocument?: string;
+    contentSop?: GameContentSop;
+    contentSopDocument?: string;
   }) => void;
   onPublishError?: (error: string) => void;
   preloadedFiles?: File[] | null;
@@ -300,7 +305,7 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
   // 兑换码配置状态
   const [redeemItems, setRedeemItems] = useState<CreateHostedItemRequest[]>([]);
   const [showRedeemForm, setShowRedeemForm] = useState(false);
-  const [activeConfigTab, setActiveConfigTab] = useState<'skills' | 'redeem' | 'sop'>('skills');
+  const [activeConfigTab, setActiveConfigTab] = useState<'skills' | 'redeem' | 'sop' | 'contentSop' | 'intro'>('skills');
   const [protocolMode, setProtocolMode] = useState<'inject' | 'integrated'>('inject');
 
   // 🆕 SOP 配置状态
@@ -319,17 +324,29 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
   const [sopJsonText, setSopJsonText] = useState('');
   // 独立状态：用户上传的 .md 原始文档（与 JSON 编辑器互不干扰）
   const [sopUploadedMd, setSopUploadedMd] = useState('');
+
+  // 🆕 内容创作 SOP 配置状态（与道具 SOP 并列、独立启用）
+  const [contentSopForm, setContentSopForm] = useState<Partial<GameContentSop>>({ enabled: false, contentTypes: [] });
+  const [contentSopJsonText, setContentSopJsonText] = useState('');
+  const [contentSopUploadedMd, setContentSopUploadedMd] = useState('');
+  const [showContentSopGuide, setShowContentSopGuide] = useState(false);
   const [selectedEffectType, setSelectedEffectType] = useState<string>('difficulty_reducer');
   // Fix 1 & 2: Mode B 警告对话框状态
   const [showModeBWarning, setShowModeBWarning] = useState(false);
   const [detectedUsesSDK, setDetectedUsesSDK] = useState(false);
   const [isLoadingTemplate, setIsLoadingTemplate] = useState(false);
+  // 游戏简介与封面
+  const [summary, setSummary] = useState('');
+  const [coverImage, setCoverImage] = useState('');
+  const [customGameName, setCustomGameName] = useState('');
+  const coverInputRef = useRef<HTMLInputElement>(null);
   // 发布指南
   const [showGuide, setShowGuide] = useState(false);
   const [guideTab, setGuideTab] = useState<'overview' | 'modes' | 'items' | 'case' | 'faq'>('overview');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sopFileInputRef = useRef<HTMLInputElement>(null);
+  const contentSopFileInputRef = useRef<HTMLInputElement>(null);
 
   // 使用预加载的文件
   useEffect(() => {
@@ -337,6 +354,16 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
       setUploadedFiles(preloadedFiles);
     }
   }, [preloadedFiles]);
+
+  // 分析完成后预填游戏名称（可在「游戏简介」标签页中修改）
+  useEffect(() => {
+    if (!analysisResult) return;
+    const detectedName = (analysisResult as any).detectedInfo?.projectName
+      || (analysisResult as any).gameName
+      || (uploadedFiles[0]?.name || '').replace(/\.(zip|html?|htm)$/i, '')
+      || '未命名游戏';
+    setCustomGameName(detectedName);
+  }, [analysisResult, uploadedFiles]);
 
   // 监听流水线状态
   useEffect(() => {
@@ -371,6 +398,39 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
       const files = Array.from(e.target.files);
       setUploadedFiles(files);
     }
+  }, []);
+
+  // 游戏封面上传：读取并压缩到最大宽 800px，转 JPEG data URL（直接存文档，跨浏览器可读）
+  const handleCoverChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 800;
+        const scale = img.width > maxW ? maxW / img.width : 1;
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          setCoverImage(reader.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        setCoverImage(canvas.toDataURL('image/jpeg', 0.85));
+        toast.success('封面已上传并压缩');
+      };
+      img.onerror = () => toast.error('图片解析失败');
+      img.src = reader.result as string;
+    };
+    reader.onerror = () => toast.error('文件读取失败');
+    reader.readAsDataURL(file);
+    // 允许重复选择同一文件
+    e.target.value = '';
   }, []);
 
   // 解压ZIP文件
@@ -713,15 +773,32 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
   // 发布
   const handlePublish = useCallback(async () => {
     if (!analysisResult) return;
+
+    // 环境校验 + 发布确认（防止 dev 预览/误操作污染线上）
+    if (isProductionTarget()) {
+      const ok = window.confirm(
+        '⚠️ 当前运行在【线上生产环境】，即将把游戏发布到全平台共享存储并在所有玩家浏览器可见。\n\n' +
+        '确认要继续发布到线上吗？\n（dev 预览部署请设置 VITE_APP_ENV=development 以避免误发布）'
+      );
+      if (!ok) {
+        toast.info('已取消发布（线上环境）');
+        return;
+      }
+    }
     
     setIsPublishing(true);
     setError(null);
     
     try {
       // 从分析结果中提取信息（兼容不同结构）
-      const gameName = (analysisResult as any).detectedInfo?.projectName 
-        || (analysisResult as any).gameName 
-        || (uploadedFiles[0]?.name?.replace(/\.zip$/i, '') || '未命名游戏');
+      // 回退到文件名时去掉扩展名（.zip/.html/.htm 等），避免游戏名变成「超级玛丽改造5.html」
+      const fallbackName = (uploadedFiles[0]?.name || '')
+        .replace(/\.(zip|html?|htm)$/i, '') || '未命名游戏';
+      const detectedName = (analysisResult as any).detectedInfo?.projectName
+        || (analysisResult as any).gameName
+        || fallbackName;
+      // 「游戏简介」标签页中可修改游戏名称（清空则回退到自动检测名）
+      const gameName = customGameName.trim() || detectedName;
       const framework = (analysisResult as any).detectedInfo?.framework 
         || analysisResult.framework?.framework 
         || 'unknown';
@@ -755,6 +832,8 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
           reason: 'AI推荐',
         })) || [],
         standardConfig: config,
+        summary: summary,
+        coverImage: coverImage,
         files: extractedFiles.length > 0 ? extractedFiles : undefined,
         redeemItems: redeemItems.map(item => ({
           name: item.name,
@@ -784,7 +863,12 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
             try {
               const itemRarity = (item.gameEffect.metadata?.rarity as string) || 'common';
               const effectType = item.gameEffect.effectType || (item.gameEffect.metadata?.effectType as string) || 'custom';
-              const isLimited = item.initialInventory > 0;
+              // 发行策略以发布者表单选择为准（handleAddRedeemItem 写入 metadata.supplyPolicy）。
+              // 初始库存只决定首铸数量，与总量上限解耦：
+              // - OPEN：无 totalSupply，首铸 initialInventory 张，之后可无限增发
+              // - LIMITED：总量上限 = initialInventory（锁定，不可增发）
+              const policy = (item.gameEffect.metadata?.supplyPolicy as ItemSupplyPolicy) || ItemSupplyPolicy.OPEN;
+              const isLimited = policy === ItemSupplyPolicy.LIMITED;
 
               // 1) 创建道具模板
               const template = voucherItemService.createItemTemplate({
@@ -803,15 +887,15 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
                   quantity: item.gameEffect.quantity || 1,
                   metadata: item.gameEffect.metadata || {},
                 },
-                supplyPolicy: isLimited ? ItemSupplyPolicy.LIMITED : ItemSupplyPolicy.OPEN as ItemSupplyPolicy,
+                supplyPolicy: policy,
                 totalSupply: isLimited ? item.initialInventory : undefined,
                 imageUrl: '',
                 isActive: true,
                 createdBy: currentUser?.id || 'system',
               } as any);
 
-              // 2) 创建模板后立即铸造凭证到平台池，数量与初始库存一致
-              if (isLimited && template?.id) {
+              // 2) 创建模板后立即铸造初始库存到平台池（数量=初始库存，与发行策略无关）
+              if (template?.id && item.initialInventory > 0) {
                 voucherItemService.mintItemVouchers({
                   gameId,
                   templateId: template.id,
@@ -843,6 +927,8 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
             schemaName: sopForm.schemaName,
           } as GameItemSop : undefined,
           sopDocument: sopUploadedMd || undefined,
+          contentSop: contentSopForm as GameContentSop,
+          contentSopDocument: contentSopUploadedMd || undefined,
         });
       } else {
         throw new Error(result.error);
@@ -853,7 +939,7 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
     } finally {
       setIsPublishing(false);
     }
-  }, [analysisResult, selectedSkills, uploadedFiles, pipeline, onPublishComplete, onPublishError, redeemItems, sopForm, sopUploadedMd, protocolMode, currentUser, recommendations, extractedFiles]);
+  }, [analysisResult, selectedSkills, uploadedFiles, pipeline, onPublishComplete, onPublishError, redeemItems, sopForm, sopUploadedMd, contentSopForm, contentSopUploadedMd, protocolMode, currentUser, recommendations, extractedFiles, summary, coverImage, customGameName]);
 
   // 渲染步骤指示器
   const renderStepIndicator = () => (
@@ -1167,6 +1253,20 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
               )}
             </button>
             <button
+              onClick={() => setActiveConfigTab('intro')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all ${
+                activeConfigTab === 'intro'
+                  ? 'bg-amber-500 text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              游戏简介
+              {(summary || coverImage) && (
+                <span className="px-1.5 py-0.5 bg-white/20 rounded-full text-xs">✓</span>
+              )}
+            </button>
+            <button
               onClick={() => setActiveConfigTab('redeem')}
               className={`flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all ${
                 activeConfigTab === 'redeem'
@@ -1196,8 +1296,111 @@ export const PublishingCenter: React.FC<PublishingCenterProps> = ({
                 <span className="px-1.5 py-0.5 bg-white/20 rounded-full text-xs">✓</span>
               )}
             </button>
+            <button
+              onClick={() => setActiveConfigTab('contentSop')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all ${
+                activeConfigTab === 'contentSop'
+                  ? 'bg-cyan-500 text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <Boxes className="w-4 h-4" />
+              内容创作 SOP
+              {contentSopForm.enabled && (
+                <span className="px-1.5 py-0.5 bg-white/20 rounded-full text-xs">✓</span>
+              )}
+            </button>
           </div>
           
+          {/* 游戏简介标签页 */}
+          {activeConfigTab === 'intro' && (
+            <div className="space-y-5">
+              <div className="text-sm text-amber-300/80 flex items-center gap-2">
+                <FileText className="w-4 h-4" />
+                游戏简介与封面将展示在游戏中心卡片与详情页，帮助玩家快速了解游戏。
+              </div>
+
+              {/* 游戏名称（可修改） */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">游戏名称</label>
+                <input
+                  type="text"
+                  value={customGameName}
+                  onChange={(e) => setCustomGameName(e.target.value)}
+                  placeholder="将显示在游戏中心卡片与详情页（最多 50 字）"
+                  maxLength={50}
+                  className="w-full px-3 py-2 rounded-md bg-slate-900/60 border border-slate-700 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500"
+                />
+                <div className="text-right text-xs text-gray-500 mt-1">
+                  {customGameName.length}/50
+                </div>
+              </div>
+
+              {/* 游戏封面 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">游戏封面</label>
+                {coverImage ? (
+                  <div className="flex items-start gap-4">
+                    <img
+                      src={coverImage}
+                      alt="游戏封面预览"
+                      className="w-40 h-28 object-cover rounded-lg border border-slate-700"
+                    />
+                    <div className="flex flex-col gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => coverInputRef.current?.click()}
+                      >
+                        <ImagePlus className="w-4 h-4 mr-1" /> 重新上传
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-400 hover:text-red-300"
+                        onClick={() => setCoverImage('')}
+                      >
+                        <Trash2 className="w-4 h-4 mr-1" /> 移除封面
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => coverInputRef.current?.click()}
+                    className="w-full flex flex-col items-center justify-center gap-2 py-8 rounded-lg border-2 border-dashed border-slate-700 hover:border-amber-500/60 hover:bg-amber-500/5 transition-all"
+                  >
+                    <ImagePlus className="w-8 h-8 text-gray-500" />
+                    <span className="text-sm text-gray-400">点击上传游戏封面（建议 16:9 或 4:3，将自动压缩）</span>
+                  </button>
+                )}
+                <input
+                  ref={coverInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleCoverChange}
+                />
+              </div>
+
+              {/* 游戏简介 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">游戏简介</label>
+                <textarea
+                  value={summary}
+                  onChange={(e) => setSummary(e.target.value)}
+                  placeholder="介绍这款游戏的玩法、特色、背景故事……（最多 500 字）"
+                  rows={5}
+                  maxLength={500}
+                  className="w-full px-3 py-2 rounded-md bg-slate-900/60 border border-slate-700 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500 resize-y"
+                />
+                <div className="text-right text-xs text-gray-500 mt-1">
+                  {summary.length}/500
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Skills 配置标签页 */}
           {activeConfigTab === 'skills' && (
             <div className="space-y-3">
@@ -1581,6 +1784,131 @@ AllinONE.onItemRedeemed(function(data) {
               <p className="text-xs text-gray-500 text-center">💡 此步骤可选 — 跳过则道具工坊使用通用规则</p>
             </div>
           )}
+
+          {/* 🆕 内容创作 SOP 配置标签页（与道具 SOP 并列、独立启用） */}
+          {activeConfigTab === 'contentSop' && (
+            <div className="space-y-6">
+              {/* 机制说明折叠区 */}
+              <div className="rounded-xl border border-slate-700/50 overflow-hidden">
+                <button
+                  onClick={() => setShowContentSopGuide(!showContentSopGuide)}
+                  className="w-full flex items-center justify-between px-5 py-3 bg-slate-700/30 hover:bg-slate-700/50 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <Boxes className="w-4 h-4 text-cyan-400" />
+                    <span className="text-sm font-medium text-white">内容创作 SOP 说明（启用后开放内容工坊）</span>
+                  </div>
+                  {showContentSopGuide
+                    ? <ChevronDown className="w-4 h-4 text-gray-400 rotate-180" />
+                    : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                </button>
+                {showContentSopGuide && (
+                  <div className="px-5 py-4 bg-slate-800/80 text-sm text-gray-300 space-y-3 border-t border-slate-700/50">
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      「内容创作 SOP」与「道具 SOP」并列、互不影响。启用后：
+                    </p>
+                    <ul className="text-xs text-gray-300 space-y-1.5 list-disc list-inside">
+                      <li><strong className="text-cyan-300">分发层注入 ContentLoader 骨架</strong> — 仅启用本 SOP 的游戏在入口 HTML 注入固定 loader SDK（空操作，不激活任何内容）</li>
+                      <li><strong className="text-cyan-300">内容工坊开放该游戏</strong> — 玩家可按声明的 contentTypes 创作内容数据包（地图/角色/剧情/道具），铸造「内容凭证」（按次使用、可交易）</li>
+                      <li><strong className="text-cyan-300">游戏内按次使用</strong> — 玩家使用内容凭证后，loader 通过 <code className="px-1 py-0.5 bg-slate-700 rounded">CONTENT_PACK_APPLY</code> 应用内容，本次会话生效</li>
+                      <li>未配置本 SOP 的游戏：不注入 loader、内容工坊不展示该游戏，与现状零差异</li>
+                    </ul>
+                    <p className="text-xs text-gray-400">
+                      游戏方在游戏中用 <code className="px-1 py-0.5 bg-slate-700 rounded">window.AllinONE_ContentLoader.on('levels', fn)</code>
+                      或 <code className="px-1 py-0.5 bg-slate-700 rounded">window.AllinONE_ContentHandlers = { '{' } levels: fn {'}' }</code> 接收内容包；每个 contentTypes 的 <code className="px-1 py-0.5 bg-slate-700 rounded">apiGuide</code> 说明游戏的创作 API。
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* 启用开关 */}
+              <div className="flex items-center justify-between p-4 rounded-xl border border-slate-700/50 bg-slate-800/40">
+                <div>
+                  <p className="text-sm font-medium text-white">启用内容创作 SOP</p>
+                  <p className="text-xs text-gray-500 mt-0.5">开启后内容工坊开放该游戏的创作，分发层注入 ContentLoader</p>
+                </div>
+                <button
+                  onClick={() => setContentSopForm(prev => ({ ...prev, enabled: !prev.enabled, contentTypes: prev.contentTypes || [] }))}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${contentSopForm.enabled ? 'bg-cyan-500' : 'bg-slate-600'}`}
+                >
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${contentSopForm.enabled ? 'left-6' : 'left-0.5'}`} />
+                </button>
+              </div>
+
+              {/* contentTypes 表单（简化） */}
+              <div className="space-y-3">
+                <label className="text-xs text-gray-400">声明支持创作的内容类型（JSON，GameContentSop.contentTypes）</label>
+                <textarea
+                  value={contentSopJsonText}
+                  onChange={e => setContentSopJsonText(e.target.value)}
+                  placeholder='[{"type":"map","slot":"levels","label":"地图","description":"","modes":["data","inject"],"apiGuide":"window.MarioLevel.build(api)"}]'
+                  rows={12}
+                  className="w-full px-3 py-2 bg-[#0F0F23]/80 border border-slate-700 rounded-lg text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-cyan-500 font-mono leading-relaxed resize-y"
+                  spellCheck={false}
+                />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button variant="outline" onClick={() => {
+                    try {
+                      const contentTypes = JSON.parse(contentSopJsonText);
+                      setContentSopForm(prev => ({ ...prev, contentTypes: Array.isArray(contentTypes) ? contentTypes : [] }));
+                      toast.success('内容类型已应用到表单');
+                    } catch { toast.error('JSON 格式错误，请检查'); }
+                  }} className="text-xs">
+                    <Check className="w-4 h-4" /> 应用到表单
+                  </Button>
+                  <button onClick={() => {
+                    const tpl = [
+                      { type: 'map', slot: 'levels', label: '地图', description: '创作自定义地图关卡', modes: ['data', 'inject'], apiGuide: 'window.MarioLevel.build(api)' },
+                      { type: 'character', slot: 'items', label: '角色', description: '创作自定义角色/皮肤', modes: ['data'], apiGuide: 'window.AllinONE_ContentHandlers.items(pack)' },
+                    ];
+                    setContentSopJsonText(JSON.stringify(tpl, null, 2));
+                    setContentSopForm(prev => ({ ...prev, contentTypes: tpl }));
+                    toast.success('已载入内容类型模板');
+                  }} className="px-3 py-1.5 text-xs bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 rounded-md hover:bg-cyan-500/25 transition-colors">
+                    📎 载入示例类型
+                  </button>
+                </div>
+              </div>
+
+              {/* 上传创作指南 .md（独立于 JSON） */}
+              <div className="rounded-xl border border-amber-500/30 overflow-hidden">
+                <div className="px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-amber-300">📄 上传内容创作指南（.md，创作引导文档，含 API 文档/数据结构/资产打包说明）</span>
+                    {contentSopUploadedMd && <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">已上传</span>}
+                  </div>
+                </div>
+                <div className="px-4 py-3 flex items-center gap-3">
+                  <input
+                    ref={contentSopFileInputRef}
+                    type="file"
+                    accept=".md,text/markdown"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (!file.name.endsWith('.md')) { toast.error('仅支持 .md 格式'); e.target.value = ''; return; }
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        setContentSopUploadedMd(String(ev.target?.result || ''));
+                        toast.success('内容创作指南已导入');
+                      };
+                      reader.readAsText(file);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button variant="outline" onClick={() => contentSopFileInputRef.current?.click()} className="text-xs">
+                    <Upload className="w-4 h-4" /> {contentSopUploadedMd ? '重新上传指南 (.md)' : '上传创作指南 (.md)'}
+                  </Button>
+                  {contentSopUploadedMd && (
+                    <Button variant="ghost" onClick={() => setContentSopUploadedMd('')} className="text-xs text-red-400 hover:text-red-300">清除</Button>
+                  )}
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500 text-center">💡 此步骤可选 — 跳过则该游戏不在内容工坊开放，也不注入 ContentLoader（与现状零差异）</p>
+            </div>
+          )}
           
           <div className="mt-6 flex justify-between">
             <Button variant="outline" onClick={() => setCurrentStep(PublishStep.UPLOAD)}>
@@ -1605,6 +1933,13 @@ AllinONE.onItemRedeemed(function(data) {
                 </>
               )}
             </Button>
+            <span className={`px-2 py-1 rounded text-xs font-semibold ${
+              getAppEnv() === 'production'
+                ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                : 'bg-green-500/20 text-green-300 border border-green-500/40'
+            }`} title="当前发布目标环境（由 VITE_APP_ENV 或访问域名推断）">
+              {getAppEnv() === 'production' ? '🌐 线上环境' : '🧪 开发/预览'}
+            </span>
             </div>
           </div>
         </CardContent>
@@ -2450,11 +2785,12 @@ const CONFIG_KEY = '__ALLINONE_CONFIG__';`}</pre>
                     <option value={ItemSupplyPolicy.OPEN}>OPEN - 开放发行（可无限增发）</option>
                     <option value={ItemSupplyPolicy.LIMITED}>LIMITED - 限量发行（总量锁定）</option>
                   </select>
+                  <p className="text-xs text-gray-500">OPEN：总量无上限，初始库存为首次铸造数量，后续可增发；LIMITED：总量上限=初始库存，不可增发</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-gray-300">初始库存 / 总量</label>
+                  <label className="text-sm font-medium text-gray-300">初始库存（首次铸造数量）</label>
                   <input
                     name="initialInventory"
                     type="number"
@@ -2462,6 +2798,7 @@ const CONFIG_KEY = '__ALLINONE_CONFIG__';`}</pre>
                     defaultValue="100"
                     className="w-full px-3 py-2 rounded-lg border border-slate-600 bg-slate-700 text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   />
+                  <p className="text-xs text-gray-500">发布时按此数量铸造到平台池；仅 LIMITED 策略下该值同时作为总量上限</p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-300">道具稀有度</label>

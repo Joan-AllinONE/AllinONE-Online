@@ -1,33 +1,35 @@
 /**
- * CloudBase 通用同步工具
- * 为凭证系统各服务提供 CloudBase 数据库优先 + localStorage 缓存能力
+ * 通用云同步工具
+ * 为凭证系统各服务提供「云端为准 + localStorage 缓存」能力
  *
- * 架构原则（2026-06-18 上线准备）：
- * - CloudBase 数据库是权威数据源，localStorage 仅作缓存
- * - 写入路径：通过 writeQueue 入队 CloudBase，同时更新本地缓存
- * - 读取路径：CloudBase 数据覆盖本地缓存（云端为准）
- * - CloudBase 不可用时，回退到本地缓存（保证离线可用）
+ * 架构原则（2026-08-04 修订）：
+ * - 云端数据库是权威数据源，localStorage 仅作缓存
+ * - 写入路径：走 gamesApi 云函数（admin SDK）——浏览器端 CloudBase JS SDK auth 已损坏，
+ *   writeQueue 线上永不落库，故不再使用
+ * - 读取路径：后端分页拉全量，云端数据覆盖本地缓存（绝不 limit 截断）
+ * - 后端不可达时，回退到本地缓存（保证离线可用）
  */
 
-import { isCloudBaseReady, getCloudBaseApp } from '../../services/cloudbase';
-import { writeQueue } from '../../services/writeQueue';
+import {
+  saveToBackend,
+  saveBatchToBackend,
+  loadFromBackend,
+  deleteFromBackend,
+  type SyncCollection,
+} from '../../services/backendSync';
 
 /**
- * 将单条记录 upsert 到 CloudBase 集合（通过写入队列，保证不丢失）
+ * 将单条记录 upsert 到云端集合（走后端云函数）
  */
 export async function upsertToCloud<T extends { id: string }>(
   collection: string,
   data: T,
 ): Promise<void> {
-  writeQueue.enqueue({
-    collection,
-    operation: 'upsert',
-    data: data as Record<string, any>,
-  });
+  await saveToBackend(collection as SyncCollection, data as Record<string, any>);
 }
 
 /**
- * 批量 upsert 到 CloudBase（全量入队，不再截断）
+ * 批量 upsert 到云端（全量提交，不再截断）
  */
 export async function batchUpsertToCloud<T extends { id: string }>(
   collection: string,
@@ -35,48 +37,31 @@ export async function batchUpsertToCloud<T extends { id: string }>(
   _limit = 50,
 ): Promise<void> {
   if (items.length === 0) return;
-  for (const item of items) {
-    writeQueue.enqueue({
-      collection,
-      operation: 'upsert',
-      data: item as Record<string, any>,
-    });
-  }
+  await saveBatchToBackend(collection as SyncCollection, items as Record<string, any>[]);
 }
 
 /**
- * 从 CloudBase 集合加载所有数据（读取路径，不经过队列）
+ * 从云端集合加载所有数据（分页全量，绝不截断）
  */
 export async function loadFromCloud<T>(
   collection: string,
-  limit = 500,
+  _limit = 500,
 ): Promise<T[]> {
-  if (!isCloudBaseReady()) return [];
-  try {
-    const db = getCloudBaseApp().database();
-    const res = await db.collection(collection).limit(limit).get();
-    return res.data as T[];
-  } catch {
-    return [];
-  }
+  return loadFromBackend<T>(collection as SyncCollection);
 }
 
 /**
- * 从 CloudBase 删除记录（通过写入队列，保证不丢失）
+ * 从云端删除记录（走后端云函数）
  */
 export async function deleteFromCloud(
   collection: string,
   id: string,
 ): Promise<void> {
-  writeQueue.enqueue({
-    collection,
-    operation: 'delete',
-    where: { id },
-  });
+  await deleteFromBackend(collection as SyncCollection, id);
 }
 
 /**
- * 通用双写持久化：先写 localStorage，再通过写入队列同步到 CloudBase
+ * 通用双写持久化：先写 localStorage，再同步到云端
  * @param storageKey localStorage 键名
  * @param data 要持久化的数据
  * @param cloudCollection CloudBase 集合名（可选）

@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/authContext';
 import { voucherPaymentService } from '@/services/voucherPaymentService';
+import { loadFromBackend } from '@/services/backendSync';
 
 export interface WalletData {
   gameCoins: number;
@@ -105,11 +106,27 @@ export function useWallet() {
         }
       } catch { /* Skill not ready */ }
 
-      // 读凭证 A币余额
+      // 读凭证 A币余额（本地凭证库）
       let voucherBalance = 0;
+      const localVoucherIds = new Set<string>();
       try {
         voucherBalance = voucherPaymentService.getUserVoucherBalance(uid);
+        const { voucherService } = await import('@/voucher-system');
+        for (const v of voucherService.getUserVouchers(uid)) localVoucherIds.add(v.id);
       } catch { /* fallback */ }
+
+      // 合并云端发放的 A币凭证（任务奖励等后端直发，本地凭证库没有）：
+      // 按 id 去重（本地凭证会异步同步到云端），只累加本地没有的凭证面额
+      try {
+        const cloudVouchers = await loadFromBackend<any>('vouchers');
+        for (const v of cloudVouchers) {
+          if (!v) continue;
+          if (String(v.currentHolderId || '') !== uid) continue;
+          if (String(v.status || '').toLowerCase() !== 'active') continue;
+          if (localVoucherIds.has(String(v.id || v._id || ''))) continue;
+          voucherBalance += Number(v.denomination) || 0;
+        }
+      } catch { /* 云端不可用时仅显示本地凭证 */ }
 
       setWallet({
         gameCoins,

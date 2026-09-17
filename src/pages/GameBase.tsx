@@ -8,6 +8,8 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/authContext';
 import { useWallet, TransactionItem, WalletStatsData } from '@/hooks/useWallet';
+import { Gift } from 'lucide-react';
+import { TaskRewardsDrawer } from '@/components/wallet/TaskRewardsDrawer';
 
 // ==================== 钱包明细抽屉 ====================
 
@@ -145,9 +147,11 @@ function formatTimestamp(ts: number): string {
 function HUD() {
   const { currentUser, isAuthenticated, logout } = useAuth();
   const { wallet } = useWallet();
+  const uid = currentUser?.uid || currentUser?.id || 'anonymous';
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [walletDrawerOpen, setWalletDrawerOpen] = useState(false);
+  const [rewardsOpen, setRewardsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // 点击外部关闭菜单
@@ -182,6 +186,15 @@ function HUD() {
             <span className="text-lg">🎫</span>
             <span className="font-bold text-purple-400">{wallet?.voucherBalance?.toLocaleString() || '0'}</span>
             <span className="text-xs text-slate-400">A币</span>
+          </div>
+          {/* 任务报酬入口（详情在抽屉里，隐私不直接显示数额） */}
+          <div
+            className="flex items-center gap-1.5 cursor-pointer hover:bg-slate-700/30 rounded-lg px-1.5 py-0.5 transition-colors"
+            onClick={() => setRewardsOpen(true)}
+            title="查看任务报酬"
+          >
+            <Gift className="w-4 h-4 text-purple-400" />
+            <span className="text-xs text-slate-300">任务报酬</span>
           </div>
         </div>
         <div className="flex items-center gap-3 ml-auto" ref={menuRef}>
@@ -222,6 +235,8 @@ function HUD() {
         </div>
       </div>
       <WalletDetailDrawer open={walletDrawerOpen} onClose={() => setWalletDrawerOpen(false)} />
+      {/* 任务报酬抽屉（导航栏入口，按当前用户隔离 + 隐私显示） */}
+      <TaskRewardsDrawer open={rewardsOpen} onClose={() => setRewardsOpen(false)} userId={uid} />
     </>
   );
 }
@@ -307,7 +322,9 @@ export default function GameBase() {
     { icon: '🎒', label: '背包', description: '查看我的凭证', route: '/personal-center' },
     { icon: '🎮', label: '游戏世界', description: '探索游戏', route: '/game-center' },
     { icon: '🎁', label: '活动中心', description: '任务签到赢游戏币', route: '/activity' },
+    { icon: '📋', label: '任务广场', description: '接单创作赢报酬', route: '/quests' },
     ...(isAdmin ? [{ icon: '⚙️', label: '平台管理', description: '金库·商店·运营', route: '/platform-admin' }] : []),
+    ...(isAdmin ? [{ icon: '🛡️', label: '游戏审核', description: '审核·上架·下架', route: '/game-review' }] : []),
   ];
 
   return (

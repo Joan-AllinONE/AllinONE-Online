@@ -15,6 +15,8 @@ import type {
   PoolSource,
 } from '../types/platform';
 import { PRESET_GAMES, GameType } from '../types/platform';
+import { getPublishedGames as getPublishedGamesFromService } from '@/services/publishedGameService';
+import { isGamePubliclyVisible } from '@/services/gameReviewService';
 import { voucherService } from './VoucherService';
 import { VoucherStatus } from '../types';
 import { voucherRuleEngine } from '../engine/RuleEngine';
@@ -333,13 +335,20 @@ export class PlatformBindingService {
 
   /**
    * 从发布中心获取已发布的游戏
+   *
+   * 2026-09-12 修复「游戏绑定不显示游戏中心游戏」：
+   * 旧实现直接读 localStorage['allinone_published_games']，但游戏中心数据架构已重构为
+   * 「后端为权威存储 + localStorage/IndexedDB 仅缓存」——dev 下缓存写入被短路（localStorage
+   * 永远为空），prod 下大游戏降级到 IndexedDB、或新浏览器需等异步刷新，导致绑定列表只有预设游戏。
+   * 现改为走 publishedGameService 统一入口（内存缓存 + 后端异步刷新 + IndexedDB/localStorage 兜底），
+   * 并过滤未通过审核/已下架的游戏（与游戏中心公开可见口径一致）。
+   * 异步刷新完成后 publishedGameService 派发 games-list-updated 事件，由绑定 Tab 监听后重载。
    */
   private getPublishedGames(): GameDefinition[] {
     try {
-      const publishedData = localStorage.getItem('allinone_published_games');
-      if (publishedData) {
-        const games = JSON.parse(publishedData);
-        return games.map((g: any) => ({
+      return getPublishedGamesFromService()
+        .filter(g => isGamePubliclyVisible(g.reviewStatus))
+        .map(g => ({
           id: g.id,
           name: g.name,
           type: GameType.PUBLISHED,
@@ -350,7 +359,6 @@ export class PlatformBindingService {
           supportsScore: true,
           supportsAchievements: true,
         }));
-      }
     } catch (error) {
       console.error('[PlatformBindingService] 获取已发布游戏失败:', error);
     }

@@ -1,0 +1,150 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  background: #0c0c12;
+  color: #e8e8ef;
+  font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  overflow: hidden;
+}
+body { display: flex; align-items: center; justify-content: center; }
+
+#game-wrap {
+  position: relative;
+  width: 1280px;
+  height: 720px;
+  max-width: 100vw;
+  max-height: 100vh;
+  box-shadow: 0 0 40px rgba(0,0,0,.8);
+  background: #15151c;
+}
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+.hidden { display: none !important; }
+
+/* ---------------- 覆盖层（标题/暂停/死亡/面板/加载） ---------------- */
+.overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(8,8,14,.82);
+  z-index: 20;
+}
+.menu {
+  background: #1d1d2b;
+  border: 2px solid #3a3a55;
+  border-radius: 10px;
+  padding: 26px 34px;
+  text-align: center;
+  min-width: 280px;
+}
+.menu.wide { min-width: 640px; }
+.menu h1 { font-size: 30px; margin-bottom: 8px; color: #ffd84d; letter-spacing: 1px; }
+.menu h2 { font-size: 22px; margin-bottom: 16px; color: #9fe6ff; }
+.menu .sub { color: #9aa; margin-bottom: 18px; font-size: 13px; }
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  background: #2f2f45;
+  color: #e8e8ef;
+  border: 1px solid #4a4a6a;
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin: 4px;
+  font-size: 14px;
+  transition: background .12s, transform .05s;
+}
+button:hover { background: #3d3d5c; }
+button:active { transform: translateY(1px); }
+
+/* 存档槽 */
+#slots { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+.slotcard {
+  background: #23233a; border: 1px solid #3a3a55; border-radius: 8px;
+  padding: 14px; width: 190px; text-align: left; font-size: 13px; line-height: 1.7;
+}
+.slotcard.empty { opacity: .65; }
+.slotcard .sl { font-weight: bold; color: #ffd84d; margin-bottom: 6px; }
+.slotcard .date { color: #888; font-size: 11px; }
+.slotcard .btns { margin-top: 10px; }
+.slotcard .btns button { width: 100%; margin: 3px 0; }
+
+/* ---------------- HUD ---------------- */
+#hud { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+.bars { position: absolute; top: 12px; left: 12px; width: 280px; }
+.bar {
+  position: relative; height: 16px; background: #000a; border: 1px solid #000;
+  border-radius: 4px; margin-bottom: 5px; overflow: hidden;
+}
+.bar .fill { position: absolute; inset: 0; width: 100%; }
+.bar span {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; text-shadow: 0 1px 2px #000; font-weight: bold;
+}
+.bar.hp .fill { background: linear-gradient(#ff6b6b, #c0392b); }
+.bar.mp .fill { background: linear-gradient(#6bb6ff, #2b6fc0); }
+.bar.exp { height: 10px; }
+.bar.exp .fill { background: linear-gradient(#ffe27a, #e0b53a); }
+.stats-top {
+  position: absolute; top: 12px; right: 12px;
+  background: #000a; padding: 6px 12px; border-radius: 6px; font-size: 14px; font-weight: bold;
+}
+#hint {
+  position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+  background: #000a; padding: 5px 14px; border-radius: 14px; font-size: 12px; color: #bcd;
+  white-space: nowrap;
+}
+
+/* ---------------- 通用面板 ---------------- */
+#panel { background: rgba(8,8,14,.9); z-index: 30; }
+#panel > * { width: 560px; max-height: 88%; overflow-y: auto; background: #1d1d2b; border: 2px solid #3a3a55; border-radius: 10px; padding: 20px; }
+.ph { font-size: 20px; font-weight: bold; color: #ffd84d; margin-bottom: 14px; border-bottom: 1px solid #3a3a55; padding-bottom: 8px; }
+.subh { color: #9fe6ff; margin: 14px 0 6px; font-weight: bold; }
+.close { margin-top: 16px; text-align: right; }
+
+/* 背包格子 */
+.grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.slot {
+  position: relative; aspect-ratio: 1; background: #15151f; border: 1px solid #2e2e44;
+  border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.slot:hover { border-color: #6a6a9a; }
+.slot.eq { border-color: #3a7; }
+.slot.sel { border-color: #ffd84d; box-shadow: 0 0 0 2px #ffd84d inset; }
+.slot .ico { width: 80%; height: 80%; image-rendering: pixelated; object-fit: contain; }
+.slot .qty { position: absolute; right: 3px; bottom: 1px; font-size: 11px; font-weight: bold; text-shadow: 0 1px 2px #000; }
+.actions { margin-top: 12px; padding: 8px; background: #15151f; border-radius: 6px; }
+
+/* 装备 / 技能 / 任务 / 商店 / 合成 */
+.eqrow, .skillrow, .qrow, .shoprow, .craftrow {
+  display: flex; align-items: center; gap: 10px; padding: 9px 6px; border-bottom: 1px solid #2a2a3e; font-size: 14px;
+}
+.eqname { width: 56px; color: #9fe6ff; flex: none; }
+.eqitem { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.eqitem b, .skillrow b, .qrow b, .shoprow b, .craftrow b { color: #fff; }
+.bonus { font-size: 11px; }
+.slotbtns, .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.strbox { padding: 6px 0; }
+.stattab { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.stattab td { padding: 6px 10px; border-bottom: 1px solid #2a2a3e; font-size: 14px; }
+.stattab td:first-child { color: #9fe6ff; }
+.bonus { color: #6c6; }
+.qd { color: #aab; font-size: 12px; flex: 1; }
+.dlgline { font-size: 16px; line-height: 1.8; padding: 10px; background: #15151f; border-radius: 6px; }
+.ico { width: 28px; height: 28px; image-rendering: pixelated; object-fit: contain; }
+
+/* 加载进度条 */
+.pbar { width: 320px; height: 16px; background: #000; border: 1px solid #3a3a55; border-radius: 8px; overflow: hidden; margin: 14px auto; }
+.pfill { height: 100%; width: 0%; background: linear-gradient(90deg, #ffd84d, #ff9f43); transition: width .1s; }
+#ploading { color: #9fe6ff; }
+
+/* Toast */
+#toast {
+  position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+  background: #000c; padding: 8px 18px; border-radius: 18px; z-index: 40;
+  font-size: 14px; border: 1px solid #4a4a6a;
+}

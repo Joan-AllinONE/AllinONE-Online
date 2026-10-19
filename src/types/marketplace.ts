@@ -16,12 +16,23 @@ export type ListingStatus = 'active' | 'sold' | 'cancelled';
  * 作品快照（作品类道具如 perler-artwork 的紧凑编码）。
  * 上架时从凭证 customData.gameEffect.itemData.params 提取，
  * 让市场卡片在任何浏览器都能重绘作品图（凭证库可能不在本机）。
+ *
+ * kind='perler'（缺省，兼容旧数据）：拼豆像素图（palette + base36 cells）
+ * kind='gushi'：缅川公盘成品（确定性程序绘制参数 craft/gem/seed/size，
+ *   平台侧 GushiProductArt 重绘，与游戏内成品卡同图）
  */
 export interface ListingArtwork {
-  w: number;
-  h: number;
-  palette: string[];
-  cells: string;
+  kind?: 'perler' | 'gushi';
+  // ---- perler-artwork（缺省 kind）----
+  w?: number;
+  h?: number;
+  palette?: string[];
+  cells?: string;
+  // ---- gushi（缅川公盘成品）----
+  craft?: string;   // bracelet | plaque | pingan | jiemian | beads | scrap
+  gem?: string;     // dou | nuo | bing | boli | diwang
+  seed?: number;
+  size?: number;
 }
 
 /** 市场挂牌 */
@@ -89,8 +100,7 @@ export interface ListItemResult {
   message: string;
 }
 
-/** 佣金配置 */
-export const MARKET_COMMISSION_RATE = 0.05; // 5% P2P 交易佣金
+// 佣金率已收敛至平台规则注册中心（market.commission_rate，前端读 src/services/platformRulesService）
 
 /** 平台金库 */
 export interface PlatformTreasury {

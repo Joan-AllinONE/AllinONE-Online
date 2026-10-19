@@ -252,7 +252,15 @@ class GameProposalService {
     proposerType: VoteStakeholderType;
     voteDurationHours?: number;
     whitelist?: string[];
-    revenueSharing?: { gameShare: number; platformShare: number; creatorShare?: number };
+    revenueSharing?: {
+      gameShare: number;
+      platformShare: number;
+      creatorShare?: number;
+      /** 创作者 userId（creatorShare > 0 时必填，执行时写入游戏三方分成配置） */
+      creatorId?: string;
+      /** 创作者名称（展示用） */
+      creatorName?: string;
+    };
   }): GameProposal {
     const proposals = loadProposals();
     const threshold = this.getGameVoteThreshold(params.gameId);
@@ -822,6 +830,11 @@ class GameProposalService {
    */
   getProposal(id: string): GameProposal | undefined {
     return loadProposals().find(p => p.id === id);
+  }
+
+  /** 全部提案列表（启动自愈用：补偿 PASSED 提案的三方分成配置） */
+  getProposals(): GameProposal[] {
+    return loadProposals();
   }
 
   /**

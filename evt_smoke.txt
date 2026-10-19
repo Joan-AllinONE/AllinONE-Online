@@ -1,0 +1,608 @@
+[JWT] WARNING: Using default dev secret — NOT for production use
+[contract] 本地 cron tick 已启动（每 60s）: http://127.0.0.1:3100/api/v1/games/__contract/tick + http://127.0.0.1:3100/api/v1/games/__event/tick
+[10:16:29] [32mINFO[39m (3296): [36mAllinONE 服务器已启动[39m
+    [35mport[39m: "3100"
+    [35mdbMode[39m: "内存数据库"
+    [35mredeemCodeCount[39m: 0
+    [35mredeemUsedCount[39m: 0
+[10:16:29] [33mWARN[39m (3296): [36m使用内存数据库（数据将在重启后丢失）[39m
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/dev-token"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 36
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/dev-token"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 6
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/dev-token"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/create"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 6
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/detail"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/current"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/join"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/join"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/submit"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 6
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/submit"
+    [35mstatusCode[39m: 400
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/submit"
+    [35mstatusCode[39m: 400
+    [35mdurationMs[39m: 7
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/progress"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/claim"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/claim"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/progress"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/claim"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/create"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegrayrdwoqk_1/join"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegrayrdwoqk_1/join"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 5
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/force-stop"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/current"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegrayrdwoqk_1/submit"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 2
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/update"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/admin/list?filter=all"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdwoqk_1/claim"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 4
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/resettle"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/create"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/update"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/admin/list?filter=all"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/create"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdwoqk_1/detail"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdwoqk_1/join"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdwoqk_1/submit"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdwoqk_1/detail"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdwoqk_1/progress"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:16:58] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdwoqk_1/claim"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:02] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdwoqk_1/submit"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[10:17:02] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:02] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdwoqk_1/detail"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:17:02] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/create"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:02] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefuturerdwoqk_1/join"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 5
+[10:17:02] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/admin/list"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 2
+[10:17:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:17:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/dev-token"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/dev-token"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/dev-token"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/create"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/detail"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/current"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/join"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/join"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/submit"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/submit"
+    [35mstatusCode[39m: 400
+    [35mdurationMs[39m: 4
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/submit"
+    [35mstatusCode[39m: 400
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/progress"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/claim"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 5
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/claim"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/progress"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/claim"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/create"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegrayrdxled_1/join"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegrayrdxled_1/join"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/force-stop"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/current"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegrayrdxled_1/submit"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/update"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/admin/list?filter=all"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefreonrdxled_1/claim"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/resettle"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/create"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/update"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/admin/list?filter=all"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/create"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdxled_1/detail"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdxled_1/join"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdxled_1/submit"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdxled_1/detail"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdxled_1/progress"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:40] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdxled_1/claim"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:44] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdxled_1/submit"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 5
+[10:17:44] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:44] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/evt_smokegbrdxled_1/detail"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:17:44] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/admin/create"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 5
+[10:17:44] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/evt_smokefuturerdxled_1/join"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 2
+[10:17:44] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__event/admin/list"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 2
+[10:18:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 6
+[10:18:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:19:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:19:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 0
+[10:20:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:20:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 5
+[10:21:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:21:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:22:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:22:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:23:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:23:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:24:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:24:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:25:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:25:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:26:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:26:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:27:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:27:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[10:28:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:28:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:29:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:29:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:30:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:30:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:31:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[10:31:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[10:32:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 6
+[10:32:30] [32mINFO[39m (3296): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__event/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2

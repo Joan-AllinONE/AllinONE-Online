@@ -1,0 +1,2549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>缅川公盘 · 3D赌石模拟器</title>
+<style>
+:root{
+  --bg:#0a0f0c; --panel:#131e17; --panel2:#1a2a20;
+  --gold:#e8c15a; --gold2:#a8842f; --jade:#3ddc84;
+  --text:#ece7d9; --muted:#8ea396; --up:#e05a4e; --down:#3ddc84;
+  --radius:14px;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{
+  background:radial-gradient(1100px 700px at 50% -10%, #16281f 0%, var(--bg) 60%) fixed;
+  color:var(--text);font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  min-height:100vh;overflow-x:hidden;
+}
+body.shake{animation:shake .5s}
+@keyframes shake{20%{transform:translate(-8px,4px)}40%{transform:translate(7px,-5px)}60%{transform:translate(-5px,-3px)}80%{transform:translate(4px,3px)}}
+/* ---------- 顶栏 ---------- */
+header{
+  position:sticky;top:0;z-index:60;background:rgba(10,15,12,.88);backdrop-filter:blur(10px);
+  border-bottom:1px solid rgba(232,193,90,.3);padding:8px 14px;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.logo{font-family:"STKaiti","KaiTi",serif;font-size:21px;color:var(--gold);letter-spacing:3px;text-shadow:0 0 16px rgba(232,193,90,.4);white-space:nowrap}
+.logo small{display:block;font-size:9px;color:var(--muted);letter-spacing:5px;font-family:sans-serif}
+.spacer{flex:1}
+.chip{display:flex;align-items:center;gap:6px;border-radius:999px;padding:5px 12px;font-size:13px;font-weight:700;border:1px solid rgba(232,193,90,.35);background:linear-gradient(135deg,#1e2f26,#131e17)}
+.coin-box{color:var(--gold);font-size:15px;min-width:118px;justify-content:center;transition:transform .15s}
+.coin-box.pulse{animation:cp .5s}
+@keyframes cp{40%{transform:scale(1.12)}}
+.coin-ic{width:15px;height:15px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffe9a8,var(--gold) 55%,var(--gold2));box-shadow:0 0 8px rgba(232,193,90,.6)}
+.lv-chip{cursor:pointer;color:var(--text);position:relative;overflow:hidden;min-width:120px}
+.lv-chip .rank{color:var(--gold)}
+.lv-bar{position:absolute;left:0;bottom:0;height:3px;background:linear-gradient(90deg,var(--jade),var(--gold));transition:width .4s}
+.mkt-chip{cursor:default;font-variant-numeric:tabular-nums}
+.btn{border:none;cursor:pointer;border-radius:10px;padding:9px 16px;font-size:14px;font-weight:600;color:#1a1408;
+  background:linear-gradient(135deg,#f3d27a,var(--gold) 60%,var(--gold2));box-shadow:0 2px 10px rgba(232,193,90,.25);
+  transition:transform .12s,filter .12s;font-family:inherit}
+.btn:hover{filter:brightness(1.08)}.btn:active{transform:scale(.96)}
+.btn:disabled{filter:grayscale(.85) brightness(.55);cursor:not-allowed;box-shadow:none}
+.btn.ghost{background:transparent;color:var(--gold);border:1px solid rgba(232,193,90,.5);box-shadow:none}
+.btn.jade{background:linear-gradient(135deg,#5ee6a0,#1d7a4c);color:#04160c}
+.btn.small{padding:6px 12px;font-size:12px}
+#signBtn{display:none;animation:glowB 1.6s infinite}
+#signBtn.show{display:inline-block}
+@keyframes glowB{50%{box-shadow:0 0 20px rgba(61,220,132,.7)}}
+/* ---------- 导航 ---------- */
+nav{display:flex;gap:4px;padding:8px 14px 0;max-width:1100px;margin:0 auto}
+nav button{flex:1;background:none;border:none;color:var(--muted);font-size:15px;font-weight:600;padding:9px 2px 11px;cursor:pointer;border-bottom:2px solid transparent;transition:.2s;font-family:inherit}
+nav button.active{color:var(--gold);border-bottom-color:var(--gold);text-shadow:0 0 12px rgba(232,193,90,.4)}
+main{max-width:1100px;margin:0 auto;padding:14px 14px 90px}
+.page{display:none;animation:fi .3s}
+.page.active{display:block}
+@keyframes fi{from{opacity:0;transform:translateY(8px)}}
+h2.st{font-family:"STKaiti","KaiTi",serif;font-size:20px;color:var(--gold);margin:10px 0 12px;letter-spacing:3px}
+/* ---------- 行情条 ---------- */
+.mkt-card{background:linear-gradient(160deg,var(--panel2),var(--panel));border:1px solid rgba(232,193,90,.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px}
+.mkt-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.mkt-head .t{font-size:13px;color:var(--muted);letter-spacing:2px}
+#mktMult{font-size:26px;font-weight:800;font-variant-numeric:tabular-nums}
+#mktMult.up{color:var(--up)}#mktMult.down{color:var(--down)}
+#mktTip{font-size:12px;color:var(--muted)}
+#kline{width:100%;height:90px;display:block}
+/* ---------- 矿区 ---------- */
+.mine-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:18px}
+.mine-card{background:linear-gradient(165deg,var(--panel2),var(--panel));border:1px solid rgba(142,163,150,.2);border-radius:var(--radius);padding:14px;cursor:pointer;transition:.2s;position:relative}
+.mine-card:hover{transform:translateY(-3px);border-color:rgba(232,193,90,.5)}
+.mine-card.sel{border-color:var(--gold);box-shadow:0 0 20px rgba(232,193,90,.25)}
+.mine-card.locked{filter:grayscale(.9) brightness(.55);cursor:not-allowed}
+.mine-card h3{font-size:16px;margin-bottom:4px}
+.mine-card .m-price{color:var(--gold);font-weight:700;font-size:15px}
+.mine-card .m-info{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.7}
+.mine-card .lock-tag{position:absolute;top:10px;right:10px;font-size:11px;background:rgba(0,0,0,.5);padding:3px 8px;border-radius:6px;color:var(--muted)}
+/* ---------- 相玉石阵 ---------- */
+.stone-bar{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.stone-bar .hint{font-size:12px;color:var(--muted)}
+#flashLeft{color:var(--jade);font-weight:700}
+.stone-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.stone-cell{background:linear-gradient(165deg,var(--panel2),var(--panel));border:1px solid rgba(142,163,150,.2);border-radius:var(--radius);padding:10px;text-align:center;cursor:pointer;transition:.2s}
+.stone-cell:hover{transform:translateY(-4px);border-color:var(--gold);box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.stone-cell canvas{width:110px;height:110px}
+.stone-cell .traits{font-size:10px;color:var(--muted);margin-top:6px;line-height:1.6;min-height:32px}
+.stone-cell .no{font-size:11px;color:var(--gold);letter-spacing:2px}
+/* ---------- 弹窗通用 ---------- */
+.modal{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.78);backdrop-filter:blur(5px);padding:16px}
+.modal.show{display:flex}
+.sheet{background:linear-gradient(170deg,#1c2d23,#0f1a14);border:1px solid var(--gold);border-radius:18px;padding:20px;max-width:430px;width:100%;text-align:center;animation:pop .45s cubic-bezier(.2,1.6,.4,1);max-height:92vh;overflow-y:auto}
+@keyframes pop{from{transform:scale(.55);opacity:0}}
+.sheet h3{font-family:"STKaiti","KaiTi",serif;color:var(--gold);letter-spacing:2px;margin-bottom:6px}
+.trait-list{text-align:left;font-size:13px;color:var(--muted);line-height:2;margin:8px 0}
+.trait-list b{color:var(--text)}
+#flashHint{color:var(--jade);font-size:14px;min-height:22px;margin:6px 0;font-weight:600}
+.sheet .row{display:flex;gap:10px;justify-content:center;margin-top:12px;flex-wrap:wrap}
+#detailView,#cutView,#rJade,#jadeView,#pView3d{width:100%;height:300px;border-radius:12px;background:radial-gradient(circle at 50% 40%,#20362a,#0a0f0c 75%);touch-action:none;cursor:grab}
+#pView3d{height:320px}
+.btn.on{background:linear-gradient(135deg,#2f7d52,#1d5a3a);color:#eafff2;border-color:#3ddc8466}
+#rJade{height:210px}
+.prod-card canvas{width:100%;border-radius:10px;display:block}
+.dex-card canvas{width:86px;height:86px;border-radius:50%;box-shadow:0 0 18px rgba(0,0,0,.5)}
+.rot-wrap{position:relative}
+.rot-hint{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:rgba(236,231,217,.55);pointer-events:none;letter-spacing:1px;background:rgba(10,15,12,.4);padding:3px 10px;border-radius:999px}
+/* ---------- 切石 ---------- */
+#cutModal .sheet{max-width:520px}
+#cutView{height:300px}
+#cutInfo{min-height:26px;font-size:15px;color:var(--jade);font-family:"STKaiti","KaiTi",serif;letter-spacing:2px;margin-top:8px}
+#estBox{display:none;margin:10px auto;padding:10px 14px;background:rgba(0,0,0,.35);border:1px dashed rgba(232,193,90,.5);border-radius:10px;font-size:14px}
+#estBox b{color:var(--gold);font-size:18px}
+/* ---------- 结果 ---------- */
+#resModal .sheet{position:relative;overflow:hidden}
+#resModal .sheet::before{content:"";position:absolute;inset:-40%;background:conic-gradient(transparent,transparent,rgba(232,193,90,.14),transparent 30%);animation:rg 4s linear infinite;pointer-events:none}
+@keyframes rg{to{transform:rotate(360deg)}}
+.r-gem{font-size:60px;line-height:1.5;filter:drop-shadow(0 0 22px currentColor)}
+.r-name{font-family:"STKaiti","KaiTi",serif;font-size:28px}
+.r-val{font-size:22px;font-weight:800;color:var(--gold);margin-top:6px}
+.r-sub{font-size:13px;color:var(--muted);margin:6px 0 4px;line-height:1.8}
+/* ---------- 仓库/图鉴/任务/统计 ---------- */
+.sum-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.sum-chip{background:var(--panel);border:1px solid rgba(142,163,150,.25);border-radius:10px;padding:9px 15px;font-size:12px;color:var(--muted)}
+.sum-chip b{display:block;font-size:16px;color:var(--gold);margin-top:2px}
+.inv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:12px}
+.gem-card{background:linear-gradient(165deg,var(--panel2),var(--panel));border-radius:var(--radius);padding:13px;text-align:center;border:1px solid rgba(142,163,150,.2)}
+.gem-card .gi{font-size:38px;filter:drop-shadow(0 0 12px currentColor)}
+.gem-card h4{font-size:14px;margin:4px 0}
+.gem-card .gv{color:var(--gold);font-weight:700;font-size:13px}
+.gem-card .gs{font-size:11px;color:var(--muted);margin:3px 0 9px}
+.empty{text-align:center;color:var(--muted);padding:46px 0;font-size:14px}
+.task-card{background:linear-gradient(165deg,var(--panel2),var(--panel));border:1px solid rgba(142,163,150,.2);border-radius:var(--radius);padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.task-card .ti{flex:1;min-width:180px}
+.task-card h4{font-size:15px}
+.task-card .td{font-size:12px;color:var(--muted);margin-top:3px}
+.task-card .rw{color:var(--gold);font-weight:700;font-size:13px;white-space:nowrap}
+.prog{height:5px;background:rgba(255,255,255,.08);border-radius:3px;margin-top:6px;overflow:hidden}
+.prog i{display:block;height:100%;background:linear-gradient(90deg,var(--jade),var(--gold));border-radius:3px}
+.dex-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.dex-card{background:linear-gradient(165deg,var(--panel2),var(--panel));border-radius:var(--radius);padding:16px 12px;text-align:center;border:1px solid rgba(142,163,150,.2)}
+.dex-card.locked{filter:grayscale(1) brightness(.5)}
+.dex-card .gi{font-size:42px;filter:drop-shadow(0 0 14px currentColor)}
+.dex-card h4{margin:6px 0 2px;font-size:15px}
+.dex-card .stars{font-size:12px;letter-spacing:2px}
+.dex-card .own{font-size:11px;color:var(--jade);margin-top:5px}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:12px;margin-bottom:16px}
+.stat-card{background:var(--panel);border:1px solid rgba(142,163,150,.2);border-radius:var(--radius);padding:13px;text-align:center}
+.stat-card .sl{font-size:12px;color:var(--muted)}
+.stat-card .sv{font-size:19px;font-weight:800;margin-top:4px}
+.chart-box{background:var(--panel);border:1px solid rgba(142,163,150,.2);border-radius:var(--radius);padding:14px}
+.chart-box h3{font-size:13px;color:var(--muted);margin-bottom:8px}
+#assetChart{width:100%;height:200px;display:block}
+/* ---------- 特效层 ---------- */
+#fxC{position:fixed;inset:0;pointer-events:none;z-index:200}
+#flashFx{position:fixed;inset:0;pointer-events:none;z-index:190;opacity:0}
+#toast{position:fixed;left:50%;bottom:80px;transform:translateX(-50%) translateY(20px);z-index:300;background:rgba(18,28,22,.96);border:1px solid var(--gold);padding:10px 22px;border-radius:999px;font-size:14px;opacity:0;transition:.3s;pointer-events:none;white-space:nowrap;max-width:92vw}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+footer{text-align:center;color:#46564d;font-size:11px;padding:18px 0 28px;letter-spacing:1px}
+@media (max-width:640px){
+  .logo{font-size:17px}
+  nav button{font-size:13px}
+  #cutView{height:240px}
+  .stone-grid{grid-template-columns:repeat(auto-fill,minmax(108px,1fr))}
+  .stone-cell canvas{width:88px;height:88px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">缅川公盘<small>3D 赌 石 模 拟 器</small></div>
+  <div class="spacer"></div>
+  <button id="signBtn" class="btn jade small">🎁 每日签到</button>
+  <div class="chip mkt-chip" title="实时行情系数，出售玉石按此结算">📈 <span id="mktMini">×1.10</span></div>
+  <div class="chip lv-chip" id="lvChip"><span class="rank" id="rankName">学徒</span> Lv.<span id="lvNum">1</span><div class="lv-bar" id="lvBar" style="width:0%"></div></div>
+  <div class="chip coin-box" id="coinBox"><span class="coin-ic"></span><span id="coinNum">0</span></div>
+</header>
+
+<nav>
+  <button class="active" data-page="xiangyu">🪨 相玉</button>
+  <button data-page="inv">🎒 仓库</button>
+  <button data-page="task">📜 任务</button>
+  <button data-page="dex">📖 图鉴</button>
+  <button data-page="stat">📊 战绩</button>
+</nav>
+
+<main>
+  <!-- ============ 相玉 ============ -->
+  <section class="page active" id="page-xiangyu">
+    <div class="mkt-card">
+      <div class="mkt-head">
+        <span class="t">缅川公盘 · 实时行情</span>
+        <span id="mktMult">×1.10</span>
+        <span id="mktTip">行情波动中，走红出货，走绿囤货</span>
+      </div>
+      <canvas id="kline"></canvas>
+    </div>
+
+    <h2 class="st">四大场口 <span class="hint" style="font-size:12px;font-weight:400;vertical-align:middle">🎫 场口入场券 <span id="passLeft">0</span> 张 <span style="color:var(--muted)">（等级不足时可用券进入，购石 1 次后失效）</span></span></h2>
+    <div class="mine-grid" id="mineGrid"></div>
+
+    <div class="stone-bar">
+      <h2 class="st" style="margin:0">相玉石阵</h2>
+      <span class="hint">🔦 强光手电今日剩余 <span id="flashLeft">3</span> 次</span>
+      <div class="spacer"></div>
+      <button class="btn ghost small" id="refreshBtn">🔄 换一批石头</button>
+    </div>
+    <div class="stone-grid" id="stoneGrid"></div>
+  </section>
+
+  <!-- ============ 仓库 ============ -->
+  <section class="page" id="page-inv">
+    <h2 class="st">我的仓库</h2>
+    <div class="sum-row">
+      <div class="sum-chip">玉石数量<b id="invCount">0</b></div>
+      <div class="sum-chip">基础估值<b id="invValue">0</b></div>
+      <div class="sum-chip">按当前行情可得<b id="invMkt" style="color:var(--jade)">0</b></div>
+      <div class="sum-chip" style="display:flex;align-items:center"><button class="btn small" id="sellAllBtn">按行情全部出售</button></div>
+    </div>
+    <div class="inv-grid" id="invGrid"></div>
+    <div class="empty" id="invEmpty">仓库空空如也，去石阵里相一块吧！</div>
+    <h2 class="st" style="margin-top:26px">⚙️ 加工成品柜 <span class="hint" style="font-size:12px">成品按当前行情出售 · 总估值 <b id="craftValue" style="color:var(--gold)">0</b></span></h2>
+    <div class="inv-grid" id="craftGrid"></div>
+    <div class="empty" id="craftEmpty">还没有成品。把仓库里的原石送去加工坊，切出镯子、玉牌吧！</div>
+  </section>
+
+  <!-- ============ 任务 ============ -->
+  <section class="page" id="page-task">
+    <h2 class="st">每日任务 & 签到</h2>
+    <div id="taskList"></div>
+    <h2 class="st" style="margin-top:22px">商人爵位</h2>
+    <div class="task-card"><div class="ti">
+      <h4 id="rankTitle">学徒 Lv.1</h4>
+      <div class="td" id="rankNext"></div>
+      <div class="prog"><i id="rankProg" style="width:0%"></i></div>
+    </div></div>
+    <div class="trait-list" style="margin-top:8px">
+      爵位晋升：学徒 Lv.1-9 → 掌眼 Lv.10-19 → 大藏家 Lv.20-39 → 玉侯 Lv.40-59 → 玉皇 Lv.60+<br>
+      场口解锁：黑乌沙 Lv.1 · 大马坎 Lv.5 · 木那 Lv.15 · 玻璃种帝王场 Lv.30<br>
+      等级只影响高级矿区入场资格，不影响各场口本身爆率。
+    </div>
+  </section>
+
+  <!-- ============ 图鉴 ============ -->
+  <section class="page" id="page-dex">
+    <h2 class="st">玉石图鉴 <span class="hint" style="font-size:12px">点击已解锁品种 · 观赏 3D 翡翠标本</span></h2>
+    <div class="dex-grid" id="dexGrid"></div>
+    <h2 class="st" style="margin-top:26px">⚙️ 成品工艺图鉴 <span class="hint" style="font-size:12px">加工坊产物 · 点击查看大图与下载</span></h2>
+    <div class="dex-grid" id="craftDexGrid"></div>
+  </section>
+
+  <!-- ============ 战绩 ============ -->
+  <section class="page" id="page-stat">
+    <h2 class="st">战绩统计</h2>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="sl">解玉次数</div><div class="sv" id="stTotal">0</div></div>
+      <div class="stat-card"><div class="sl">涨 / 垮</div><div class="sv"><span style="color:var(--up)" id="stWin">0</span> / <span style="color:var(--down)" id="stLose">0</span></div></div>
+      <div class="stat-card"><div class="sl">累计盈亏</div><div class="sv" id="stProfit">0</div></div>
+      <div class="stat-card"><div class="sl">最大一刀</div><div class="sv" style="color:var(--up)" id="stBest">0</div></div>
+      <div class="stat-card"><div class="sl">总资产</div><div class="sv" id="stAssets">0</div></div>
+    </div>
+    <div class="chart-box"><h3>总资产变化曲线（玉币 + 仓库原石估值 + 加工成品估值）</h3><canvas id="assetChart"></canvas></div>
+    <div style="text-align:center;margin-top:16px"><button class="btn small" style="background:linear-gradient(135deg,#e88,#c0392b);color:#fff" id="resetBtn">🔄 退隐重开（清空存档）</button></div>
+  </section>
+</main>
+
+<footer>纯虚拟货币 · 无充值入口 · 仅供娱乐 · 珍爱生活 远离赌博</footer>
+
+<!-- 相玉详情弹窗 -->
+<div class="modal" id="detailModal">
+  <div class="sheet">
+    <h3 id="dTitle">相玉</h3>
+    <div class="rot-wrap"><div id="detailView"></div><div class="rot-hint">⟳ 拖拽石头 · 360° 无死角旋转</div></div>
+    <div class="trait-list" id="dTraits"></div>
+    <div id="flashHint"></div>
+    <div class="row">
+      <button class="btn jade small" id="useFlashBtn">🔦 强光手电</button>
+      <button class="btn" id="buyBtn">💰 买下此石</button>
+      <button class="btn ghost small" id="closeDetail">再看看</button>
+    </div>
+  </div>
+</div>
+
+<!-- 解玉弹窗 -->
+<div class="modal" id="cutModal">
+  <div class="sheet">
+    <h3 id="cutTitle">解玉</h3>
+    <div class="rot-wrap"><div id="cutView"></div><div class="rot-hint">⟳ 拖拽石头 · 360° 无死角旋转</div></div>
+    <div id="cutInfo">选择解玉方式</div>
+    <div id="estBox"></div>
+    <div class="row" id="cutBtns">
+      <button class="btn jade" id="modeCapi">🐌 擦皮（慢工三段）</button>
+      <button class="btn" id="modeYidao">⚡ 一刀切（定生死）</button>
+    </div>
+    <div class="row" id="capiBtns" style="display:none">
+      <button class="btn jade" id="stopSellBtn">💰 收手出售（落袋为安）</button>
+      <button class="btn" id="contBtn">🔥 继续擦（赌大涨）</button>
+    </div>
+  </div>
+</div>
+
+<!-- 结果弹窗 -->
+<div class="modal" id="resModal">
+  <div class="sheet">
+    <div class="rot-wrap" id="rJadeWrap" style="display:none"><div id="rJade"></div><div class="rot-hint">⟳ 拖拽 · 360° 观赏刚切出的翡翠</div></div>
+    <div class="r-gem" id="rGem"></div>
+    <div class="r-name" id="rName"></div>
+    <div class="r-val" id="rVal"></div>
+    <div class="r-sub" id="rSub"></div>
+    <div class="row">
+      <button class="btn jade" id="keepBtn">🎒 存入仓库</button>
+      <button class="btn ghost" id="sellNowBtn">💰 按行情出售</button>
+    </div>
+  </div>
+</div>
+
+<!-- 翡翠标本 3D 弹窗 -->
+<div class="modal" id="jadeModal">
+  <div class="sheet">
+    <h3 id="jTitle">翡翠标本</h3>
+    <div class="rot-wrap"><div id="jadeView"></div><div class="rot-hint">⟳ 拖拽 · 360° 无死角观赏</div></div>
+    <div class="trait-list" id="jTraits"></div>
+    <div class="row"><button class="btn ghost small" id="closeJade">关闭</button></div>
+  </div>
+</div>
+
+<!-- 加工弹窗 -->
+<div class="modal" id="craftModal">
+  <div class="sheet">
+    <h3 id="cTitle">⚙️ 翡翠加工坊</h3>
+    <div class="trait-list" id="cInfo"></div>
+    <div id="cWork" style="display:none">
+      <div class="prog" style="height:14px;margin:10px 0"><i id="cProg" style="width:0%"></i></div>
+      <div style="text-align:center;color:var(--muted);font-size:13px" id="cStep">切坯中……</div>
+    </div>
+    <div class="inv-grid" id="cResult" style="margin-top:10px"></div>
+    <div class="row">
+      <button class="btn jade" id="craftGo">🔨 开始加工</button>
+      <button class="btn ghost small" id="closeCraft">先不了</button>
+    </div>
+  </div>
+</div>
+
+<!-- 成品大图弹窗（3D 实物 / 工艺成图双视图） -->
+<div class="modal" id="prodModal">
+  <div class="sheet">
+    <h3 id="pTitle">成品</h3>
+    <div class="rot-wrap"><div id="pView3d"></div><div class="rot-hint" id="pHint">⟳ 拖拽 · 360° 观赏抛光实物</div></div>
+    <div style="display:flex;justify-content:center"><canvas id="pCanvas" width="480" height="480" style="max-width:100%;border-radius:14px;display:none"></canvas></div>
+    <div class="row" style="justify-content:center;margin-top:6px">
+      <button class="btn small" id="pTab3d">✨ 3D 实物</button>
+      <button class="btn small ghost" id="pTabImg">🖼 工艺成图</button>
+    </div>
+    <div class="trait-list" id="pTraits"></div>
+    <div class="row">
+      <button class="btn jade small" id="pDownload">📥 下载图片</button>
+      <button class="btn ghost small" id="closeProd">关闭</button>
+    </div>
+  </div>
+</div>
+
+<canvas id="fxC"></canvas>
+<div id="flashFx"></div>
+<div id="toast"></div>
+
+<script src="three.min.js"></script>
+<script>
+"use strict";
+/* ================================================================
+   配置
+================================================================ */
+const GEMS=[
+  {id:"rock",  name:"垮石杂料", icon:"🪨", color:"#9a9a9a", jade:"#8f8f8b", stars:0, idx:0},
+  {id:"dou",   name:"豆种翡翠", icon:"🟢", color:"#7bc47f", jade:"#6fa76a", stars:1, idx:1},
+  {id:"nuo",   name:"糯种翡翠", icon:"💚", color:"#3ddc84", jade:"#3ea562", stars:2, idx:2},
+  {id:"bing",  name:"冰种翡翠", icon:"💎", color:"#7ec8e3", jade:"#9fd8bd", stars:3, idx:3},
+  {id:"boli",  name:"玻璃种翡翠",icon:"🔮", color:"#c9a7f5", jade:"#cfeee0", stars:4, idx:4},
+  {id:"diwang",name:"帝王绿",   icon:"👑", color:"#ffd94d", jade:"#0d8a4a", stars:5, idx:5},
+];
+const jadeCol=g=>g.jade||g.color; /* 玉料真实色（区别于 UI 图标色） */
+const MINES=[
+  {id:1,name:"黑乌沙场口",lv:1, price:500,  green:.25,cap:5000,   icon:"⛏️",desc:"新手练手的老场口，皮薄裂少，小赌怡情。",
+   w:[["dou",55],["nuo",30],["bing",12],["boli",2.5],["diwang",0.5]]},
+  {id:2,name:"大马坎场口",lv:5, price:2000, green:.18,cap:50000,  icon:"🏜️",desc:"黄砂皮名坑，水长种老，行家必争之地。",
+   w:[["dou",40],["nuo",35],["bing",18],["boli",6],["diwang",1]]},
+  {id:3,name:"木那场口",  lv:15,price:8000, green:.12,cap:500000, icon:"🌲",desc:"雪花棉故乡，一刀下去或成传说。",
+   w:[["nuo",35],["bing",35],["boli",22],["diwang",8]]},
+  {id:4,name:"玻璃种帝王场",lv:30,price:50000,green:.05,cap:5000000,icon:"👑",desc:"公盘压轴蒙头料，非大藏家不得入内。",
+   w:[["bing",30],["boli",45],["diwang",25]]},
+];
+const RANKS=[[1,"学徒"],[10,"掌眼"],[20,"大藏家"],[40,"玉侯"],[60,"玉皇"]];
+const START_COINS=10000, SIGN_REWARD=2000, FLASH_PER_DAY=3;
+const SAVE_KEY="gambleStone_v2";
+
+function rankOf(l){let r=RANKS[0][1];for(const[t,n]of RANKS)if(l>=t)r=n;return r;}
+function xpNeed(l){return Math.round(20*Math.pow(l,1.4));}
+function fmt(n){return Math.round(n).toLocaleString("zh-CN");}
+function today(){return new Date().toISOString().slice(0,10);}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const gemOf=id=>GEMS.find(g=>g.id===id);
+
+/* ================================================================
+   存档
+================================================================ */
+let S=load();
+if(!S.dexSpec)S.dexSpec={};if(!S.crafts)S.crafts=[];if(!S.craftDex)S.craftDex={};
+if(S.tasks&&S.tasks.craft===undefined)S.tasks.craft=0; /* 旧存档迁移 */
+if(S.luck===undefined)S.luck=0; /* AllinONE 道具：幸运加持剩余次数 */
+if(S.minePass===undefined)S.minePass=0; /* AllinONE 道具：场口入场券张数 */
+if(S.passMine===undefined||S.passMine===false)S.passMine=null; /* 入场券绑定的场口 id，购买 1 次后失效 */
+function load(){
+  try{const s=JSON.parse(localStorage.getItem(SAVE_KEY));if(s&&typeof s.coins==="number")return s;}catch(e){}
+  return {coins:START_COINS,level:1,xp:0,inv:[],dex:{},dexSpec:{},crafts:[],craftDex:{},day:"",signed:false,flashUsed:0,
+    tasks:{cut:0,sell:0,flash:0,craft:0,done:{}},stat:{total:0,win:0,lose:0,profit:0,best:0},
+    history:[{t:Date.now(),assets:START_COINS}],mult:1.1};
+}
+function save(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(S));}catch(e){}}
+function rollover(){
+  if(S.day!==today()){S.day=today();S.signed=false;S.flashUsed=0;S.tasks={cut:0,sell:0,flash:0,craft:0,done:{}};save();}
+}
+function invBase(){return S.inv.reduce((a,g)=>a+g.value,0);}
+function craftBase(){return (S.crafts||[]).reduce((a,g)=>a+g.value,0);}
+function assets(){return S.coins+invBase()+craftBase();}
+function pushHistory(){
+  S.history.push({t:Date.now(),assets:assets()});if(S.history.length>120)S.history=S.history.slice(-120);
+  /* AllinONE 奖励上报：总资产里程碑（每档只报一次） */
+  if(window.AllinONE_Reward){
+    const ms=[1e5,1e6,1e7].find(t=>assets()>=t&&!AllinONE_Reward._done("mile_"+t));
+    if(ms!==undefined){AllinONE_Reward.mark("mile_"+ms);AllinONE_Reward.report("SCORE_MILESTONE",{assets:Math.round(assets()),threshold:ms});}
+  }
+}
+function addXP(n){
+  S.xp+=n;let up=false;
+  while(S.xp>=xpNeed(S.level)){S.xp-=xpNeed(S.level);S.level++;up=true;}
+  if(up){
+    toast(`🎖️ 晋升 ${rankOf(S.level)} Lv.${S.level}！新场口或许已解锁`);
+    if(window.AllinONE_Reward)AllinONE_Reward.report("ACHIEVEMENT_UNLOCK",{level:S.level,rank:rankOf(S.level)}); /* AllinONE 奖励上报 */
+  }
+  save();renderHeader();renderMines();
+}
+
+/* ================================================================
+   音效（WebAudio 全合成）
+================================================================ */
+let AC=null;
+const ac=()=>{if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)();}catch(e){}}if(AC&&AC.state==="suspended")AC.resume();return AC;};
+function noiseBuf(c,dur){const b=c.createBuffer(1,c.sampleRate*dur,c.sampleRate),d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;return b;}
+function sndSaw(dur=2.4){ /* 砂轮摩擦 */
+  const c=ac();if(!c)return;
+  const s=c.createBufferSource();s.buffer=noiseBuf(c,dur);s.loop=false;
+  const f=c.createBiquadFilter();f.type="bandpass";f.Q.value=2.5;
+  f.frequency.setValueAtTime(700,c.currentTime);
+  f.frequency.linearRampToValueAtTime(2600,c.currentTime+dur*.5);
+  f.frequency.linearRampToValueAtTime(900,c.currentTime+dur);
+  const g=c.createGain();g.gain.setValueAtTime(.001,c.currentTime);
+  g.gain.exponentialRampToValueAtTime(.3,c.currentTime+.15);
+  g.gain.exponentialRampToValueAtTime(.001,c.currentTime+dur);
+  s.connect(f).connect(g).connect(c.destination);s.start();
+}
+function sndCoins(){ /* 金币爆裂 */
+  const c=ac();if(!c)return;
+  for(let i=0;i<7;i++){
+    const o=c.createOscillator(),g=c.createGain();
+    o.type="square";o.frequency.value=1800+Math.random()*2600;
+    const t=c.currentTime+i*.05+Math.random()*.03;
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.12,t+.01);
+    g.gain.exponentialRampToValueAtTime(.001,t+.35);
+    o.connect(g).connect(c.destination);o.start(t);o.stop(t+.4);
+  }
+  const s=c.createBufferSource();s.buffer=noiseBuf(c,.3);
+  const f=c.createBiquadFilter();f.type="highpass";f.frequency.value=6000;
+  const g=c.createGain();g.gain.value=.08;
+  s.connect(f).connect(g).connect(c.destination);s.start();
+}
+function sndCrack(){ /* 石头碎裂 */
+  const c=ac();if(!c)return;
+  const s=c.createBufferSource();s.buffer=noiseBuf(c,.5);
+  const f=c.createBiquadFilter();f.type="lowpass";f.frequency.setValueAtTime(3000,c.currentTime);
+  f.frequency.exponentialRampToValueAtTime(200,c.currentTime+.45);
+  const g=c.createGain();g.gain.setValueAtTime(.5,c.currentTime);
+  g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.5);
+  s.connect(f).connect(g).connect(c.destination);s.start();
+  const o=c.createOscillator(),g2=c.createGain();o.type="sine";
+  o.frequency.setValueAtTime(160,c.currentTime);o.frequency.exponentialRampToValueAtTime(45,c.currentTime+.4);
+  g2.gain.setValueAtTime(.4,c.currentTime);g2.gain.exponentialRampToValueAtTime(.001,c.currentTime+.45);
+  o.connect(g2).connect(c.destination);o.start();o.stop(c.currentTime+.5);
+}
+function sndChime(big){
+  const c=ac();if(!c)return;
+  (big?[523,659,784,1047,1319]:[392,523,659]).forEach((fr,i)=>{
+    const o=c.createOscillator(),g=c.createGain();o.type="sine";o.frequency.value=fr;
+    const t=c.currentTime+i*.09;
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.2,t+.02);
+    g.gain.exponentialRampToValueAtTime(.001,t+.8);
+    o.connect(g).connect(c.destination);o.start(t);o.stop(t+.9);
+  });
+}
+
+/* ================================================================
+   全屏粒子 & 闪光 & 震动
+================================================================ */
+const fxC=document.getElementById("fxC"),fx2=fxC.getContext("2d");let parts=[];
+function rsFx(){fxC.width=innerWidth;fxC.height=innerHeight;}addEventListener("resize",rsFx);rsFx();
+function burst(x,y,color,n,sp,up){for(let i=0;i<n;i++){const a=Math.random()*7,s=(Math.random()*.7+.3)*sp;
+  parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-(up||0),life:1,d:.008+Math.random()*.02,color,r:1+Math.random()*3});}}
+(function loop(){fx2.clearRect(0,0,fxC.width,fxC.height);parts=parts.filter(p=>p.life>0);
+  for(const p of parts){p.x+=p.vx;p.y+=p.vy;p.vy+=.12;p.life-=p.d;
+    fx2.globalAlpha=Math.max(p.life,0);fx2.fillStyle=p.color;
+    fx2.beginPath();fx2.arc(p.x,p.y,p.r*p.life+.4,0,7);fx2.fill();}
+  fx2.globalAlpha=1;requestAnimationFrame(loop);})();
+function flash(color,peak){const f=document.getElementById("flashFx");
+  f.style.background=`radial-gradient(circle at 50% 45%, ${color} 0%, transparent 70%)`;
+  f.style.transition="none";f.style.opacity=peak;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{f.style.transition="opacity .9s";f.style.opacity=0;}));}
+function shake(){document.body.classList.remove("shake");void document.body.offsetWidth;document.body.classList.add("shake");}
+function vibrate(p){if(navigator.vibrate)navigator.vibrate(p);}
+let toastT=null;
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("show");
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2400);}
+
+/* ================================================================
+   市场行情（0.8 ~ 1.5，均值回归）+ K线
+================================================================ */
+let candles=[],curCandle=null,tickN=0;
+(function initCandles(){
+  let p=S.mult;
+  for(let i=0;i<30;i++){const o=p;p=clampM(p+(Math.random()-.5)*.08+(1.1-p)*.06);
+    candles.push({o,c:p,h:Math.max(o,p)+Math.random()*.02,l:Math.min(o,p)-Math.random()*.02});}
+  curCandle={o:p,c:p,h:p,l:p};S.mult=p;
+})();
+function clampM(v){return Math.min(1.5,Math.max(.8,v));}
+setInterval(()=>{
+  const o=S.mult;
+  /* AllinONE 道具「行情拉升」：持有期内行情冻结不动 */
+  if(Date.now()>=(S.marketHoldUntil||0)){
+    S.mult=clampM(S.mult+(Math.random()-.5)*.06+(1.1-S.mult)*.05);
+  }
+  curCandle.c=S.mult;curCandle.h=Math.max(curCandle.h,S.mult);curCandle.l=Math.min(curCandle.l,S.mult);
+  if(++tickN%5===0){candles.push({...curCandle});if(candles.length>40)candles.shift();
+    curCandle={o:S.mult,c:S.mult,h:S.mult,l:S.mult};}
+  renderMarket(o);
+},4000);
+function renderMarket(prev){
+  const m=S.mult,up=m>=prev;
+  const el=document.getElementById("mktMult");
+  el.textContent="×"+m.toFixed(2)+(up?" ▲":" ▼");
+  el.className=up?"up":"down";
+  document.getElementById("mktMini").textContent="×"+m.toFixed(2);
+  document.getElementById("mktMini").style.color=m>=1.15?"var(--up)":m<=0.95?"var(--down)":"var(--text)";
+  document.getElementById("mktTip").textContent=
+    m>=1.3?"🔥 行情大热！出货良机，落袋为安！":
+    m<=0.9?"🧊 行情低迷，好玉不妨入仓蛰伏":m>=1.1?"行情偏暖，出货小赚":"行情平淡，可切可囤";
+  drawKline();
+  if(document.getElementById("page-inv").classList.contains("active"))renderInv();
+}
+function drawKline(){
+  const cv=document.getElementById("kline"),dpr=devicePixelRatio||1;
+  const w=cv.clientWidth,h=cv.clientHeight||90;if(!w)return;
+  cv.width=w*dpr;cv.height=h*dpr;const c=cv.getContext("2d");c.scale(dpr,dpr);
+  const all=[...candles,curCandle],pad=6;
+  let mn=1.5,mx=.8;all.forEach(k=>{mn=Math.min(mn,k.l);mx=Math.max(mx,k.h);});
+  const Y=v=>h-pad-(v-mn)/(mx-mn+.001)*(h-pad*2);
+  const bw=Math.max(2,(w-pad*2)/all.length*.6);
+  /* 1.0 基准线 */
+  c.strokeStyle="rgba(142,163,150,.35)";c.setLineDash([4,4]);
+  c.beginPath();c.moveTo(pad,Y(1));c.lineTo(w-pad,Y(1));c.stroke();c.setLineDash([]);
+  all.forEach((k,i)=>{
+    const x=pad+(i+.5)*(w-pad*2)/all.length,up=k.c>=k.o,col=up?"#e05a4e":"#3ddc84";
+    c.strokeStyle=col;c.lineWidth=1;
+    c.beginPath();c.moveTo(x,Y(k.h));c.lineTo(x,Y(k.l));c.stroke();
+    c.fillStyle=up?"transparent":col;c.strokeStyle=col;
+    const t=Y(Math.max(k.o,k.c)),b=Y(Math.min(k.o,k.c));
+    c.lineWidth=1.2;
+    c.beginPath();c.rect(x-bw/2,t,bw,Math.max(b-t,1.5));
+    up?c.stroke():c.fill();
+  });
+  c.fillStyle="#8ea396";c.font="10px sans-serif";
+  c.fillText(mx.toFixed(2),2,10);c.fillText(mn.toFixed(2),2,h-2);
+}
+
+/* ================================================================
+   原石生成（视觉特征与隐藏结果挂钩）
+================================================================ */
+/* 形状档案：滚圆饱满(贵·稳) / 扁平板正 / 细长条 / 歪瓜裂枣(贱·高方差捡漏) */
+const SHAPES={
+  round:{name:"滚圆饱满", squash:[.95,1,.98], costMul:1.25, reg:[.72,1],  vol:[.78,.2]},
+  slab: {name:"扁平板正", squash:[1.28,.62,.96],costMul:1.0,  reg:[.55,.85],vol:[.6,.55]},
+  elong:{name:"细长条状", squash:[.7,1.12,1.2], costMul:.85,  reg:[.45,.8], vol:[.5,.75]},
+  odd:  {name:"歪瓜裂枣", squash:[1,1,1],       costMul:.62,  reg:[.1,.5],  vol:[.22,1.3]},
+};
+function genStone(mine){
+  const seed=(Math.random()*1e9)|0,rng=mulberry32(seed);
+  /* AllinONE 道具「幸运加持」：出绿率 ×1.6，实际购买时才消耗次数 */
+  const lucky=S.luck>0;
+  let quality,value;
+  if(rng()<mine.green*(lucky?1.6:1)){
+    let r=rng()*100;quality=mine.w[0][0];
+    for(const pair of mine.w){if(r<pair[1]){quality=pair[0];break;}r-=pair[1];}
+    value=Math.min(mine.cap,Math.round(mine.price*(1.2+Math.pow(rng(),2.0)*(mine.cap/mine.price-1))));
+  }else{
+    quality=rng()<.7?"rock":"dou";
+    value=Math.round(mine.price*(0.03+rng()*0.3));
+  }
+  const waxSkin=MINE_SKIN[mine.id].wax;
+  const skin=rng()<(waxSkin?.75:.3)?"dark":"brown"; /* 腊壳场口多高波动，沙皮场口多稳 */
+  if(quality!=="rock"&&value>mine.price){value=skin==="dark"?Math.min(mine.cap,Math.round(value*1.3)):Math.round(value*.9);}
+  else{value=skin==="dark"?Math.round(value*.7):Math.round(value*1.3);}
+  const cracks=rng(),songhua=rng();
+  if(cracks>.7){ /* 裂多生变 */
+    const gi=gemOf(quality).idx;
+    if(rng()<.22&&gi<5){quality=GEMS[gi+1].id;value=Math.min(mine.cap,Math.round(value*1.5));}
+    else if(rng()<.3&&gi>0){quality=GEMS[gi-1].id;value=Math.round(value*.5);}
+  }
+  /* —— 体型与形状（决定标价：越大越规整越贵，越怪越便宜） —— */
+  const size=.6+rng()*.85;                               /* 相对体型 0.6~1.45 */
+  const pool=["round","round","slab","slab","elong","odd"]; /* 歪瓜权重最低但存在 */
+  const shape=pool[(rng()*pool.length)|0];
+  const SH=SHAPES[shape];
+  const regularity=SH.reg[0]+rng()*(SH.reg[1]-SH.reg[0]);
+  const sizeMul=Math.pow(size,1.15);
+  const jitter=.9+rng()*.2;                              /* 同档个体微差 */
+  const cost=Math.max(Math.round(mine.price*.25),Math.round(mine.price*sizeMul*SH.costMul*jitter));
+  /* 价值随体型等比走（大石出大货，期望与标价持平），形状只改方差：
+     滚圆稳、歪瓜暴涨暴跌——便宜是拿波动换的 */
+  const valScale=sizeMul*SH.costMul;
+  if(quality!=="rock"){value=Math.min(mine.cap,Math.round(value*valScale*(SH.vol[0]+rng()*SH.vol[1])));}
+  else{value=Math.round(value*(0.35+0.75*valScale));} /* 废料也按大小称斤卖 */
+  const winGlow=Math.min(1,gemOf(quality).idx/5*.85+rng()*.3);
+  return {seed,mineId:mine.id,cost,skin,cracks,songhua,winGlow,quality,value,size,shape,regularity,lucky};
+}
+let curMine=MINES[0],stones=[];
+/* AllinONE 扩展矿区（任务广场 levels slot / 内容工坊注入），铁律：按 ?ext= 过滤后由加载器填入 */
+let EXT_MINES=[];
+function allMines(){return EXT_MINES.length?MINES.concat(EXT_MINES):MINES;}
+function skinBaseOf(extMine){ /* 扩展矿区皮壳底版：1黑乌沙/2黄砂/3白盐沙/4腊壳 */
+  const m={dark:1,brown:2,white:3,wax:4};
+  const b=m[extMine.skin]|| (Number(extMine.skin)>=1&&Number(extMine.skin)<=4?Number(extMine.skin):2);
+  return b;
+}
+/**
+ * 应用一个扩展矿区（数据型内容包）。返回 true 表示成功。
+ * 防御式兜底：字段缺失/类型错误/数值超限全部夹取，权重归一化，id 去重。
+ */
+function applyMine(lv){
+  if(!lv||typeof lv!=="object")return false;
+  const gid=lv._submissionId?("ext_"+String(lv._submissionId).replace(/[^A-Za-z0-9_\-]/g,"").slice(0,20)):("ext_"+Date.now()+"_"+((Math.random()*1e4)|0));
+  let id=String(lv.id||"").replace(/[^A-Za-z0-9_\-]/g,"").slice(0,20)||gid;
+  if(allMines().some(m=>String(m.id)===id))id=gid;               /* id 冲突 → 换生成 id */
+  if(allMines().some(m=>String(m.id)===id))return false;
+  let price=Math.round(Number(lv.price));
+  if(!isFinite(price))price=500;
+  price=Math.max(50,Math.min(1e7,price));
+  let green=Number(lv.green);
+  if(!isFinite(green))green=15;
+  if(green>1)green=green/100;                                    /* 兼容百分制 */
+  green=Math.max(.02,Math.min(.6,green));
+  let cap=Math.round(Number(lv.cap));
+  if(!isFinite(cap))cap=price*10;
+  cap=Math.max(Math.round(price*1.5),Math.min(5e7,cap));
+  /* 品质权重：只认 GEMS 里的 id，权重正数，全部非法时给默认表 */
+  const GEM_IDS=GEMS.map(g=>g.id);
+  let w=(Array.isArray(lv.w)?lv.w:[]).filter(p=>Array.isArray(p)&&GEM_IDS.includes(p[0])&&Number(p[1])>0)
+    .map(p=>[p[0],Number(p[1])]);
+  if(!w.length)w=[["dou",40],["nuo",30],["bing",20],["boli",8],["diwang",2]];
+  const wsum=w.reduce((a,p)=>a+p[1],0);
+  w=w.map(p=>[p[0],Math.max(.5,Math.round(p[1]/wsum*1000)/10)]);
+  const mine={
+    id,name:String(lv.name||"未名矿脉").slice(0,10),
+    icon:(typeof lv.icon==="string"&&lv.icon&&lv.icon.length<=3)?lv.icon:"⛰️",
+    lv:Math.max(1,Math.min(60,Math.round(Number(lv.lv)||1))),
+    price,green,cap,
+    desc:String(lv.desc||"玩家新探明的矿脉，风险自负。").slice(0,40),
+    w,ext:true
+  };
+  const base=skinBaseOf(lv);                                     /* 注册皮壳外观底版 */
+  MINE_SKIN[mine.id]=JSON.parse(JSON.stringify(MINE_SKIN[base]));
+  MINE_SKIN_NAME[mine.id]=String(lv.skinName||mine.name+"皮").slice(0,8);
+  EXT_MINES.push(mine);
+  return true;
+}
+function refreshStones(){stones=Array.from({length:6},()=>genStone(curMine));renderStones();}
+
+/* ================================================================
+   拟真纹理 v2（参照真实场口皮壳实拍特征：
+   黑乌沙「皮黑似漆+癣+白蟒带+松花」/ 大马坎黄砂水石 / 木那白盐沙 / 腊壳蒙头料。
+   同时绘制 色彩图 + 凹凸图，法线贴图由凹凸图 Sobel 生成）
+================================================================ */
+const MINE_SKIN={
+  1:{base:"#17130f",lite:"#332c22",grain:"#4a4132",dark:"#0a0806",wax:true, band:"rgba(150,142,124,.38)"},
+  2:{base:"#8a6a38",lite:"#b28d52",grain:"#d0af74",dark:"#5f4522",wax:false,band:"rgba(225,208,168,.44)"},
+  3:{base:"#969e8a",lite:"#c0c8b4",grain:"#e6ecda",dark:"#686f5c",wax:false,band:"rgba(185,196,175,.4)"},
+  4:{base:"#1c1915",lite:"#3b352b",grain:"#57503f",dark:"#0c0a08",wax:true, band:"rgba(140,130,112,.34)"},
+};
+const MINE_SKIN_NAME={1:"黑乌沙皮",2:"黄砂水石皮",3:"白盐沙皮",4:"腊壳蒙头料"};
+function makeSkinLayers(st){
+  const W=1024,H=512;
+  const col=document.createElement("canvas");col.width=W;col.height=H;
+  const bmp=document.createElement("canvas");bmp.width=W;bmp.height=H;
+  const c=col.getContext("2d"),b=bmp.getContext("2d");
+  const rng=mulberry32(st.seed),P=MINE_SKIN[st.mineId];
+  b.fillStyle="#808080";b.fillRect(0,0,W,H);
+  /* ---- 底色：多层矿物色斑 + 沉积条带 ---- */
+  c.fillStyle=P.base;c.fillRect(0,0,W,H);
+  for(let i=0;i<90;i++){
+    const x=rng()*W,y=rng()*H,r=30+rng()*140;
+    const g=c.createRadialGradient(x,y,0,x,y,r);
+    g.addColorStop(0,(rng()<.5?P.lite:P.dark)+"66");g.addColorStop(1,"transparent");
+    c.fillStyle=g;c.beginPath();c.arc(x,y,r,0,7);c.fill();
+    const gb=b.createRadialGradient(x,y,0,x,y,r);
+    gb.addColorStop(0,(rng()<.5?"#8a8a8a":"#767676")+"40");gb.addColorStop(1,"transparent");
+    b.fillStyle=gb;b.beginPath();b.arc(x,y,r,0,7);b.fill();
+  }
+  for(let i=0;i<5;i++){
+    c.fillStyle="rgba(0,0,0,.06)";c.fillRect(0,H*(.12+i*.18+rng()*.05),W,14+rng()*26);
+  }
+  /* ---- 蟒带：凸起蜿蜒条带，白蟒突出为佳兆 ---- */
+  const nb=1+(rng()<.45?1:0);
+  c.lineCap="round";b.lineCap="round";
+  for(let k=0;k<nb;k++){
+    const y0=H*(.18+rng()*.64),amp=12+rng()*26,ph=rng()*7,wd=16+rng()*24;
+    const path=()=>{c.beginPath();b.beginPath();
+      for(let x=0;x<=W;x+=10){
+        const y=y0+Math.sin(x/65+ph)*amp+Math.sin(x/23+ph*2)*5;
+        if(x){c.lineTo(x,y);b.lineTo(x,y);}else{c.moveTo(x,y);b.moveTo(x,y);}}};
+    path();c.strokeStyle=P.dark;c.lineWidth=wd+9;c.stroke();
+    path();c.strokeStyle=P.band;c.lineWidth=wd;c.stroke();
+    path();c.strokeStyle="rgba(255,250,235,.25)";c.lineWidth=wd*.35;c.stroke();
+    path();b.strokeStyle="#b4b4b4";b.lineWidth=wd;b.stroke();
+    path();b.strokeStyle="#d2d2d2";b.lineWidth=wd*.4;b.stroke();
+  }
+  /* ---- 松花：绿色放射针簇（内部有绿的表面信号） ---- */
+  const nS=1+Math.round(st.songhua*6);
+  for(let s2=0;s2<nS;s2++){
+    const cx=rng()*W,cy=rng()*H,cr=7+rng()*15;
+    let g=c.createRadialGradient(cx,cy,1,cx,cy,cr*2.4);
+    g.addColorStop(0,"rgba(70,165,85,.5)");g.addColorStop(1,"transparent");
+    c.fillStyle=g;c.beginPath();c.arc(cx,cy,cr*2.4,0,7);c.fill();
+    c.strokeStyle="rgba(95,195,105,.85)";c.lineWidth=1.1;
+    const nN=8+(rng()*8|0);
+    for(let i=0;i<nN;i++){const a=rng()*7,r1=cr*.25,r2=cr*(.6+rng()*.6);
+      c.beginPath();c.moveTo(cx+Math.cos(a)*r1,cy+Math.sin(a)*r1);
+      c.lineTo(cx+Math.cos(a)*r2,cy+Math.sin(a)*r2);c.stroke();}
+    c.fillStyle="rgba(140,225,140,.95)";
+    for(let i=0;i<7;i++){c.beginPath();c.arc(cx+(rng()-.5)*cr*1.4,cy+(rng()-.5)*cr*1.4,.8+rng()*1.4,0,7);c.fill();}
+    const gb=b.createRadialGradient(cx,cy,1,cx,cy,cr);
+    gb.addColorStop(0,"#a8a8a8");gb.addColorStop(1,"transparent");
+    b.fillStyle=gb;b.beginPath();b.arc(cx,cy,cr,0,7);b.fill();
+  }
+  /* ---- 癣：黑斑伴灰绿晕圈（铬铁矿伴生） ---- */
+  const nX=2+(rng()*4|0);
+  for(let i=0;i<nX;i++){
+    const cx=rng()*W,cy=rng()*H,cr=6+rng()*18;
+    let g=c.createRadialGradient(cx,cy,1,cx,cy,cr*1.8);
+    g.addColorStop(0,"rgba(8,8,8,.9)");g.addColorStop(.55,"rgba(20,24,18,.6)");
+    g.addColorStop(.8,"rgba(70,95,70,.28)");g.addColorStop(1,"transparent");
+    c.fillStyle=g;c.beginPath();c.arc(cx,cy,cr*1.8,0,7);c.fill();
+    const gb=b.createRadialGradient(cx,cy,1,cx,cy,cr);
+    gb.addColorStop(0,"#565656");gb.addColorStop(1,"transparent");
+    b.fillStyle=gb;b.beginPath();b.arc(cx,cy,cr,0,7);b.fill();
+  }
+  /* ---- 裂：树枝状深裂 + 受光棱边高光 ---- */
+  const nC=1+Math.round(st.cracks*6);
+  for(let i=0;i<nC;i++){
+    let x=rng()*W,y=rng()*H;const segs=3+(rng()*5|0);
+    const ptsC=[[x,y]];
+    for(let s3=0;s3<segs;s3++){x+=(rng()-.5)*90;y+=(rng()-.35)*55;ptsC.push([x,y]);}
+    const strokeP=(ctx,style,wd,dx,dy)=>{ctx.strokeStyle=style;ctx.lineWidth=wd;
+      ctx.beginPath();ptsC.forEach((p,j)=>j?ctx.lineTo(p[0]+dx,p[1]+dy):ctx.moveTo(p[0]+dx,p[1]+dy));ctx.stroke();};
+    strokeP(c,"rgba(255,255,255,.14)",2.4,1.2,1.2);
+    strokeP(c,"rgba(5,4,3,.85)",1.5,0,0);
+    strokeP(b,"#2e2e2e",1.6,0,0);
+  }
+  /* ---- 砂粒感（风化沙皮的灵魂；腊壳石更细腻） ---- */
+  const gn=P.wax?1500:5200;
+  for(let i=0;i<gn;i++){
+    const x=rng()*W,y=rng()*H,r=.6+rng()*1.7;
+    c.fillStyle=rng()<.5?P.grain:P.dark;c.globalAlpha=.1+rng()*.3;
+    c.fillRect(x,y,r,r);c.globalAlpha=1;
+    const v=100+(rng()*90|0);
+    b.fillStyle=`rgb(${v},${v},${v})`;b.globalAlpha=.5;
+    b.fillRect(x,y,r,r);b.globalAlpha=1;
+  }
+  /* ---- 腊壳光泽（黑乌沙/蒙头料的漆面反光） ---- */
+  if(P.wax){
+    let g=c.createLinearGradient(0,0,W,H);
+    g.addColorStop(.25,"rgba(255,255,255,0)");g.addColorStop(.45,"rgba(255,244,214,.1)");
+    g.addColorStop(.6,"rgba(255,255,255,0)");
+    c.fillStyle=g;c.fillRect(0,0,W,H);
+  }
+  /* ---- 开窗：擦口磨光面（不规则多边形 + 凹坑 + 抛光高光） ---- */
+  const wx=W*(.28+rng()*.44),wy=H*(.28+rng()*.44),wr=34+st.winGlow*58;
+  const gemC=gemOf(st.quality).color;
+  const pts=[];const np=11;
+  for(let i=0;i<np;i++){const a=i/np*Math.PI*2,rr=wr*(.75+rng()*.5);
+    pts.push([wx+Math.cos(a)*rr,wy+Math.sin(a)*rr*.82]);}
+  let g=c.createRadialGradient(wx,wy,wr*.7,wx,wy,wr*1.35);
+  g.addColorStop(0,"rgba(0,0,0,.4)");g.addColorStop(1,"transparent");
+  c.fillStyle=g;c.beginPath();c.arc(wx,wy,wr*1.35,0,7);c.fill();
+  const gb=b.createRadialGradient(wx,wy,wr*.5,wx,wy,wr*1.3);
+  gb.addColorStop(0,"#868686");gb.addColorStop(.75,"#5a5a5a");gb.addColorStop(1,"transparent");
+  b.fillStyle=gb;b.beginPath();b.arc(wx,wy,wr*1.3,0,7);b.fill();
+  c.save();c.beginPath();
+  pts.forEach((p,i)=>i?c.lineTo(p[0],p[1]):c.moveTo(p[0],p[1]));c.closePath();c.clip();
+  /* 窗内：直接采样抛光玉肉纹理，再叠少量棉絮与高光 */
+  c.drawImage(jadeOf(st),wx-wr*1.25,wy-wr*1.05,wr*2.5,wr*2.1);
+  /* 压暗调和，让窗内玉肉融入皮壳光影 */
+  c.fillStyle="rgba(22,32,24,.16)";c.fillRect(wx-wr*1.6,wy-wr*1.4,wr*3.2,wr*2.8);
+  for(let i=0;i<10;i++){
+    const x=wx+(rng()-.5)*wr*1.6,y=wy+(rng()-.5)*wr*1.2,r=2+rng()*8;
+    const gg=c.createRadialGradient(x,y,1,x,y,r);
+    gg.addColorStop(0,"rgba(255,255,255,.25)");gg.addColorStop(1,"transparent");
+    c.fillStyle=gg;c.beginPath();c.arc(x,y,r,0,7);c.fill();
+  }
+  let hg=c.createRadialGradient(wx-wr*.3,wy-wr*.35,2,wx,wy,wr*1.1);
+  hg.addColorStop(0,"rgba(255,255,255,.42)");hg.addColorStop(.35,"rgba(255,255,255,.1)");
+  hg.addColorStop(1,"rgba(255,255,255,0)");
+  c.fillStyle=hg;c.fillRect(wx-wr*1.6,wy-wr*1.4,wr*3.2,wr*2.8);
+  c.restore();
+  /* 窗沿：磨光亮边 + 深色皮壳包边，消除"贴纸感" */
+  c.beginPath();pts.forEach((p,i)=>i?c.lineTo(p[0],p[1]):c.moveTo(p[0],p[1]));c.closePath();
+  c.strokeStyle="rgba(8,7,5,.8)";c.lineWidth=7;c.lineJoin="round";c.stroke();
+  c.strokeStyle="rgba(255,255,240,.32)";c.lineWidth=1.6;c.stroke();
+  seamBlend(col);seamBlend(bmp);
+  return {color:col,bump:bmp};
+}
+/* 经度接缝消除：右缘 60px 与左缘内容交叉淡化，实现无缝球面包裹 */
+function seamBlend(cv){
+  const W=cv.width,H=cv.height,c=cv.getContext("2d"),S=60;
+  for(let i=0;i<S;i++){
+    c.globalAlpha=i/S;
+    c.drawImage(cv,i,0,1,H,W-S+i,0,1,H);
+  }
+  c.globalAlpha=1;
+}
+function makeJadeCanvas(st){
+  const W=1024,H=512,cv=document.createElement("canvas");cv.width=W;cv.height=H;
+  const c=cv.getContext("2d"),rng=mulberry32(st.seed^0x9e37),gem=gemOf(st.quality),col=jadeCol(gem);
+  const g=c.createLinearGradient(0,0,W,H);
+  g.addColorStop(0,col);g.addColorStop(.5,shade(col,-35));g.addColorStop(1,col);
+  c.fillStyle=g;c.fillRect(0,0,W,H);
+  for(let i=0;i<120;i++){ /* 玉肉云雾 */
+    const x=rng()*W,y=rng()*H,r=10+rng()*46;
+    const gg=c.createRadialGradient(x,y,1,x,y,r);
+    gg.addColorStop(0,(rng()<.5?shade(col,25):shade(col,-25))+"2e");
+    gg.addColorStop(1,"transparent");
+    c.fillStyle=gg;c.beginPath();c.arc(x,y,r,0,7);c.fill();
+  }
+  if(gem.idx>=2){ /* 色根：浓绿条带蜿蜒 */
+    const nR=gem.idx*3;
+    for(let i=0;i<nR;i++){
+      let x=rng()*W,y=rng()*H;const wd=6+rng()*14,segs=3+(rng()*4|0);
+      c.strokeStyle="rgba(10,90,40,.4)";c.lineWidth=wd;c.lineCap="round";
+      c.beginPath();c.moveTo(x,y);
+      const pts2=[[x,y]];
+      for(let s4=0;s4<segs;s4++){x+=(rng()-.3)*120;y+=(rng()-.5)*90;pts2.push([x,y]);}
+      pts2.forEach((p,j)=>j?c.lineTo(p[0],p[1]):0);c.stroke();
+      c.strokeStyle="rgba(120,240,140,.35)";c.lineWidth=wd*.3;
+      c.beginPath();pts2.forEach((p,j)=>j?c.lineTo(p[0]-2,p[1]-2):c.moveTo(p[0]-2,p[1]-2));c.stroke();
+    }
+  }
+  if(gem.idx>=3){ /* 雪花棉：冰种以上白棉点 */
+    for(let i=0;i<70;i++){
+      c.fillStyle=`rgba(255,255,255,${.25+rng()*.4})`;
+      c.beginPath();c.arc(rng()*W,rng()*H,.6+rng()*1.8,0,7);c.fill();
+    }
+  }
+  for(let i=0;i<40;i++){ /* 水头亮斑 */
+    const x=rng()*W,y=rng()*H,r=6+rng()*26;
+    const gg=c.createRadialGradient(x,y,1,x,y,r);
+    gg.addColorStop(0,"rgba(255,255,255,.16)");gg.addColorStop(1,"transparent");
+    c.fillStyle=gg;c.beginPath();c.arc(x,y,r,0,7);c.fill();
+  }
+  if(st.quality==="rock"){ /* 干青垮料：灰暗杂质 */
+    for(let i=0;i<40;i++){
+      const x=rng()*W,y=rng()*H,r=10+rng()*40;
+      const gg=c.createRadialGradient(x,y,1,x,y,r);
+      gg.addColorStop(0,"rgba(55,55,52,.4)");gg.addColorStop(1,"transparent");
+      c.fillStyle=gg;c.beginPath();c.arc(x,y,r,0,7);c.fill();
+    }
+  }
+  return cv;
+}
+function shade(hex,amt){
+  const n=parseInt(hex.slice(1),16);
+  const r=Math.min(255,Math.max(0,(n>>16)+amt)),g=Math.min(255,Math.max(0,(n>>8&255)+amt)),bl=Math.min(255,Math.max(0,(n&255)+amt));
+  return "#"+((r<<16)|(g<<8)|bl).toString(16).padStart(6,"0");
+}
+/* 纹理缓存（石头对象上挂 canvas，避免重复生成） */
+function skinLayers(st){if(!st._sl)st._sl=makeSkinLayers(st);return st._sl;}
+function skinOf(st){return skinLayers(st).color;}
+function bumpOf(st){return skinLayers(st).bump;}
+function jadeOf(st){if(!st._jade)st._jade=makeJadeCanvas(st);return st._jade;}
+/* 贴图派生：凹凸图 Sobel 求导 → 法线贴图 + 粗糙度贴图（首次使用时计算并缓存）
+   粗糙度：砂粒处干涩高粗糙、腊壳漆面低粗糙带光泽微变 */
+function deriveMaps(st){
+  if(st._maps)return st._maps;
+  const src=bumpOf(st),W=src.width,H=src.height;
+  const img=src.getContext("2d").getImageData(0,0,W,H).data;
+  const nout=document.createElement("canvas");nout.width=W;nout.height=H;
+  const rout=document.createElement("canvas");rout.width=W;rout.height=H;
+  const no=nout.getContext("2d").createImageData(W,H);
+  const ro=rout.getContext("2d").createImageData(W,H);
+  const nd=no.data,rd=ro.data;
+  const hAt=(x,y)=>img[(((y+H)%H)*W+((x+W)%W))*4]/255;
+  const STR=2.2,baseR=MINE_SKIN[st.mineId].wax?.52:.74;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const dx=(hAt(x-1,y)-hAt(x+1,y))*STR,dy=(hAt(x,y+1)-hAt(x,y-1))*STR;
+    const len=Math.sqrt(dx*dx+dy*dy+1),i=(y*W+x)*4;
+    nd[i]=(dx/len*.5+.5)*255;nd[i+1]=(dy/len*.5+.5)*255;nd[i+2]=((1)/len*.5+.5)*255;nd[i+3]=255;
+    const v=img[i];
+    const rgh=Math.min(.98,Math.max(.38,baseR+(v-128)/255*.34));
+    const rv=rgh*255;
+    rd[i]=rd[i+1]=rd[i+2]=rv;rd[i+3]=255;
+  }
+  nout.getContext("2d").putImageData(no,0,0);
+  rout.getContext("2d").putImageData(ro,0,0);
+  st._maps={nrm:nout,rgh:rout};return st._maps;
+}
+/* 擦皮合成：wipeFrac 0~1，左侧被擦掉露出玉肉，边缘粗糙 */
+function compositeTex(skinCv,jadeCv,frac,seed){
+  const W=skinCv.width,H=skinCv.height,out=document.createElement("canvas");out.width=W;out.height=H;
+  const c=out.getContext("2d");
+  c.drawImage(jadeCv,0,0);
+  if(frac<1){
+    const skin=document.createElement("canvas");skin.width=W;skin.height=H;
+    const sc2=skin.getContext("2d");sc2.drawImage(skinCv,0,0);
+    sc2.globalCompositeOperation="destination-out";
+    const rng=mulberry32(seed^0x1234);
+    const ex=frac*W;
+    sc2.fillStyle="#000";sc2.fillRect(0,0,ex-20,H);
+    for(let y=0;y<H;y+=10){ /* 锯齿状擦除边缘 */
+      sc2.beginPath();sc2.arc(ex+(rng()-.5)*36,y+rng()*8,12+rng()*14,0,7);sc2.fill();
+    }
+    c.drawImage(skin,0,0);
+  }
+  return out;
+}
+/* 2D 伪3D 缩略图（球面投影 + 高光） */
+function drawThumb(cv,st,skinCv,t){
+  const s=cv.width,c=cv.getContext("2d");
+  c.clearRect(0,0,s,s);
+  /* 体型→半径，形状→剪影轮廓 */
+  const R=(s/2-4)*Math.sqrt(.55+.45*st.size);
+  c.save();
+  c.beginPath();
+  if(st.shape==="odd"){
+    const rng=mulberry32(st.seed^0xBEEF);
+    const wob=[];for(let i=0;i<9;i++)wob.push(.72+rng()*.5);
+    for(let i=0;i<=18;i++){
+      const a=i/18*Math.PI*2,f=1+(wob[i%9]-.97)*Math.sin(a*2.3+st.seed)+ (wob[(i+3)%9]-.97)*Math.cos(a*1.7);
+      const x=s/2+Math.cos(a)*R*f,y=s/2+Math.sin(a)*R*f*.88;
+      i?c.lineTo(x,y):c.moveTo(x,y);
+    }
+    c.closePath();
+  }else{
+    const SH={round:[1,1],slab:[1.22,.74],elong:[.76,1.18]}[st.shape]||[1,1];
+    const rot=((st.seed%13)-6)/40;
+    c.ellipse(s/2,s/2,R*SH[0],R*SH[1],rot,0,7);
+  }
+  c.save();c.clip();
+  const off=((st.seed%97)/97+t)*skinCv.width;
+  c.drawImage(skinCv,-off*.3,0,skinCv.width*.6,s);
+  c.drawImage(skinCv,skinCv.width*.6-off*.3,0,skinCv.width*.6,s);
+  /* 球面明暗 */
+  const g=c.createRadialGradient(s*.38,s*.34,s*.06,s/2,s/2,s*.62);
+  g.addColorStop(0,"rgba(255,255,255,.22)");g.addColorStop(.45,"rgba(0,0,0,0)");g.addColorStop(1,"rgba(0,0,0,.72)");
+  c.fillStyle=g;c.fillRect(0,0,s,s);
+  c.restore();
+  c.restore();
+  /* 开窗呼吸光 */
+  if(st.winGlow>.25){
+    const p=(Math.sin(Date.now()/500+st.seed)+1)/2;
+    c.globalAlpha=st.winGlow*(.3+.4*p);
+    const wg=c.createRadialGradient(s/2,s/2,2,s/2,s/2,R*.9);
+    wg.addColorStop(0,gemOf(st.quality).color);wg.addColorStop(1,"transparent");
+    c.fillStyle=wg;c.beginPath();c.arc(s/2,s/2,R*.9,0,7);c.fill();c.globalAlpha=1;
+  }
+}
+
+/* ================================================================
+   Three.js 3D 查看器
+================================================================ */
+/* 拟真岩体几何：多倍频噪声 + 高斯鼓包 + 场口专属体形
+   黑乌沙滚圆 / 大马坎扁长水石 / 木那近球微扁 / 蒙头料大块微棱角 */
+function rockGeometry(st){
+  const rng=mulberry32(st.seed^0xC0FFEE);
+  /* 索引化球体：顶点共享 → computeVertexNormals 平滑着色，消除棱面感 */
+  const geo=new THREE.SphereGeometry(1,128,80);
+  const pos=geo.attributes.position,v=new THREE.Vector3();
+  const SH=SHAPES[st.shape]||SHAPES.round;
+  const sq=SH.squash.slice();
+  const irr=1-st.regularity;                 /* 规整度越低形变越野 */
+  const lumps=[];const nl=2+(rng()*4|0);
+  for(let i=0;i<nl;i++){
+    const th=rng()*Math.PI*2,ph=Math.acos(2*rng()-1);
+    lumps.push({x:Math.sin(ph)*Math.cos(th),y:Math.cos(ph),z:Math.sin(ph)*Math.sin(th),
+      a:(.03+irr*.15)*(.5+rng()),s:.45+rng()*.75});
+  }
+  const p1=rng()*7,p2=rng()*7,p3=rng()*7;
+  /* 歪瓜专属：一个大鼓包+一处凹陷+整体歪斜 */
+  const bigLump=st.shape==="odd"?{x:(rng()-.5)*1.6,y:(rng()-.5)*1.2,z:(rng()-.5)*1.6,a:.28+rng()*.14,s:.6}:null;
+  const dent=st.shape==="odd"?{x:-bigLump.x*.8,y:-bigLump.y*.8,z:-bigLump.z*.8,a:-.16-rng()*.1,s:.5}:null;
+  const taper=st.shape==="odd"?.18+rng()*.22:0;   /* 上窄下宽的楔形 */
+  for(let i=0;i<pos.count;i++){
+    v.fromBufferAttribute(pos,i);
+    let r=1
+      +Math.sin(v.x*3.1+p1)*Math.sin(v.y*4.3+p2)*(.035+irr*.06)
+      +Math.sin(v.x*7.7+v.y*5.3+p3)*Math.sin(v.z*6.1+p1)*(.022+irr*.045)
+      +Math.sin(v.z*11.3+v.x*9.7+p2)*(.012+irr*.022);
+    for(const L of lumps){
+      const d=(v.x-L.x)**2+(v.y-L.y)**2+(v.z-L.z)**2;
+      r+=L.a*Math.exp(-d/(L.s*L.s));
+    }
+    if(bigLump){
+      const dl=(v.x-bigLump.x)**2+(v.y-bigLump.y)**2+(v.z-bigLump.z)**2;
+      r+=bigLump.a*Math.exp(-dl/(bigLump.s*bigLump.s));
+      const dd=(v.x-dent.x)**2+(v.y-dent.y)**2+(v.z-dent.z)**2;
+      r+=dent.a*Math.exp(-dd/(dent.s*dent.s));
+    }
+    v.multiplyScalar(r);
+    if(taper)v.y*=1-taper*(v.y<0?-.6:1)*Math.abs(v.y); /* 歪瓜重心下坠 */
+    v.x*=sq[0];v.y*=sq[1];v.z*=sq[2];
+    pos.setXYZ(i,v.x,v.y,v.z);
+  }
+  /* 体型缩放进几何体（0.6~1.45 倍，视觉上一眼可辨大小） */
+  const sc=.72+.28*st.size;
+  geo.scale(sc*sq[0],sc*sq[1],sc*sq[2]);
+  geo.computeVertexNormals();
+  return geo;
+}
+const Viewer={
+  ok:false,renderer:null,scene:null,cam:null,rock:null,mat:null,tex:null,
+  rig:null,halves:null,splitP:0,
+  rotX:-.12,rotY:.6,velX:0,velY:.004,dragging:false,px:0,py:0,lastMove:0,
+  init(){
+    if(this.ok||!window.THREE)return this.ok;
+    try{
+      this.renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+      this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+      /* 摄影感：sRGB 输出 + ACES 电影色调映射 + PCF 软阴影 */
+      this.renderer.outputEncoding=THREE.sRGBEncoding;
+      this.renderer.toneMapping=THREE.ACESFilmicToneMapping;
+      this.renderer.toneMappingExposure=1.18;
+      this.renderer.shadowMap.enabled=true;
+      this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+      this.scene=new THREE.Scene();
+      this.cam=new THREE.PerspectiveCamera(36,1,.1,100);this.cam.position.set(0,.25,3.1);
+      this.cam.lookAt(0,0,0);
+      /* IBL 环境反射：程序化天光贴图（暖天顶+冷地+高光窗），PBR 质感核心 */
+      const envCv=document.createElement("canvas");envCv.width=256;envCv.height=128;
+      const ec=envCv.getContext("2d");
+      const eg=ec.createLinearGradient(0,0,0,128);
+      eg.addColorStop(0,"#fff0cc");eg.addColorStop(.42,"#5f6f60");eg.addColorStop(1,"#0e140e");
+      ec.fillStyle=eg;ec.fillRect(0,0,256,128);
+      const spot=ec.createRadialGradient(74,34,2,74,34,46);
+      spot.addColorStop(0,"rgba(255,250,228,.95)");spot.addColorStop(1,"rgba(255,250,228,0)");
+      ec.fillStyle=spot;ec.beginPath();ec.arc(74,34,46,0,7);ec.fill();
+      const spot2=ec.createRadialGradient(190,58,2,190,58,30);
+      spot2.addColorStop(0,"rgba(160,230,190,.5)");spot2.addColorStop(1,"rgba(160,230,190,0)");
+      ec.fillStyle=spot2;ec.beginPath();ec.arc(190,58,30,0,7);ec.fill();
+      const envTex=new THREE.CanvasTexture(envCv);
+      envTex.mapping=THREE.EquirectangularReflectionMapping;
+      const pm=new THREE.PMREMGenerator(this.renderer);
+      this.scene.environment=pm.fromEquirectangular(envTex).texture;
+      pm.dispose();
+      /* 灯光：暖主光（投影）+ 冷补光 + 翡翠轮廓光 */
+      this.scene.add(new THREE.HemisphereLight(0xfff4dd,0x1a241c,.55));
+      const key=new THREE.DirectionalLight(0xffe8bb,1.3);
+      key.position.set(2.6,3.4,2.2);key.castShadow=true;
+      key.shadow.mapSize.set(1024,1024);
+      key.shadow.camera.left=-2.2;key.shadow.camera.right=2.2;
+      key.shadow.camera.top=2.2;key.shadow.camera.bottom=-2.2;
+      key.shadow.radius=4;key.shadow.bias=-.0005;
+      this.scene.add(key);
+      const fill=new THREE.DirectionalLight(0x8fb8d8,.3);fill.position.set(-2,1,1.5);this.scene.add(fill);
+      const rim=new THREE.PointLight(0x3ddc84,.5,12);rim.position.set(-2.5,-1,-1);this.scene.add(rim);
+      /* 旋转容器（石头与切半都挂这里，360° 旋转统一驱动） */
+      this.rig=new THREE.Group();this.scene.add(this.rig);
+      /* 接触投影地面（只接收阴影） */
+      const ground=new THREE.Mesh(
+        new THREE.PlaneGeometry(8,8),
+        new THREE.ShadowMaterial({opacity:.38})
+      );
+      ground.rotation.x=-Math.PI/2;ground.position.y=-1.42;ground.receiveShadow=true;
+      this.scene.add(ground);
+      /* 360° 拖拽：横向转 Y 轴、纵向转 X 轴，松手带惯性 */
+      const dom=this.renderer.domElement;
+      dom.style.width="100%";dom.style.height="100%";
+      dom.style.touchAction="none";dom.style.cursor="grab";
+      dom.addEventListener("pointerdown",e=>{
+        this.dragging=true;this.px=e.clientX;this.py=e.clientY;
+        this.velX=0;this.velY=0;dom.style.cursor="grabbing";
+        if(dom.setPointerCapture)try{dom.setPointerCapture(e.pointerId);}catch(err){}
+      });
+      dom.addEventListener("pointermove",e=>{
+        if(!this.dragging)return;
+        const dx=e.clientX-this.px,dy=e.clientY-this.py;
+        this.rotY+=dx*.0085;this.rotX+=dy*.0085;
+        this.rotX=Math.max(-1.45,Math.min(1.45,this.rotX));
+        this.velY=dx*.0085;this.velX=dy*.0085;
+        this.px=e.clientX;this.py=e.clientY;this.lastMove=Date.now();
+      });
+      const endDrag=()=>{this.dragging=false;this.lastMove=Date.now();
+        const dom2=this.renderer&&this.renderer.domElement;if(dom2)dom2.style.cursor="grab";};
+      dom.addEventListener("pointerup",endDrag);
+      dom.addEventListener("pointercancel",endDrag);
+      dom.addEventListener("pointerleave",endDrag);
+      this.ok=true;
+    }catch(e){this.ok=false;}
+    return this.ok;
+  },
+  mount(el){
+    if(!this.init()){el.innerHTML="<div style='color:#8ea396;padding-top:110px;font-size:13px'>3D 渲染不可用（缺少 three.min.js）</div>";return;}
+    if(this.renderer.domElement.parentNode!==el){el.innerHTML="";el.appendChild(this.renderer.domElement);}
+    this.resize();
+  },
+  resize(){
+    if(!this.ok)return;
+    const el=this.renderer.domElement.parentNode;if(!el)return;
+    const w=el.clientWidth||300,h=el.clientHeight||260;
+    this.renderer.setSize(w,h,false);this.cam.aspect=w/h;this.cam.updateProjectionMatrix();
+  },
+  setStone(st,frac=0){
+    if(!this.ok)return;
+    this.clearRock();
+    const cv=frac>0?compositeTex(skinOf(st),jadeOf(st),frac,st.seed):skinOf(st);
+    this.tex=new THREE.CanvasTexture(cv);
+    this.tex.wrapS=THREE.RepeatWrapping;
+    this.tex.encoding=THREE.sRGBEncoding;this.tex.anisotropy=8;
+    const maps=deriveMaps(st);
+    this.nrm=new THREE.CanvasTexture(maps.nrm);
+    this.nrm.wrapS=THREE.RepeatWrapping;this.nrm.anisotropy=8;
+    this.rgh=new THREE.CanvasTexture(maps.rgh);
+    this.rgh.wrapS=THREE.RepeatWrapping;
+    /* 物理材质：腊壳石带清漆层（漆面反光），沙皮石干涩 */
+    const wax=MINE_SKIN[st.mineId].wax;
+    this.mat=new THREE.MeshPhysicalMaterial({
+      map:this.tex,normalMap:this.nrm,normalScale:new THREE.Vector2(1.25,1.25),
+      roughnessMap:this.rgh,roughness:1,metalness:.02,
+      clearcoat:wax?.42:.08,clearcoatRoughness:wax?.36:.5,
+      envMapIntensity:wax?.7:.45
+    });
+    this.rock=new THREE.Mesh(rockGeometry(st),this.mat);
+    this.rock.castShadow=true;
+    this.rig.add(this.rock);
+    this.rotY=.6;this.rotX=-.12;this.velY=.004;this.velX=0;
+    this.splitP=0;this.halves=null;
+  },
+  updateWipe(st,frac){ /* 擦皮更新贴图 */
+    if(!this.ok||!this.mat)return;
+    const cv=compositeTex(skinOf(st),jadeOf(st),frac,st.seed);
+    this.mat.map=new THREE.CanvasTexture(cv);
+    this.mat.map.encoding=THREE.sRGBEncoding;
+    this.mat.needsUpdate=true;
+  },
+  split(color){ /* 一刀切：换成两半 + 玉肉面 */
+    if(!this.ok)return;
+    this.clearRock();
+    const mkHalf=(start)=>{
+      const g=new THREE.SphereGeometry(1,48,28,start,Math.PI);
+      const m=new THREE.Mesh(g,this.mat);m.castShadow=true;return m;
+    };
+    const gl=new THREE.Group(),gr=new THREE.Group();
+    gl.add(mkHalf(Math.PI/2));gr.add(mkHalf(-Math.PI/2));
+    const faceG=new THREE.CircleGeometry(.97,48);
+    const faceM=new THREE.MeshPhysicalMaterial({
+      color:new THREE.Color(color),emissive:new THREE.Color(color),
+      emissiveIntensity:.75,roughness:.18,metalness:0,
+      clearcoat:.8,clearcoatRoughness:.15
+    });
+    const f1=new THREE.Mesh(faceG,faceM);f1.rotation.y=Math.PI/2;f1.position.x=.012;gl.add(f1);
+    const f2=new THREE.Mesh(faceG,faceM);f2.rotation.y=-Math.PI/2;f2.position.x=-.012;gr.add(f2);
+    this.rig.add(gl);this.rig.add(gr);
+    this.halves={gl,gr};this.splitP=0.0001;
+  },
+  clearRock(){
+    if(this.rock){this.rig.remove(this.rock);this.rock.geometry.dispose();this.rock=null;}
+    if(this.halves){this.rig.remove(this.halves.gl);this.rig.remove(this.halves.gr);this.halves=null;}
+  },
+  tick(){
+    if(!this.ok)return;
+    /* 拖拽 360° + 松手惯性 + 闲置 2 秒后恢复缓慢自转 */
+    if(!this.dragging){
+      this.rotY+=this.velY;this.rotX+=this.velX;
+      this.rotX=Math.max(-1.45,Math.min(1.45,this.rotX));
+      if(Date.now()-this.lastMove>2000){
+        this.velY+=(.004-this.velY)*.02;this.velX*=.94;
+      }else{this.velY*=.95;this.velX*=.95;}
+    }
+    this.rig.rotation.set(this.rotX,this.rotY,0);
+    if(this.halves&&this.splitP<1){
+      this.splitP=Math.min(1,this.splitP+.03);
+      const p=this.splitP,e=1-Math.pow(1-p,3);
+      this.halves.gl.position.x=-e*.75;this.halves.gl.rotation.z=e*.45;
+      this.halves.gr.position.x=e*.75;this.halves.gr.rotation.z=-e*.45;
+    }
+    this.renderer.render(this.scene,this.cam);
+  }
+};
+/* ================================================================
+   JadeViewer — 3D 翡翠标本查看器
+   依据切开石头的真实玉料（seed+品质）重建抛光翡翠：
+   transmission 透射（种水越高越透）+ ior1.66（翡翠真实折射率）
+   + 内部散射辉光 + 清漆抛光层
+================================================================ */
+const JadeViewer={
+  ok:false,renderer:null,scene:null,cam:null,mesh:null,glow:null,rig:null,rotY:.6,velY:.005,dragging:false,lastX:0,
+  init(){
+    if(this.ok||!window.THREE)return this.ok;
+    try{
+      this.renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+      this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+      this.renderer.outputEncoding=THREE.sRGBEncoding;
+      this.renderer.toneMapping=THREE.ACESFilmicToneMapping;
+      this.renderer.toneMappingExposure=1.02;
+      this.scene=new THREE.Scene();
+      this.cam=new THREE.PerspectiveCamera(38,1,.1,100);this.cam.position.set(0,.18,3.65);this.cam.lookAt(0,0,0);
+      /* 与主 Viewer 同款程序化天光 IBL */
+      const envCv=document.createElement("canvas");envCv.width=256;envCv.height=128;
+      const ec=envCv.getContext("2d");
+      const eg=ec.createLinearGradient(0,0,0,128);
+      eg.addColorStop(0,"#fff2d4");eg.addColorStop(.45,"#63755f");eg.addColorStop(1,"#0d130d");
+      ec.fillStyle=eg;ec.fillRect(0,0,256,128);
+      const sp=ec.createRadialGradient(76,32,2,76,32,48);
+      sp.addColorStop(0,"rgba(255,250,230,.95)");sp.addColorStop(1,"rgba(255,250,230,0)");
+      ec.fillStyle=sp;ec.beginPath();ec.arc(76,32,48,0,7);ec.fill();
+      const envTex=new THREE.CanvasTexture(envCv);
+      envTex.mapping=THREE.EquirectangularReflectionMapping;
+      const pm=new THREE.PMREMGenerator(this.renderer);
+      this.scene.environment=pm.fromEquirectangular(envTex).texture;pm.dispose();
+      this.scene.add(new THREE.HemisphereLight(0xfff4dd,0x14201a,.5));
+      const key=new THREE.DirectionalLight(0xffffff,1.1);key.position.set(2.4,3,2.4);this.scene.add(key);
+      const back=new THREE.PointLight(0xaff0c8,.9,14);back.position.set(-2,-1.2,-2.4);this.scene.add(back); /* 背投光：打灯透翡翠 */
+      this.rig=new THREE.Group();this.scene.add(this.rig);
+      const dom=this.renderer.domElement;
+      dom.style.width="100%";dom.style.height="100%";dom.style.touchAction="none";dom.style.cursor="grab";
+      dom.addEventListener("pointerdown",e=>{this.dragging=true;this.lastX=e.clientX;dom.style.cursor="grabbing";});
+      addEventListener("pointermove",e=>{if(this.dragging){this.velY=(e.clientX-this.lastX)*.006;this.lastX=e.clientX;}});
+      addEventListener("pointerup",()=>{this.dragging=false;if(dom)dom.style.cursor="grab";});
+      this.ok=true;
+    }catch(e){this.ok=false;}
+    return this.ok;
+  },
+  mount(el){
+    if(!this.init()){el.innerHTML="<div style='color:#8ea396;padding-top:100px;font-size:13px;text-align:center'>3D 渲染不可用（缺少 three.min.js）</div>";return;}
+    if(this.renderer.domElement.parentNode!==el){el.innerHTML="";el.appendChild(this.renderer.domElement);}
+    this.resize();
+  },
+  resize(){
+    if(!this.ok)return;
+    const el=this.renderer.domElement.parentNode;if(!el)return;
+    const w=el.clientWidth||300,h=el.clientHeight||220;
+    this.renderer.setSize(w,h,false);this.cam.aspect=w/h;this.cam.updateProjectionMatrix();
+  },
+  /* spec:{seed,quality,mineId,size} — 用真实玉料重建 */
+  setJade(spec){
+    if(!this.ok)return;
+    this.clearMesh();
+    const gem=gemOf(spec.quality),idx=gem.idx;
+    const pst={seed:spec.seed,mineId:spec.mineId||1,quality:spec.quality,size:spec.size||1,
+      shape:"round",regularity:.86+((spec.seed%17)/17)*.14}; /* 抛光坯：圆润规整 */
+    const tex=new THREE.CanvasTexture(jadeOf(pst));
+    tex.wrapS=THREE.RepeatWrapping;tex.encoding=THREE.sRGBEncoding;
+    /* 种水→透射度：玻璃种/帝王绿近乎通透，豆种浑浊 */
+    const trans=idx>=4?.72:idx===3?.55:idx===2?.3:idx===1?.12:.02;
+    const col=new THREE.Color(jadeCol(gem));
+    this.mat=new THREE.MeshPhysicalMaterial({
+      map:tex,roughness:.05+.06*(5-idx),metalness:0,
+      transmission:trans,thickness:1.5,ior:1.66,
+      clearcoat:1,clearcoatRoughness:.06+.04*(5-idx),
+      envMapIntensity:.6,
+      emissive:col,emissiveIntensity:.03+idx*.022  /* 次表面散射辉光 */
+    });
+    this.mesh=new THREE.Mesh(rockGeometry(pst),this.mat);
+    this.rig.add(this.mesh);
+    /* 内层发光体：模拟光在玉肉内部的散射（体积感关键） */
+    this.glowMat=new THREE.MeshBasicMaterial({map:tex,color:new THREE.Color(jadeCol(gem)),
+      blending:THREE.AdditiveBlending,transparent:true,opacity:.03+idx*.02,depthWrite:false});
+    this.glow=new THREE.Mesh(
+      rockGeometry({...pst,seed:spec.seed^0x5555}),
+      this.glowMat
+    );
+    this.glow.scale.setScalar(.9);
+    this.rig.add(this.glow);
+    this.rotY=.6;this.velY=.005;
+  },
+  jadeMaterial(gemId,seed,size){
+    const gem=gemOf(gemId),idx=gem.idx;
+    const pst={seed,mineId:4,quality:gemId,size:size||1,shape:"round",regularity:.92};
+    const tex=new THREE.CanvasTexture(jadeOf(pst));
+    tex.wrapS=THREE.RepeatWrapping;tex.wrapT=THREE.RepeatWrapping;tex.encoding=THREE.sRGBEncoding;
+    const trans=idx>=4?.72:idx===3?.55:idx===2?.3:idx===1?.12:.02;
+    const col=new THREE.Color(jadeCol(gem));
+    return new THREE.MeshPhysicalMaterial({
+      map:tex,roughness:.055+.06*(5-idx),metalness:0,
+      transmission:trans,thickness:1.1,ior:1.66,
+      clearcoat:1,clearcoatRoughness:.05+.04*(5-idx),
+      envMapIntensity:.68,
+      emissive:col,emissiveIntensity:.03+idx*.022
+    });
+  },
+  /* spec:{type,gem,seed,size} — 成品 3D 实物（手镯/玉牌/平安扣/戒面/玉珠/碎石） */
+  setProduct(spec){
+    if(!this.ok)return;
+    this.clearMesh();
+    const mat=this.mat=this.jadeMaterial(spec.gem,spec.seed,spec.size);
+    const t=spec.type;let obj=null;
+    if(t==="bracelet"){ /* 手镯：圆环镯身，微仰角展示 */
+      obj=new THREE.Mesh(new THREE.TorusGeometry(.62,.185,56,140),mat);
+      obj.rotation.x=.58;
+    }else if(t==="pingan"){ /* 平安扣：扁平大孔圆扣 */
+      obj=new THREE.Mesh(new THREE.TorusGeometry(.52,.3,56,140),mat);
+      obj.scale.z=.42;obj.rotation.x=.5;
+    }else if(t==="plaque"){ /* 玉牌：圆角矩形坯，倒角抛光 */
+      const w=1.12,h=1.42,r=.16,sh=new THREE.Shape();
+      sh.moveTo(-w/2+r,-h/2);
+      sh.lineTo(w/2-r,-h/2);sh.quadraticCurveTo(w/2,-h/2,w/2,-h/2+r);
+      sh.lineTo(w/2,h/2-r);sh.quadraticCurveTo(w/2,h/2,w/2-r,h/2);
+      sh.lineTo(-w/2+r,h/2);sh.quadraticCurveTo(-w/2,h/2,-w/2,h/2-r);
+      sh.lineTo(-w/2,-h/2+r);sh.quadraticCurveTo(-w/2,-h/2,-w/2+r,-h/2);
+      const g=new THREE.ExtrudeGeometry(sh,{depth:.13,bevelEnabled:true,bevelThickness:.05,bevelSize:.05,bevelSegments:5,curveSegments:22});
+      g.center();
+      obj=new THREE.Mesh(g,mat);
+      obj.rotation.x=-.3;
+    }else if(t==="jiemian"){ /* 戒面：双凸蛋面 */
+      obj=new THREE.Mesh(new THREE.SphereGeometry(.74,64,48),mat);
+      obj.scale.set(.86,1,.4);
+      obj.rotation.x=.32;
+    }else if(t==="beads"){ /* 玉珠：十颗珠串成镯串 */
+      obj=new THREE.Group();
+      const n=10;
+      for(let i=0;i<n;i++){
+        const b=new THREE.Mesh(new THREE.SphereGeometry(.19,36,28),mat);
+        const a=i/n*Math.PI*2;
+        b.position.set(Math.cos(a)*.6,Math.sin(a)*.6,(i%2)*.015);
+        obj.add(b);
+      }
+      obj.rotation.x=.85;
+    }else{ /* 碎石：不规则小料堆 */
+      obj=new THREE.Group();
+      const rng=mulberry32(spec.seed^0xCAFE);
+      for(let i=0;i<4;i++){
+        const pst={seed:(spec.seed+i*7919)|0,mineId:4,quality:spec.gem,size:.8,shape:"odd",regularity:.3};
+        const m=new THREE.Mesh(rockGeometry(pst),mat);
+        m.scale.setScalar(.34+rng()*.14);
+        m.position.set((rng()-.5)*.9,(rng()-.5)*.5,(rng()-.5)*.4);
+        m.rotation.set(rng()*3,rng()*3,rng()*3);
+        obj.add(m);
+      }
+    }
+    this.mesh=obj;
+    this.glow=null;
+    this.rig.add(obj);
+    this.rotY=.6;this.velY=.005;
+  },
+  clearMesh(){
+    const killGeo=o=>{if(o&&o.traverse)o.traverse(n=>{if(n.geometry)n.geometry.dispose();});};
+    if(this.mesh){killGeo(this.mesh);this.rig.remove(this.mesh);this.mesh=null;}
+    if(this.glow){killGeo(this.glow);this.rig.remove(this.glow);this.glow=null;}
+    if(this.mat){this.mat.dispose();this.mat=null;}
+    if(this.glowMat){this.glowMat.dispose();this.glowMat=null;}
+  },
+  tick(){
+    if(!this.ok||!this.mesh)return;
+    if(!this.dragging){this.rotY+=this.velY;this.velY+=(.005-this.velY)*.02;}
+    else this.rotY+=this.velY*.2;
+    this.rig.rotation.y=this.rotY;
+    this.mesh.position.y=Math.sin(Date.now()/1600)*.035;
+    if(this.glow)this.glow.position.y=this.mesh.position.y;
+    this.renderer.render(this.scene,this.cam);
+  }
+};
+(function vLoop(){Viewer.tick();JadeViewer.tick();requestAnimationFrame(vLoop);})();
+
+/* ================================================================
+   渲染：顶栏 / 矿区 / 石阵
+================================================================ */
+function renderHeader(pulse){
+  document.getElementById("coinNum").textContent=fmt(S.coins);
+  if(pulse){const b=document.getElementById("coinBox");b.classList.remove("pulse");void b.offsetWidth;b.classList.add("pulse");}
+  document.getElementById("rankName").textContent=rankOf(S.level);
+  document.getElementById("lvNum").textContent=S.level;
+  document.getElementById("lvBar").style.width=Math.min(100,S.xp/xpNeed(S.level)*100)+"%";
+  document.getElementById("signBtn").classList.toggle("show",!S.signed);
+  document.getElementById("flashLeft").textContent=FLASH_PER_DAY-S.flashUsed;
+}
+function renderMines(){
+  const passEl=document.getElementById("passLeft");
+  if(passEl)passEl.textContent=S.minePass;
+  document.getElementById("mineGrid").innerHTML=allMines().map(m=>{
+    const locked=S.level<m.lv;
+    const passHere=locked&&S.passMine&&String(m.id)===S.passMine; /* 入场券已绑定此场口 */
+    return `<div class="mine-card ${m.id===curMine.id?"sel":""} ${locked&&!passHere?"locked":""}" data-mine="${m.id}">
+      ${m.ext?`<div class="lock-tag" style="background:#2f7d52">🧩 玩家矿区</div>`:""}
+      ${passHere?`<div class="lock-tag" style="background:#8a6a1f">🎫 入场券生效中 · 可购 1 次</div>`
+        :locked?`<div class="lock-tag">🔒 ${rankOf(m.lv)} Lv.${m.lv} 解锁${S.minePass>0?" · 🎫 可持券进入":""}</div>`:""}
+      <h3>${m.icon} ${m.name}</h3>
+      <div class="m-price">${fmt(m.price)} 玉币起 / 块（按大小·形状浮动）</div>
+      <div class="m-info">出绿率 ${Math.round(m.green*100)}% · 极品封顶 ${fmt(m.cap)}<br>${m.desc}</div>
+    </div>`;
+  }).join("");
+  document.querySelectorAll("[data-mine]").forEach(el=>el.onclick=()=>{
+    const m=allMines().find(x=>String(x.id)===el.dataset.mine);
+    if(!m)return;
+    const passHere=S.passMine&&String(m.id)===S.passMine;
+    /* 持有未消费的入场券却换场：视为放弃，退回旧券 */
+    if(S.passMine&&!passHere){S.minePass++;S.passMine=null;save();toast("🎫 入场券已退回（未在该场口购买）");}
+    if(S.level<m.lv&&!passHere){
+      if(S.minePass<=0){toast(`🔒 需要 ${rankOf(m.lv)} Lv.${m.lv}，当前 ${rankOf(S.level)} Lv.${S.level}（可用场口入场券进入）`);return;}
+      S.minePass--;S.passMine=String(m.id);save();
+      toast(`🎫 已使用场口入场券绑定「${m.name}」，可购买原石 1 次（剩 ${S.minePass} 张）`);
+    }
+    if(m.id!==curMine.id){curMine=m;renderMines();refreshStones();toast(`已入场：${m.icon} ${m.name}`);}
+  });
+}
+let thumbT=0;
+function sizeTxt(st){return st.size>1.15?"大块":st.size<0.82?"小块":"中等个头";}
+function renderStones(){
+  const g=document.getElementById("stoneGrid");
+  g.innerHTML=stones.map((st,i)=>{
+    const skinTxt=`${MINE_SKIN_NAME[st.mineId]}·${st.skin==="dark"?"高波动":"较稳"}`;
+    const crackTxt=st.cracks>.7?"裂多·变数大":st.cracks>.4?"有裂·需细观":"裂少·皮相整";
+    const winTxt=st.winGlow>.65?"开窗泛绿光":st.winGlow>.4?"开窗见底色":"开窗暗淡";
+    const shapeTxt=`${SHAPES[st.shape].name}·${sizeTxt(st)}`;
+    return `<div class="stone-cell" data-i="${i}">
+      <div class="no">第 ${["壹","贰","叁","肆","伍","陆"][i]} 号</div>
+      <canvas width="110" height="110"></canvas>
+      <div class="traits">${skinTxt}<br>${shapeTxt}</div>
+      <div class="traits" style="color:var(--gold)">${crackTxt} · ${winTxt}</div>
+      <div style="font-size:12px;color:var(--gold);font-weight:700;margin-top:2px">标价 ${fmt(st.cost)} 玉币</div>
+    </div>`;
+  }).join("");
+  g.querySelectorAll(".stone-cell").forEach(el=>{
+    const st=stones[+el.dataset.i];
+    drawThumb(el.querySelector("canvas"),st,skinOf(st),0);
+    el.onclick=()=>openDetail(st);
+  });
+  /* 缩略图呼吸光动画（复用缓存纹理） */
+  if(!window._thumbAnim){
+    window._thumbAnim=true;
+    setInterval(()=>{
+      document.querySelectorAll("#stoneGrid .stone-cell").forEach(el=>{
+        const st=stones[+el.dataset.i];if(!st)return;
+        drawThumb(el.querySelector("canvas"),st,skinOf(st),0);
+      });
+    },600);
+  }
+}
+
+/* ================================================================
+   相玉详情 + 手电
+================================================================ */
+let detailStone=null;
+function openDetail(st){
+  detailStone=st;
+  document.getElementById("dTitle").textContent=`相玉 · ${curMine.icon}${curMine.name} · ${fmt(st.cost)} 玉币`;
+  document.getElementById("dTraits").innerHTML=
+    `形状：<b>${SHAPES[st.shape].name} · ${sizeTxt(st)} · ${st.regularity>.7?"皮相周正":st.regularity>.45?"略有起伏":"奇形怪状"}</b><br>`+
+    `行情：形正个大者价高，形歪个小者贱而多变（方差大，可捡漏）<br>`+
+    `皮壳：<b>${MINE_SKIN_NAME[st.mineId]}——${st.skin==="dark"?"高风险高回报":"走势平稳"}</b><br>`+
+    `裂痕：<b>${st.cracks>.7?"裂绺密布，或进杂质，或藏高色":st.cracks>.4?"隐约见裂，需谨慎下刀":"皮壳完整，裂少底净"}</b><br>`+
+    `松花：<b>${st.songhua>.6?"松花点点，有绿之兆":st.songhua>.3?"松花稀疏，中规中矩":"松花难觅"}</b><br>`+
+    `开窗：<b>${st.winGlow>.65?"擦口处绿意盈盈，光可鉴人":st.winGlow>.4?"擦口微露底色，似是而非":"擦口灰暗，难辨乾坤"}</b>`;
+  document.getElementById("flashHint").textContent="";
+  document.getElementById("useFlashBtn").disabled=S.flashUsed>=FLASH_PER_DAY;
+  document.getElementById("buyBtn").disabled=S.coins<st.cost;
+  document.getElementById("buyBtn").textContent=`💰 买下此石（${fmt(st.cost)}）`;
+  document.getElementById("detailModal").classList.add("show");
+  Viewer.mount(document.getElementById("detailView"));
+  Viewer.setStone(st);
+}
+document.getElementById("closeDetail").onclick=()=>document.getElementById("detailModal").classList.remove("show");
+document.getElementById("useFlashBtn").onclick=()=>{
+  if(S.flashUsed>=FLASH_PER_DAY){toast("今日手电次数已用完");return;}
+  S.flashUsed++;S.tasks.flash=1;save();renderHeader();
+  const hints={
+    rock:"光圈散乱发闷，吃光不进……多半是垮料，谨慎！",
+    dou:"隐约透出豆青底色，种水一般，稳中藏险。",
+    nuo:"光下糯意浮现，细腻温润——可能到糯种。",
+    bing:"荧光清亮透水，寒光逼人，冰味十足！",
+    boli:"光圈通透如镜，刚味隐现……玻璃光泽！",
+    diwang:"强光所至满绿爆荧——此石有帝王之相！！"
+  };
+  document.getElementById("flashHint").textContent="🔦 "+hints[detailStone.quality];
+  flash(gemOf(detailStone.quality).color,.18);
+  toast("手电余 "+(FLASH_PER_DAY-S.flashUsed)+" 次");
+};
+document.getElementById("buyBtn").onclick=()=>{
+  const st=detailStone;
+  const lockedMine=S.level<(curMine.lv||1);
+  const passHere=S.passMine&&String(curMine.id)===S.passMine; /* 入场券生效中 */
+  if(lockedMine&&!passHere){toast("🔒 等级不足，无法在此场口购买原石");return;}
+  if(S.coins<st.cost){toast("玉币不足！");return;}
+  if(st.lucky&&S.luck>0){S.luck--;toast("🍀 幸运加持已消耗（剩 "+S.luck+" 次）");} /* 道具：购买时才消耗 */
+  S.coins-=st.cost;
+  const usedPass=passHere;
+  save();renderHeader(true);
+  document.getElementById("detailModal").classList.remove("show");
+  openCut(st);
+  if(usedPass){ /* 入场券使命完成：解绑并退回可进入场口（解玉台不受影响） */
+    S.passMine=null;
+    const unlocked=allMines().filter(m=>S.level>=(m.lv||1));
+    if(unlocked.length&&!unlocked.find(m=>m.id===curMine.id))curMine=unlocked[unlocked.length-1];
+    renderMines();refreshStones();
+    toast("🎫 入场券已使用完毕，该场口重新上锁");
+  }
+};
+document.getElementById("refreshBtn").onclick=()=>{refreshStones();toast("新一批原石已进场");};
+
+/* ================================================================
+   解玉（擦皮 / 一刀切）
+================================================================ */
+let cutStone=null,cutting=false;
+function openCut(st){
+  cutStone=st;cutting=false;
+  document.getElementById("cutTitle").textContent=`解玉 · ${curMine.icon}${curMine.name}`;
+  document.getElementById("cutInfo").textContent="买定离手！选择解玉方式——";
+  document.getElementById("estBox").style.display="none";
+  document.getElementById("cutBtns").style.display="flex";
+  document.getElementById("capiBtns").style.display="none";
+  document.getElementById("cutModal").classList.add("show");
+  Viewer.mount(document.getElementById("cutView"));
+  Viewer.setStone(st,0);
+  Viewer.resize();
+}
+/* --- 一刀切 --- */
+document.getElementById("modeYidao").onclick=()=>{
+  if(cutting)return;cutting=true;
+  document.getElementById("cutBtns").style.display="none";
+  const info=document.getElementById("cutInfo");
+  info.textContent="刀起——";sndSaw(1.1);
+  setTimeout(()=>{
+    info.textContent="石破！！";
+    shake();vibrate([80,50,150]);sndCrack();
+    Viewer.split(gemOf(cutStone.quality).color);
+    const good=cutStone.value>cutStone.cost;
+    flash(gemOf(cutStone.quality).color,good?.45:.2);
+    const cv=document.getElementById("cutView").getBoundingClientRect();
+    burst(cv.left+cv.width/2,cv.top+cv.height/2,gemOf(cutStone.quality).color,good?90:30,good?7:3,3);
+    setTimeout(()=>finalize(cutStone.value,null),1400);
+  },1100);
+};
+/* --- 擦皮三段 --- */
+document.getElementById("modeCapi").onclick=()=>{
+  if(cutting)return;cutting=true;
+  document.getElementById("cutBtns").style.display="none";
+  const st=cutStone,info=document.getElementById("cutInfo");
+  const progs=[.33,.66,1],stageNames=["第一擦……","第二擦……","第三擦——全开！"];
+  let stage=0;
+  function doStage(){
+    if(stage>=3){finalize(st.value,null);return;}
+    info.textContent=stageNames[stage];sndSaw(1.6);
+    const frac=progs[stage];
+    setTimeout(()=>{
+      Viewer.updateWipe(st,frac);
+      stage++;
+      const prog=[.35,.7,1][stage-1];
+      const est=Math.max(1,Math.round((st.cost+(st.value-st.cost)*prog)*(0.92+Math.random()*.16)));
+      const seeGreen=est>st.cost;
+      const eb=document.getElementById("estBox");
+      eb.style.display="block";
+      eb.innerHTML=`第 ${["壹","贰","叁"][stage-1]} 擦结果 · 当前估值 <b>${fmt(est)}</b> 玉币（行情 ×${S.mult.toFixed(2)} 可得 ${fmt(est*S.mult)}）`;
+      if(seeGreen){flash("#3ddc84",.3);sndChime(false);
+        const cv=document.getElementById("cutView").getBoundingClientRect();
+        burst(cv.left+cv.width/2,cv.top+cv.height/2,"#3ddc84",40,5,3);
+        info.textContent="见绿了！！收手还是再赌一把？";
+      }else{info.textContent="这一擦……灰蒙蒙的，还要继续吗？";sndCrack();}
+      if(stage>=3){setTimeout(()=>finalize(st.value,null),1200);return;}
+      document.getElementById("capiBtns").style.display="flex";
+      document.getElementById("stopSellBtn").onclick=()=>{
+        document.getElementById("capiBtns").style.display="none";
+        finalize(est,true);
+      };
+      document.getElementById("contBtn").onclick=()=>{
+        document.getElementById("capiBtns").style.display="none";
+        doStage();
+      };
+    },1600);
+  }
+  doStage();
+};
+
+/* ================================================================
+   结算 & 出售
+================================================================ */
+let pending=null; /* {gem,value,early} */
+function finalize(value,early){
+  const st=cutStone,gem=gemOf(st.quality);
+  const gain=value-st.cost;
+  S.stat.total++;S.tasks.cut++;
+  if(gain>0)S.stat.win++;else S.stat.lose++;
+  S.stat.profit+=gain;
+  if(value>S.stat.best)S.stat.best=value;
+  S.dex[gem.id]=(S.dex[gem.id]||0)+1;
+  S.dexSpec[gem.id]={seed:st.seed,mineId:st.mineId,size:st.size}; /* 图鉴标本：留最新玉料 */
+  /* AllinONE 奖励上报：集齐六档玉石图鉴（只报一次） */
+  if(window.AllinONE_Reward&&!AllinONE_Reward._done("dex_full")&&GEMS.every(g=>S.dex[g.id]>0)){
+    AllinONE_Reward.mark("dex_full");AllinONE_Reward.report("GAME_COMPLETE",{dex:GEMS.length,best:S.stat.best});
+  }
+  addXP(Math.max(4,Math.round(st.cost/50)));
+  pushHistory();save();
+  pending={gem:gem.id,value,seed:st.seed,size:st.size,quality:st.quality,mineId:st.mineId};
+  /* 3D 翡翠：用这块石头真实的玉肉重建抛光标本 */
+  document.getElementById("rGem").style.display="none";
+  document.getElementById("rJadeWrap").style.display="block";
+  JadeViewer.mount(document.getElementById("rJade"));
+  JadeViewer.setJade(pending);
+  document.getElementById("cutModal").classList.remove("show");
+  document.getElementById("rGem").textContent=gem.icon;
+  document.getElementById("rGem").style.color=gem.color;
+  document.getElementById("rName").textContent=gem.name+(early?"（擦皮见好就收）":"");
+  document.getElementById("rName").style.color=gem.color;
+  document.getElementById("rVal").textContent=`基础估值 ${fmt(value)} 玉币`;
+  document.getElementById("rSub").innerHTML=
+    (gain>0?`这一刀<font color="#e05a4e">涨了</font>！较成本 +${fmt(gain)} 玉币 🎉`
+           :`切<font color="#3ddc84">垮</font>了……较成本 ${fmt(gain)} 玉币 💸`)+
+    `<br>当前行情 ×${S.mult.toFixed(2)}，现在出售可得 <b style="color:var(--gold)">${fmt(value*S.mult)}</b> 玉币`;
+  document.getElementById("resModal").classList.add("show");
+  const good=gain>0;
+  if(good){sndCoins();flash(gem.color,.3);}
+  else sndCrack();
+}
+document.getElementById("keepBtn").onclick=()=>{
+  S.inv.push({gem:pending.gem,value:pending.value,t:Date.now(),seed:pending.seed,size:pending.size});
+  pushHistory();save();afterDeal(`已入仓，等行情回暖再卖`);
+};
+document.getElementById("sellNowBtn").onclick=()=>{
+  const got=Math.round(pending.value*S.mult);
+  S.coins+=got;S.tasks.sell=1;pushHistory();save();sndCoins();
+  afterDeal(`成交 +${fmt(got)} 玉币（×${S.mult.toFixed(2)}）`);
+};
+function afterDeal(msg){
+  document.getElementById("resModal").classList.remove("show");
+  pending=null;cutStone=null;cutting=false;
+  renderHeader(true);renderInv();renderDex();renderStat();checkTasks();renderStones();
+  toast(msg);
+}
+
+/* ================================================================
+   仓库
+================================================================ */
+function renderInv(){
+  document.getElementById("invCount").textContent=S.inv.length;
+  document.getElementById("invValue").textContent=fmt(invBase());
+  document.getElementById("invMkt").textContent=fmt(invBase()*S.mult);
+  document.getElementById("invEmpty").style.display=S.inv.length?"none":"block";
+  document.getElementById("invGrid").innerHTML=S.inv.map((it,i)=>{
+    const g=gemOf(it.gem);
+    return `<div class="gem-card" style="border-color:${g.color}55">
+      <div class="gi" style="color:${g.color}">${g.icon}</div>
+      <h4 style="color:${g.color}">${g.name}${it.size?`<span style="font-size:10px;color:var(--muted)"> · ${it.size>1.15?"大块":it.size<0.82?"小块":"中等"}</span>`:""}</h4>
+      <div class="gv">估值 ${fmt(it.value)} → 现售 ${fmt(it.value*S.mult)}</div>
+      <div class="gs">${new Date(it.t).toLocaleDateString("zh-CN")}</div>
+      <div style="display:flex;gap:6px;justify-content:center">
+        <button class="btn small" data-sell="${i}">出售</button>
+        <button class="btn small jade" data-craft="${i}">⚙️ 加工</button>
+      </div>
+    </div>`;
+  }).join("");
+  document.querySelectorAll("[data-sell]").forEach(b=>b.onclick=()=>{
+    const it=S.inv.splice(+b.dataset.sell,1)[0];
+    const got=Math.round(it.value*S.mult);
+    S.coins+=got;S.tasks.sell=1;pushHistory();save();sndCoins();
+    renderHeader(true);renderInv();renderStat();checkTasks();
+    toast(`成交 +${fmt(got)} 玉币`);
+  });
+  document.querySelectorAll("[data-craft]").forEach(b=>b.onclick=()=>openCraft(+b.dataset.craft));
+  renderCrafts();
+}
+document.getElementById("sellAllBtn").onclick=()=>{
+  if(!S.inv.length){toast("仓库是空的");return;}
+  const got=Math.round(invBase()*S.mult);
+  S.coins+=got;S.inv=[];S.tasks.sell=1;pushHistory();save();sndCoins();
+  renderHeader(true);renderInv();renderStat();checkTasks();
+  toast(`全部成交 +${fmt(got)} 玉币`);
+};
+
+/* —— 成品柜 —— */
+let craftTarget=null; /* {idx} 待加工仓库件 */
+function renderCrafts(){
+  const cv2=document.getElementById("craftValue");
+  if(cv2)cv2.textContent=fmt(craftBase());
+  const g=document.getElementById("craftGrid"),empty=document.getElementById("craftEmpty");
+  if(!g)return;
+  empty.style.display=S.crafts.length?"none":"block";
+  g.innerHTML=S.crafts.map((p,i)=>{
+    const gem=gemOf(p.gem);
+    return `<div class="gem-card prod-card" style="border-color:${gem.color}55">
+      <canvas width="300" height="300" data-pimg="${i}"></canvas>
+      <h4 style="color:${gem.color};margin:6px 0 2px">${craftName(CRAFT_TYPES.find(t=>t.id===p.type),gem)}</h4>
+      <div class="gv">估值 ${fmt(p.value)} → 现售 ${fmt(p.value*S.mult)}</div>
+      <div style="display:flex;gap:6px;justify-content:center;margin-top:4px">
+        <button class="btn small" data-psell="${i}">出售</button>
+        <button class="btn small ghost" data-pview="${i}">🔍 大图</button>
+      </div>
+    </div>`;
+  }).join("");
+  g.querySelectorAll("[data-pimg]").forEach(el=>{
+    const p=S.crafts[+el.dataset.pimg];
+    el.getContext("2d").drawImage(drawProduct(p.type,p.gem,p.seed,p.size,300),0,0);
+  });
+  g.querySelectorAll("[data-psell]").forEach(b=>b.onclick=()=>{
+    const p=S.crafts.splice(+b.dataset.psell,1)[0];
+    const got=Math.round(p.value*S.mult);
+    S.coins+=got;S.tasks.sell=1;pushHistory();save();sndCoins();
+    renderHeader(true);renderInv();renderStat();checkTasks();
+    toast(`成品成交 +${fmt(got)} 玉币`);
+  });
+  g.querySelectorAll("[data-pview]").forEach(b=>b.onclick=()=>openProduct(S.crafts[+b.dataset.pview]));
+}
+
+/* —— 加工流程 —— */
+let craftBusy=false; /* 防止加工动画期间重复触发 */
+function openCraft(idx){
+  if(craftBusy)return;
+  const it=S.inv[idx];
+  if(!it){toast("这块原石已不在仓库");return;}
+  craftTarget={idx,item:it}; /* 捕获引用：防止期间出售其他原石导致下标错位 */
+  const g=gemOf(it.gem),idx5=g.idx,size=it.size||1;
+  const fee=craftFee(it);
+  const eligible=CRAFT_TYPES.filter(t=>idx5>=t.min&&size>=t.sizeMin);
+  const poor=S.coins<fee;
+  document.getElementById("cInfo").innerHTML=
+    `原料：<b style="color:${g.color}">${g.name}</b> · ${size>1.15?"大块":size<0.82?"小块":"中等个头"} · 估值 <b>${fmt(it.value)}</b> 玉币<br>`+
+    `工艺判定：${eligible.map(t=>t.name).join("、")}<br>`+
+    `<span style="color:var(--muted);font-size:12px">${eligible.map(t=>`${t.name}：${t.desc}`).join("<br>")}</span><br>`+
+    `工费：<b style="color:var(--gold)">${fmt(fee)}</b> 玉币（开工即付，不退还） · 成品总值 = 原料估值 + 工艺增值 ± 市场随机<br>`+
+    `<span style="color:${poor?"#ff7a7a":"var(--muted)"};font-size:12px">${poor?"玉币不足以支付工费。":"种水越高工艺增值越多，但低种水料可能入不敷出——加工有风险，开料前请三思。"}加工后不可逆。</span>`;
+  document.getElementById("cWork").style.display="none";
+  document.getElementById("cResult").innerHTML="";
+  const go=document.getElementById("craftGo");
+  go.style.display="";go.disabled=poor;
+  go.textContent=poor?"玉币不足，无法开工":`🔨 支付 ${fmt(fee)} 工费 · 开始加工`;
+  document.getElementById("craftModal").classList.add("show");
+}
+document.getElementById("closeCraft").onclick=()=>document.getElementById("craftModal").classList.remove("show");
+document.getElementById("craftGo").onclick=()=>{
+  if(!craftTarget||!craftTarget.item||craftBusy)return;
+  const it=craftTarget.item;
+  craftBusy=true;
+  const go=document.getElementById("craftGo");
+  go.disabled=true;go.textContent="加工中……";
+  document.getElementById("cWork").style.display="block";
+  sndSaw(2.2);
+  const steps=["切坯定位……","掏料去棱……","打磨修形……","抛光上蜡……"];
+  const bar=document.getElementById("cProg"),stepEl=document.getElementById("cStep");
+  let p=0,si=0;
+  const timer=setInterval(()=>{
+    p+=4+Math.random()*5;if(si<3&&p>si*28)si++;
+    bar.style.width=Math.min(100,p)+"%";stepEl.textContent=steps[si];
+    if(p>=100){
+      clearInterval(timer);
+      setTimeout(()=>{doCraft(it);},350);
+    }
+  },80);
+};
+function doCraft(it){
+  const pos=S.inv.indexOf(it);
+  if(pos<0){craftBusy=false;craftTarget=null;toast("原料已不在仓库");return;}
+  const idx5=gemOf(it.gem).idx,size=it.size||1;
+  const seed=it.seed!==undefined?it.seed:((it.t||Date.now())|0);
+  /* 工费开工即付 */
+  const fee=craftFee(it);
+  S.coins-=fee;
+  /* 成品总值：种水越高工艺增值越大，市场随机 0.75~1.35 —— 低种水可能血本无归 */
+  const total=idx5===0
+    ?Math.round(it.value*(0.55+Math.random()*0.45)) /* 垮料碎石：必亏工费，练习代价 */
+    :Math.round(it.value*(1.12+0.12*idx5)*(0.75+Math.random()*0.6));
+  const rng=Math.random;
+  const made=idx5===0
+    ?[{t:CRAFT_TYPES[5],n:CRAFT_TYPES[5].cnt(rng,size)}]
+    :CRAFT_TYPES.slice(0,5).filter(t=>idx5>=t.min&&size>=t.sizeMin)
+      .map(t=>({t,n:t.cnt(rng,size)}));
+  const wsum=made.reduce((a,m)=>a+m.t.w*m.n,0);
+  const products=[];let acc=0;
+  made.forEach((m,mi)=>{
+    for(let k=0;k<m.n;k++){
+      const isLast=(mi===made.length-1&&k===m.n-1);
+      const v=isLast?Math.max(1,total-acc):Math.round(total*m.t.w*m.n/wsum);
+      acc+=v;
+      products.push({type:m.t.id,gem:it.gem,seed:seed+mi*131+k*17,size,value:Math.max(1,v),t:Date.now()});
+    }
+  });
+  S.inv.splice(pos,1);
+  S.crafts.push(...products);
+  S.tasks.craft=1;
+  /* 成品工艺图鉴：每类保留种水最高的样本做展示 */
+  products.forEach(p=>{
+    const rec=S.craftDex[p.type];
+    if(!rec){S.craftDex[p.type]={seed:p.seed,gem:p.gem,size:p.size,n:0};}
+    else if(gemOf(p.gem).idx>gemOf(rec.gem).idx){
+      S.craftDex[p.type]={seed:p.seed,gem:p.gem,size:p.size,n:rec.n};
+    }
+    S.craftDex[p.type].n++;
+  });
+  addXP(Math.max(6,Math.round(it.value/80)));
+  pushHistory();save();sndCoins();
+  craftTarget=null;craftBusy=false;
+  /* 盈亏结算：投入 = 原料估值 + 工费 */
+  const invested=it.value+fee,got=products.reduce((a,p)=>a+p.value,0),net=got-invested;
+  const netColor=net>=0?"#ff7a7a":"#59d98c"; /* 中式：盈红亏绿 */
+  /* AllinONE 成品铸造凭证（ITEM_HARVEST）：加工出的每件成品（碎石边角除外）
+     都可提取为平台凭证，市场挂牌交易后他人兑换回来折算玉币——打金闭环 */
+  if(window.AllinONEHarvest){
+    products.forEach(function(p){
+      if(p.type==="scrap")return; /* 垮料不入凭证体系，保住「一刀穷」的随机乐趣 */
+      const t=CRAFT_TYPES.find(x=>x.id===p.type),g=gemOf(p.gem),nm=craftName(t,g);
+      const bonus=Math.min(50000,Math.max(500,Math.round(p.value*0.85)));
+      AllinONEHarvest.spawn(nm,"add_coins",
+        {bonus:bonus,craft:p.type,gem:p.gem,seed:p.seed,size:p.size},
+        `取自「${g.name}」的${nm}，兑换后折算约 ${fmt(bonus)} 玉币（面值由兑换效果决定，市场价由卖家挂牌）`);
+    });
+  }
+  /* 展示成品 */
+  const g=document.getElementById("cResult");
+  g.innerHTML=
+    `<div class="gem-card" style="grid-column:1/-1;border-color:${netColor}44;background:${net>=0?"rgba(255,120,120,.06)":"rgba(90,220,140,.06)"}">
+      <div style="font-size:14px">投入 <b>${fmt(invested)}</b>（原料 ${fmt(it.value)} + 工费 ${fmt(fee)}） · 成品总值 <b>${fmt(got)}</b></div>
+      <div style="font-size:19px;margin-top:4px;color:${netColor}">${net>=0?"▲ 加工盈利 +":"▼ 加工亏损 "}${fmt(Math.abs(net))} 玉币</div>
+      ${net<0?`<div style="color:var(--muted);font-size:12px;margin-top:2px">种水不足或市况不佳——这次手艺钱打了水漂，下刀前记得多看种水</div>`:""}
+    </div>`+
+    products.map((p,i)=>{
+      const gem=gemOf(p.gem),t=CRAFT_TYPES.find(x=>x.id===p.type);
+      return `<div class="gem-card prod-card" style="border-color:${gem.color}55">
+        <canvas width="300" height="300" data-cimg="${i}"></canvas>
+        <h4 style="color:${gem.color};margin:6px 0 2px">${craftName(t,gem)}</h4>
+        <div class="gv">估值 ${fmt(p.value)} 玉币</div>
+        <div style="display:flex;gap:6px;justify-content:center;margin-top:4px">
+          <button class="btn small" data-cview="${i}">✨ 3D</button>
+          <button class="btn small ghost" data-cdl="${i}">📥 下载</button>
+        </div>
+      </div>`;
+    }).join("");
+  g.querySelectorAll("[data-cimg]").forEach(el=>{
+    const p=products[+el.dataset.cimg];
+    el.getContext("2d").drawImage(drawProduct(p.type,p.gem,p.seed,p.size,300),0,0);
+  });
+  g.querySelectorAll("[data-cdl]").forEach(b=>b.onclick=()=>{
+    const p=products[+b.dataset.cdl];
+    downloadProduct(p.type,p.gem,p.seed,p.size,craftName(CRAFT_TYPES.find(x=>x.id===p.type),gemOf(p.gem)));
+  });
+  g.querySelectorAll("[data-cview]").forEach(b=>b.onclick=()=>openProduct(products[+b.dataset.cview]));
+  const go=document.getElementById("craftGo");
+  go.style.display="none";
+  document.getElementById("cStep").textContent=`共出成品 ${products.length} 件，已收入成品柜与工艺图鉴 · 本单${net>=0?"盈利":"亏损"} ${fmt(Math.abs(net))}`;
+  renderHeader(true);renderInv();renderCrafts();renderStat();checkTasks();renderDex();renderCraftDex();
+  flash(net>=0?"#3ddc84":"#59d98c",.25);
+  toast(net>=0?`加工完成：出成品 ${products.length} 件，盈利 +${fmt(net)}！`:`加工完成：出成品 ${products.length} 件，亏损 ${fmt(Math.abs(net))}……`);
+}
+
+/* —— 成品大图弹窗（3D 实物 / 工艺成图，含下载） —— */
+let prodSpec=null;
+function pShowView(is3d){
+  document.getElementById("pView3d").parentNode.style.display=""; /* rot-wrap */
+  document.getElementById("pView3d").style.display=is3d?"":"none";
+  document.getElementById("pCanvas").style.display=is3d?"none":"";
+  document.getElementById("pHint").style.display=is3d?"":"none";
+  document.getElementById("pTab3d").classList.toggle("on",is3d);
+  document.getElementById("pTab3d").classList.toggle("ghost",!is3d);
+  document.getElementById("pTabImg").classList.toggle("on",!is3d);
+  document.getElementById("pTabImg").classList.toggle("ghost",is3d);
+  if(is3d){JadeViewer.mount(document.getElementById("pView3d"));JadeViewer.resize();}
+}
+function openProduct(p){
+  if(!p)return;
+  prodSpec=p;
+  const gem=gemOf(p.gem),t=CRAFT_TYPES.find(x=>x.id===p.type);
+  document.getElementById("pTitle").textContent=`${craftName(t,gem)}（${gem.name}）`;
+  const cv=document.getElementById("pCanvas");
+  cv.getContext("2d").drawImage(drawProduct(p.type,p.gem,p.seed,p.size,480),0,0);
+  document.getElementById("prodModal").classList.add("show");
+  pShowView(true);
+  JadeViewer.setProduct(p);
+  document.getElementById("pTraits").innerHTML=
+    `工艺：${t.desc}<br>`+
+    (p.value>0
+      ?`估值：<b style="color:var(--gold)">${fmt(p.value)}</b> 玉币（现售 ${fmt(p.value*S.mult)}）<br>`
+      :`<span style="color:var(--gold)">工艺图鉴标本</span> · 同类成品可在仓库成品柜出售<br>`)+
+    `<span style="color:var(--muted);font-size:12px">3D 实物与成图均由真实玉料参数程序化生成，图片可下载收藏</span>`;
+  requestAnimationFrame(()=>{JadeViewer.resize();}); /* 弹窗布局稳定后再取正确尺寸 */
+}
+document.getElementById("closeProd").onclick=()=>document.getElementById("prodModal").classList.remove("show");
+document.getElementById("pTab3d").onclick=()=>pShowView(true);
+document.getElementById("pTabImg").onclick=()=>pShowView(false);
+document.getElementById("pDownload").onclick=()=>{
+  if(!prodSpec)return;
+  downloadProduct(prodSpec.type,prodSpec.gem,prodSpec.seed,prodSpec.size,
+    craftName(CRAFT_TYPES.find(x=>x.id===prodSpec.type),gemOf(prodSpec.gem)));
+};
+
+/* —— 成品工艺图鉴 —— */
+function renderCraftDex(){
+  const g=document.getElementById("craftDexGrid");
+  if(!g)return;
+  g.innerHTML=CRAFT_TYPES.map(t=>{
+    const rec=S.craftDex[t.id],n=rec?rec.n:0;
+    return `<div class="dex-card ${n?"":"locked"}" ${n?`data-cdex="${t.id}" style="cursor:pointer"`:""}>
+      ${n?`<canvas width="240" height="240" data-cdeximg="${t.id}"></canvas>`
+         :`<div class="gi">❓</div>`}
+      <h4 style="color:${n?"var(--gold)":"var(--muted)"}">${n?t.name:"？？？"}</h4>
+      <div class="stars" style="color:var(--gold)">${t.min?"★".repeat(Math.max(1,t.min)):"—"}</div>
+      ${n?`<div class="own">累计产出 ×${n} · 点击大图</div>`:""}
+    </div>`;
+  }).join("");
+  g.querySelectorAll("[data-cdeximg]").forEach(el=>{
+    const rec=S.craftDex[el.dataset.cdeximg];
+    if(rec&&rec.seed!==undefined)
+      el.getContext("2d").drawImage(drawProduct(el.dataset.cdeximg,rec.gem,rec.seed,rec.size,240),0,0);
+  });
+  g.querySelectorAll(".dex-card[data-cdex]").forEach(el=>{
+    el.onclick=()=>openProduct({type:el.dataset.cdex,seed:S.craftDex[el.dataset.cdex].seed,gem:S.craftDex[el.dataset.cdex].gem,size:S.craftDex[el.dataset.cdex].size,value:0});
+  });
+}
+
+/* ================================================================
+   加工坊：原石 → 成品（手镯/玉牌/平安扣/戒面/玉珠/碎石）
+   产出种类与数量由 大小+种水 判定，总值≈原料估值×工艺系数
+================================================================ */
+const CRAFT_TYPES=[
+  {id:"bracelet",name:"翡翠手镯", min:2,sizeMin:1.0, w:.55,cnt:(r,size)=>1+(size>1.22&&r()<.4?1:0),
+   desc:"一块料只够取一两只镯，镯芯还能出牌——料大种好才敢切镯"},
+  {id:"plaque",  name:"山水玉牌", min:1,sizeMin:.82, w:.24,cnt:r=>1+(r()<.45?1:0),
+   desc:"取板正处开牌，俏色巧雕山水"},
+  {id:"pingan",  name:"平安扣",   min:1,sizeMin:.68, w:.13,cnt:r=>1+(r()*2|0),
+   desc:"小料也能出，圆圆满满保平安"},
+  {id:"jiemian", name:"戒面",     min:1,sizeMin:0,   w:.07,cnt:r=>2+(r()*4|0),
+   desc:"种水最好的部位磨蛋面，颗颗是精华"},
+  {id:"beads",   name:"玉珠",     min:1,sizeMin:0,   w:.025,cnt:r=>6+(r()*12|0),
+   desc:"边角车珠，积少成多"},
+  {id:"scrap",   name:"碎石边角", min:0,sizeMin:0,   w:.01,cnt:r=>3+(r()*5|0),
+   desc:"垮料只能当练习料称斤卖"},
+];
+function craftName(t,g){const q=g.name.replace("翡翠","");return `${q}${t.name}`;} /* 帝王绿手镯 / 冰种玉牌 */
+/* 加工工费：料越大越贵、种水越高雕工越精；垮料也有基础工费（开工即付，盈亏自负） */
+function craftFee(it){
+  const idx5=gemOf(it.gem).idx,size=it.size||1;
+  return Math.max(150,Math.round(it.value*(0.14+0.04*idx5)*(0.85+0.3*size)));
+}
+
+/* —— 写实成品图绘制引擎（程序化 Canvas，模拟抛光/雕刻/透光工艺） —— */
+function drawProduct(type,gemId,seed,size,px=480){
+  const cv=document.createElement("canvas");cv.width=px;cv.height=px;
+  const c=cv.getContext("2d"),W=px,gem=gemOf(gemId),idx=gem.idx,col=jadeCol(gem);
+  const rng=mulberry32(seed^(type.length*7919));
+  /* 天鹅绒衬布背景 */
+  const bg=c.createRadialGradient(W/2,W*.42,W*.1,W/2,W/2,W*.72);
+  bg.addColorStop(0,"#233226");bg.addColorStop(1,"#0a0f0c");
+  c.fillStyle=bg;c.fillRect(0,0,W,W);
+  for(let i=0;i<50;i++){ /* 绒布纤维微光 */
+    c.fillStyle=`rgba(120,160,130,${.02+rng()*.03})`;
+    c.fillRect(rng()*W,rng()*W,1.5,1.5);
+  }
+  /* 通用玉料渲染：底色+云雾+色根+棉+内透光，path 内裁剪 */
+  function paintJade(pathFn,o={}){
+    c.save();c.beginPath();pathFn(c);o.rule?c.clip(o.rule):c.clip();
+    const g=c.createLinearGradient(0,0,W,W);
+    g.addColorStop(0,shade(col,34));g.addColorStop(.45,col);g.addColorStop(1,shade(col,-48));
+    c.fillStyle=g;c.fillRect(0,0,W,W);
+    for(let i=0;i<22;i++){ /* 玉肉云雾 */
+      const x=rng()*W,y=rng()*W,r=W*.03+rng()*W*.1;
+      const gg=c.createRadialGradient(x,y,1,x,y,r);
+      gg.addColorStop(0,(rng()<.5?shade(col,28):shade(col,-26))+"30");gg.addColorStop(1,"transparent");
+      c.fillStyle=gg;c.beginPath();c.arc(x,y,r,0,7);c.fill();
+    }
+    if(idx>=2){ /* 色根条带（浓绿走脉） */
+      for(let i=0;i<idx*2;i++){
+        let x=rng()*W,y=rng()*W;c.strokeStyle="rgba(8,80,38,.42)";
+        c.lineWidth=W*.012+rng()*W*.02;c.lineCap="round";c.beginPath();c.moveTo(x,y);
+        const pts2=[[x,y]];for(let s2=0;s2<3;s2++){x+=(rng()-.3)*W*.22;y+=(rng()-.5)*W*.18;pts2.push([x,y]);}
+        pts2.forEach((p,j)=>j?c.lineTo(p[0],p[1]):0);c.stroke();
+        c.strokeStyle="rgba(140,255,170,.3)";c.lineWidth=W*.004;
+        c.beginPath();pts2.forEach((p,j)=>j?c.lineTo(p[0]-2,p[1]-2):c.moveTo(p[0]-2,p[1]-2));c.stroke();
+      }
+    }
+    if(idx>=3){ /* 雪花棉 */
+      for(let i=0;i<40;i++){c.fillStyle=`rgba(255,255,255,${.2+rng()*.35})`;
+        c.beginPath();c.arc(rng()*W,rng()*W,W*.0015+rng()*W*.004,0,7);c.fill();}
+    }
+    /* 内部透光（种水越高越透亮） */
+    const ig=c.createRadialGradient(W/2,W*.4,W*.02,W/2,W/2,W*.5);
+    ig.addColorStop(0,`rgba(235,255,240,${.05+idx*.045})`);ig.addColorStop(1,"transparent");
+    c.fillStyle=ig;c.fillRect(0,0,W,W);
+    c.restore();
+  }
+  /* 抛光高光弧 */
+  function glossArc(cx,cy,r,a0,a1,w,alpha){
+    c.save();c.strokeStyle=`rgba(255,255,255,${alpha})`;c.lineWidth=w;c.lineCap="round";
+    c.beginPath();c.arc(cx,cy,r,a0,a1);c.stroke();
+    c.strokeStyle=`rgba(255,255,255,${alpha*.45})`;c.lineWidth=w*.4;
+    c.beginPath();c.arc(cx,cy,r-w*.75,a0+.12,a1-.1);c.stroke();
+    c.restore();
+  }
+  /* 地面柔影 */
+  function shadow(cx,cy,rx,ry){
+    const sg=c.createRadialGradient(cx,cy,2,cx,cy,rx);
+    sg.addColorStop(0,"rgba(0,0,0,.5)");sg.addColorStop(1,"transparent");
+    c.save();c.translate(cx,cy);c.scale(1,ry/rx);c.translate(-cx,-cy);
+    c.fillStyle=sg;c.beginPath();c.arc(cx,cy,rx,0,7);c.fill();c.restore();
+  }
+
+  if(type==="bracelet"||type==="pingan"){
+    const main=type==="bracelet";
+    const cx=W/2,cy=W*(main?.48:.5);
+    const R=W*(main?.3:.2)*(.85+.3*(size||1)),r=R*(main?.45:.42);
+    shadow(cx,cy+R*.92,R*1.05,R*.22);
+    const ring=c=>{c.moveTo(cx+R,cy);c.arc(cx,cy,R,0,7,false);c.moveTo(cx+r,cy);c.arc(cx,cy,r,0,7,false);};
+    paintJade(ring,{rule:"evenodd"});
+    /* 环面立体感：外缘暗环+内缘亮环 */
+    c.save();c.beginPath();ring(c);c.clip("evenodd");
+    const tR=c.createRadialGradient(cx,cy,r,cx,cy,R);
+    tR.addColorStop(0,"rgba(255,255,255,.14)");tR.addColorStop(.55,"rgba(255,255,255,0)");tR.addColorStop(1,"rgba(0,20,10,.42)");
+    c.fillStyle=tR;c.fillRect(0,0,W,W);c.restore();
+    /* 透光边：轮廓内侧一线水头 */
+    c.save();c.beginPath();c.arc(cx,cy,R-3,0,7);c.strokeStyle=shade(col,64)+"88";c.lineWidth=3.2;c.stroke();
+    c.beginPath();c.arc(cx,cy,r+3,0,7);c.strokeStyle=shade(col,58)+"77";c.lineWidth=2.6;c.stroke();c.restore();
+    /* 抛光长高光（左上）+ 对射弱高光（右下） */
+    glossArc(cx,cy,(R+r)/2,Math.PI*1.08,Math.PI*1.62,R*.14,main?.5:.55);
+    glossArc(cx,cy,(R+r)/2,-.15,.42,R*.09,.22);
+  }
+  else if(type==="plaque"){
+    const pw=W*.4,ph=W*.54,cx=W/2,cy=W*.47;
+    shadow(cx,cy+ph*.56,pw*.62,ph*.1);
+    const rr=W*.05;
+    const plate=c=>{c.roundRect?c.roundRect(cx-pw/2,cy-ph/2,pw,ph,rr):c.rect(cx-pw/2,cy-ph/2,pw,ph);};
+    paintJade(plate);
+    /* 牌缘起线（ double 边框：外粗内细，仿工） */
+    c.save();c.beginPath();plate(c);c.clip();
+    c.strokeStyle="rgba(6,60,30,.5)";c.lineWidth=3.5;
+    c.strokeRect(cx-pw/2+W*.022,cy-ph/2+W*.022,pw-W*.044,ph-W*.044);
+    c.strokeStyle=shade(col,52)+"66";c.lineWidth=1.4;
+    c.strokeRect(cx-pw/2+W*.03,cy-ph/2+W*.03,pw-W*.06,ph-W*.06);
+    /* 俏色山水浮雕：远山剪影+近坡+江水+小日（填充式浮雕，非线条） */
+    function carve(fn,depth){
+      c.save();c.translate(-depth,-depth);c.globalAlpha=.5+.25*depth;
+      c.fillStyle=`rgba(6,55,28,1)`;fn(c,"dark");c.restore();
+      c.save();c.translate(depth*.6,depth*.6);c.globalAlpha=.28;
+      c.fillStyle=`rgba(225,255,238,1)`;fn(c,"lite");c.restore();
+    }
+    const mountains=(cc)=>{
+      cc.beginPath();
+      cc.moveTo(cx-pw*.42,cy+ph*.16);
+      cc.quadraticCurveTo(cx-pw*.18,cy-ph*.3,cx+pw*.02,cy+ph*.14);
+      cc.quadraticCurveTo(cx+pw*.2,cy-ph*.12,cx+pw*.42,cy+ph*.16);
+      cc.closePath();cc.fill();
+      cc.beginPath();
+      cc.moveTo(cx+pw*.05,cy+ph*.16);
+      cc.quadraticCurveTo(cx+pw*.28,cy-ph*.02,cx+pw*.42,cy+ph*.16);
+      cc.closePath();cc.fill();
+      cc.beginPath();cc.arc(cx+pw*.24,cy-ph*.24,ph*.045,0,7);cc.fill(); /* 小日 */
+      cc.fill();
+      cc.beginPath();
+      cc.moveTo(cx-pw*.42,cy+ph*.3);
+      cc.quadraticCurveTo(cx,cy+ph*.2,cx+pw*.42,cy+ph*.3);
+      cc.quadraticCurveTo(cx,cy+ph*.24,cx-pw*.42,cy+ph*.3);
+      cc.closePath();cc.fill(); /* 近坡江岸 */
+    };
+    carve(mountains,.045);
+    /* 穿绳孔 */
+    c.beginPath();c.arc(cx,cy-ph/2+W*.038,W*.016,0,7);
+    c.fillStyle="rgba(0,0,0,.55)";c.fill();
+    c.beginPath();c.arc(cx-W*.004,cy-ph/2+W*.034,W*.016,0,7);c.strokeStyle=shade(col,60)+"99";c.lineWidth=1.5;c.stroke();
+    c.restore();
+    /* 抛光高光 */
+    glossArc(cx,cy-ph*.18,pw*.34,Math.PI*1.05,Math.PI*1.55,W*.035,.4);
+  }
+  else if(type==="jiemian"){
+    const cx=W/2,cy=W*.5,rx=W*.17*(.9+.25*(size||1)),ry=rx*.78;
+    shadow(cx,cy+ry*.95,rx*1.1,ry*.24);
+    const egg=c=>{c.ellipse(cx,cy,rx,ry,-.2,0,7);};
+    paintJade(egg);
+    c.save();c.beginPath();egg(c);c.clip();
+    /* 蛋面弧度：底部收暗 */
+    const dg=c.createRadialGradient(cx-rx*.25,cy-ry*.3,rx*.1,cx,cy,rx*1.25);
+    dg.addColorStop(0,"rgba(255,255,255,.2)");dg.addColorStop(.6,"rgba(255,255,255,0)");dg.addColorStop(1,"rgba(0,25,12,.5)");
+    c.fillStyle=dg;c.fillRect(0,0,W,W);c.restore();
+    /* 蛋面镜面高光：一手抹亮的弧面反光 */
+    c.save();c.translate(-rx*.3,-ry*.35);c.rotate(-.5);c.scale(1,.45);
+    const hg=c.createRadialGradient(0,0,1,0,0,rx*.5);
+    hg.addColorStop(0,"rgba(255,255,255,.85)");hg.addColorStop(.6,"rgba(255,255,255,.15)");hg.addColorStop(1,"transparent");
+    c.fillStyle=hg;c.beginPath();c.arc(0,0,rx*.5,0,7);c.fill();c.restore();
+    c.beginPath();egg(c);c.strokeStyle=shade(col,55)+"88";c.lineWidth=2.4;c.stroke();
+  }
+  else if(type==="beads"){
+    const n=7,cx=W/2,cy=W*.46,arcR=W*.3;
+    shadow(cx,cy+arcR*.86,arcR*1.1,W*.06);
+    const br=W*.062*(.9+.25*(size||1));
+    for(let i=0;i<n;i++){
+      const a=Math.PI*(.15+.7*i/(n-1)); /* 悬垂珠链弧 */
+      const x=cx+Math.cos(a+Math.PI)*arcR,y=cy+Math.sin(a)*arcR*.5+cy*.12;
+      const bead=c=>{c.arc(x,y,br,0,7);};
+      paintJade(bead);
+      const bg2=c.createRadialGradient(x-br*.35,y-br*.4,br*.08,x,y,br);
+      bg2.addColorStop(0,"rgba(255,255,255,.55)");bg2.addColorStop(.35,"rgba(255,255,255,.08)");bg2.addColorStop(1,"rgba(0,25,12,.4)");
+      c.save();c.beginPath();c.arc(x,y,br,0,7);c.clip();c.fillStyle=bg2;c.fillRect(x-br,y-br,br*2,br*2);c.restore();
+      c.fillStyle="rgba(255,255,255,.9)";c.beginPath();c.arc(x-br*.32,y-br*.38,br*.09,0,7);c.fill();
+      c.beginPath();c.arc(x,y,br,0,7);c.strokeStyle=shade(col,45)+"55";c.lineWidth=1.6;c.stroke();
+      if(i<n-1){ /* 穿珠绳 */
+        const a2=Math.PI*(.15+.7*(i+1)/(n-1));
+        const x2=cx+Math.cos(a2+Math.PI)*arcR,y2=cy+Math.sin(a2)*arcR*.5+cy*.12;
+        c.strokeStyle="rgba(190,160,110,.8)";c.lineWidth=2.2;
+        c.beginPath();c.moveTo(x+Math.cos(a2)*br*.8,y+Math.sin(a2)*br*.8);c.lineTo(x2-Math.cos(a2)*br*.8,y2-Math.sin(a2)*br*.8);c.stroke();
+      }
+    }
+  }
+  else{ /* scrap 碎石边角 */
+    for(let i=0;i<5;i++){
+      const cx=W*(.24+rng()*.52),cy=W*(.3+rng()*.42),r=W*(.05+rng()*.06);
+      shadow(cx,cy+r*.9,r*1.1,r*.25);
+      const chip=c=>{for(let k=0;k<=7;k++){const a=k/7*7,rr=r*(.75+rng()*.5);
+        const x=cx+Math.cos(a)*rr,y=cy+Math.sin(a)*rr*.8;k?c.lineTo(x,y):c.moveTo(x,y);}c.closePath();};
+      paintJade(chip);
+      c.beginPath();
+      for(let k=0;k<=7;k++){const a=k/7*7,rr=r*(.75+rng()*.5);
+        const x=cx+Math.cos(a)*rr,y=cy+Math.sin(a)*rr*.8;k?c.lineTo(x,y):c.moveTo(x,y);}c.closePath();
+      c.strokeStyle=shade(col,42)+"66";c.lineWidth=1.6;c.stroke();
+    }
+  }
+  return cv;
+}
+function downloadProduct(type,gemId,seed,size,name){
+  const cv=drawProduct(type,gemId,seed,size,960);
+  const a=document.createElement("a");
+  a.href=cv.toDataURL("image/png");a.download=`翡翠${name}.png`;a.click();
+  toast("成品图已下载 📥");
+}
+
+/* ================================================================
+   任务 & 签到
+================================================================ */
+const TASKS=[
+  {id:"cut", name:"解玉三石", desc:"今日完成 3 次解玉（任意场口）", goal:3, reward:1500, cnt:()=>S.tasks.cut},
+  {id:"sell",name:"开市成交", desc:"今日出售 1 块玉石", goal:1, reward:1000, cnt:()=>S.tasks.sell},
+  {id:"flash",name:"打灯相玉", desc:"今日使用 1 次强光手电", goal:1, reward:500, cnt:()=>S.tasks.flash},
+  {id:"craft",name:"精工细作", desc:"今日加工 1 块原石", goal:1, reward:800, cnt:()=>S.tasks.craft},
+];
+function renderTasks(){
+  let html=`<div class="task-card">
+    <div class="ti"><h4>🎁 每日签到</h4><div class="td">领取 ${fmt(SIGN_REWARD)} 玉币 + 20 经验（每日一次）</div></div>
+    <span class="rw">+${fmt(SIGN_REWARD)}</span>
+    <button class="btn jade small" id="signBtn2" ${S.signed?"disabled":""}>${S.signed?"已签到":"签到"}</button>
+  </div>`;
+  html+=TASKS.map(t=>{
+    const c=Math.min(t.cnt(),t.goal),done=S.tasks.done[t.id],can=c>=t.goal&&!done;
+    return `<div class="task-card">
+      <div class="ti"><h4>${t.name}</h4><div class="td">${t.desc}</div>
+        <div class="prog"><i style="width:${c/t.goal*100}%"></i></div></div>
+      <span class="rw">+${fmt(t.reward)}</span>
+      <button class="btn small ${can?"jade":""}" data-task="${t.id}" ${can?"":"disabled"}>${done?"已领取":c>=t.goal?"领取":c+"/"+t.goal}</button>
+    </div>`;
+  }).join("");
+  document.getElementById("taskList").innerHTML=html;
+  document.getElementById("signBtn2").onclick=doSign;
+  document.querySelectorAll("[data-task]").forEach(b=>b.onclick=()=>{
+    const t=TASKS.find(x=>x.id===b.dataset.task);
+    S.tasks.done[t.id]=true;S.coins+=t.reward;save();
+    sndCoins();renderHeader(true);renderTasks();
+    toast(`任务完成 +${fmt(t.reward)} 玉币`);
+  });
+  /* 爵位进度 */
+  document.getElementById("rankTitle").textContent=`${rankOf(S.level)} Lv.${S.level}`;
+  const nextMine=MINES.find(m=>m.lv>S.level);
+  document.getElementById("rankNext").textContent=nextMine
+    ?`再升 ${nextMine.lv-S.level} 级（Lv.${nextMine.lv}）解锁「${nextMine.name}」 · 本级经验 ${S.xp}/${xpNeed(S.level)}`
+    :`已解锁全部场口 · 本级经验 ${S.xp}/${xpNeed(S.level)}`;
+  document.getElementById("rankProg").style.width=Math.min(100,S.xp/xpNeed(S.level)*100)+"%";
+}
+function checkTasks(){renderTasks();}
+function doSign(){
+  if(S.signed)return;
+  S.signed=true;S.coins+=SIGN_REWARD;save();sndCoins();
+  addXP(20);renderHeader(true);renderTasks();
+  toast(`签到成功 +${fmt(SIGN_REWARD)} 玉币 +20 经验`);
+}
+document.getElementById("signBtn").onclick=doSign;
+
+/* ================================================================
+   图鉴 / 战绩
+================================================================ */
+function renderDex(){
+  document.getElementById("dexGrid").innerHTML=GEMS.map(g=>{
+    const n=S.dex[g.id]||0;
+    return `<div class="dex-card ${n?"":"locked"}" ${n?`data-jade="${g.id}" style="cursor:pointer"`:""}>
+      <div class="gi" style="color:${g.color}">${n?g.icon:"❓"}</div>
+      <h4 style="color:${n?g.color:"var(--muted)"}">${n?g.name:"？？？"}</h4>
+      <div class="stars" style="color:${g.color}">${g.stars?"★".repeat(g.stars):"—"}</div>
+      ${n?`<div class="own">已开出 ×${n} · 点击观赏 3D 标本</div>`:""}
+    </div>`;
+  }).join("");
+  document.querySelectorAll("[data-jade]").forEach(el=>el.onclick=()=>openJade(el.dataset.jade));
+}
+function openJade(gid){
+  const g=gemOf(gid),spec=S.dexSpec[gid]||{seed:[...gid].reduce((a,ch)=>(a*31+ch.charCodeAt(0))|0,7),mineId:1,size:1};
+  document.getElementById("jTitle").textContent=`翡翠标本 · ${g.name}`;
+  document.getElementById("jTraits").innerHTML=
+    `种水：<b style="color:${g.color}">${g.name}（${"★".repeat(g.stars)||"无星"}）</b><br>`+
+    `标本来源：缅川公盘真实开料，玉肉纹理、色根、棉点均取自该石原坯<br>`+
+    `透光度：${["不透光（垮料）","微透·豆地","半透·糯地","亚透明·冰地","透明·玻璃地","浓艳通透·帝王地"][g.idx]}<br>`+
+    `累计开出：×${S.dex[gid]||0}`;
+  document.getElementById("jadeModal").classList.add("show");
+  JadeViewer.mount(document.getElementById("jadeView"));
+  JadeViewer.setJade({...spec,quality:gid});
+}
+document.getElementById("closeJade").onclick=()=>document.getElementById("jadeModal").classList.remove("show");
+function renderStat(){
+  document.getElementById("stTotal").textContent=S.stat.total;
+  document.getElementById("stWin").textContent=S.stat.win;
+  document.getElementById("stLose").textContent=S.stat.lose;
+  const p=document.getElementById("stProfit");
+  p.textContent=(S.stat.profit>=0?"+":"")+fmt(S.stat.profit);
+  p.style.color=S.stat.profit>=0?"var(--up)":"var(--down)";
+  document.getElementById("stBest").textContent=fmt(S.stat.best);
+  document.getElementById("stAssets").textContent=fmt(assets());
+  drawAsset();
+}
+function drawAsset(){
+  const cv=document.getElementById("assetChart"),dpr=devicePixelRatio||1;
+  const w=cv.clientWidth,h=cv.clientHeight||200;if(!w)return;
+  cv.width=w*dpr;cv.height=h*dpr;const c=cv.getContext("2d");c.scale(dpr,dpr);
+  const data=S.history.slice(-60);
+  if(data.length<2){c.fillStyle="#8ea396";c.font="13px sans-serif";c.fillText("解几块石头后这里会出现资产曲线",16,h/2);return;}
+  const vals=data.map(d=>d.assets);
+  let mn=Math.min(...vals),mx=Math.max(...vals);if(mx===mn){mx++;mn--;}
+  const pad=14,X=i=>pad+i/(data.length-1)*(w-pad*2),Y=v=>h-pad-(v-mn)/(mx-mn)*(h-pad*2);
+  c.strokeStyle="rgba(142,163,150,.35)";c.setLineDash([4,4]);
+  c.beginPath();c.moveTo(pad,Y(START_COINS));c.lineTo(w-pad,Y(START_COINS));c.stroke();c.setLineDash([]);
+  const up=vals[vals.length-1]>=START_COINS,col=up?"#e05a4e":"#3ddc84";
+  const grd=c.createLinearGradient(0,0,0,h);
+  grd.addColorStop(0,col+"44");grd.addColorStop(1,col+"00");
+  c.beginPath();c.moveTo(X(0),Y(vals[0]));vals.forEach((v,i)=>c.lineTo(X(i),Y(v)));
+  c.lineTo(X(data.length-1),h-pad);c.lineTo(X(0),h-pad);c.closePath();c.fillStyle=grd;c.fill();
+  c.beginPath();c.moveTo(X(0),Y(vals[0]));vals.forEach((v,i)=>c.lineTo(X(i),Y(v)));
+  c.strokeStyle=col;c.lineWidth=2;c.stroke();
+  c.fillStyle=col;c.beginPath();c.arc(X(data.length-1),Y(vals[vals.length-1]),3.5,0,7);c.fill();
+  c.fillStyle="#8ea396";c.font="11px sans-serif";c.fillText(fmt(mx),pad,12);c.fillText(fmt(mn),pad,h-3);
+}
+
+/* ================================================================
+   导航 / 重置 / 初始化
+================================================================ */
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active");
+  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+  document.getElementById("page-"+b.dataset.page).classList.add("active");
+  if(b.dataset.page==="stat")setTimeout(drawAsset,30);
+  if(b.dataset.page==="inv")renderInv();
+  if(b.dataset.page==="dex")renderCraftDex();
+  if(b.dataset.page==="task")renderTasks();
+});
+document.getElementById("lvChip").onclick=()=>document.querySelector('[data-page="task"]').click();
+document.getElementById("resetBtn").onclick=()=>{
+  if(!confirm("确定退隐重开吗？玉币、仓库、等级、战绩全部清空！"))return;
+  localStorage.removeItem(SAVE_KEY);location.reload();
+};
+addEventListener("resize",()=>{Viewer.resize();drawKline();drawAsset();});
+
+rollover();
+renderHeader();renderMines();refreshStones();renderInv();renderTasks();renderDex();renderCraftDex();renderStat();
+renderMarket(S.mult);
+if(!S.signed)setTimeout(()=>toast("🎁 今日还未签到，先去任务页领玉币吧"),900);
+</script>
+
+<!-- ===================== AllinONE 游戏实例 API（代码段 C/D 沙箱与效果共用） ===================== -->
+<script>
+window.gameAPI={
+  addCoins(n){n=Math.max(1,Math.min(1e7,Math.round(Number(n)||0)));S.coins+=n;pushHistory();save();renderHeader(true);toast("✨ 玉币 +"+fmt(n));},
+  addFlash(times){const t=Math.max(1,Math.min(9,Math.round(Number(times)||3)));S.flashUsed=Math.max(0,S.flashUsed-t);save();renderHeader();toast("🔦 强光手电 +"+t+" 次");},
+  setLuck(cuts){const c=Math.max(1,Math.min(9,Math.round(Number(cuts)||1)));S.luck=Math.min(9,S.luck+c);save();toast("🍀 幸运加持 ×"+c+"（接下来购买的石头出绿率提升）");},
+  boostMarket(mult,seconds){const m=Math.max(1,Math.min(1.5,Number(mult)||1.4)),sec=Math.max(15,Math.min(600,Math.round(Number(seconds)||60)));S.mult=m;S.marketHoldUntil=Date.now()+sec*1000;renderMarket(S.mult);toast("📈 行情拉升 ×"+m.toFixed(2)+"，持续 "+sec+" 秒，速去出货！");},
+  addMinePass(times){const t=Math.max(1,Math.min(9,Math.round(Number(times)||1)));S.minePass=Math.min(9,S.minePass+t);save();renderMines();toast("🎫 场口入场券 ×"+t+"（等级不足的场口可持券进入，购石 1 次后失效）");}
+};
+</script>
+
+<!-- ===================== 代码段 A：AllinONE 扩展加载器（levels slot = 玩家矿区） ===================== -->
+<script>
+/* 平台把玩家提交的矿区合并到 published_games[gameId].levels（逐条带 _submissionId）。
+   铁律：无 ?ext= = 纯净原版（不加载任何扩展矿区）；有 ?ext=<id> = 原版 + 该扩展。 */
+var A1G_EXT={
+  gameId:'',apiBase:'',customLevels:[],assetPaths:[],started:false
+};
+function a1gApiBase(){
+  if(/tcloudbaseapp\.com$/.test(location.hostname))
+    return 'https://allinonegaming-d4gmsmrzz573264f6.service.tcloudbase.com/api/v1/games';
+  return '/api/v1/games';
+}
+function a1gDetectGameId(){
+  var m=location.pathname.match(/\/api\/v1\/games\/([^\/]+?)(\/|$)/);
+  if(m){try{return decodeURIComponent(m[1]);}catch(e){}}
+  try{var q=new URLSearchParams(location.search);if(q.get('gameId'))return q.get('gameId');}catch(e){}
+  return '';
+}
+function a1gExtParam(){try{return new URLSearchParams(location.search).get('ext')||'';}catch(e){return '';}}
+function a1gEncodePath(p){return String(p).split('/').map(function(seg){return encodeURIComponent(seg);}).join('/');}
+function a1gLoadCustomLevels(){
+  var id=A1G_EXT.gameId||a1gDetectGameId();
+  if(!id||A1G_EXT.started)return;
+  A1G_EXT.gameId=id;A1G_EXT.started=true;
+  fetch(a1gApiBase()+'/'+encodeURIComponent(id),{cache:'no-cache'})
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(json){
+      if(!json)return;
+      var doc=json&&json.data?json.data:json;
+      var levels=Array.isArray(doc.levels)?doc.levels:[];
+      var flat=[];
+      for(var i=0;i<levels.length;i++){ /* 兼容历史嵌套：扁平化一层 */
+        if(Array.isArray(levels[i])){for(var j=0;j<levels[i].length;j++)flat.push(levels[i][j]);}
+        else flat.push(levels[i]);
+      }
+      var assetPaths=[],exts=Array.isArray(doc.questExtensions)?doc.questExtensions:[];
+      for(var k=0;k<exts.length;k++){
+        var e=exts[k];
+        if(e&&Array.isArray(e.assets))for(var m=0;m<e.assets.length;m++)
+          if(e.assets[m]&&e.assets[m].path)assetPaths.push(e.assets[m].path);
+      }
+      A1G_EXT.assetPaths=assetPaths;
+      var ext=a1gExtParam();
+      A1G_EXT.customLevels=flat.filter(function(l){
+        if(!l||typeof l!=='object')return false;
+        if(!ext)return !l._submissionId;               /* 纯净原版 */
+        return !l._submissionId||l._submissionId===ext; /* 原版 + 指定扩展 */
+      });
+      if(A1G_EXT.customLevels.length>0)console.log('[EXT] 扩展矿区:',A1G_EXT.customLevels.length,'条');
+      a1gAutoSelectFromUrl();
+    })
+    .catch(function(){console.warn('[EXT] 扩展矿区加载失败，保持原版');});
+}
+function a1gAutoSelectFromUrl(){
+  var applied=0;
+  A1G_EXT.customLevels.forEach(function(lv){if(applyMine(lv))applied++;});
+  if(applied){renderMines();toast('🧩 已加载 '+applied+' 条玩家矿区，去矿区页试试');}
+  var ext=a1gExtParam();
+  if(!ext)return;
+  var target=allMines().find(function(m){return m.ext&&A1G_EXT.customLevels.some(function(l){return l._submissionId===ext&&m.name===String(l.name||'未名矿脉').slice(0,10);});});
+  if(target&&S.level>=target.lv){curMine=target;renderMines();refreshStones();toast('🧩 已自动入场扩展矿区：'+target.name);}
+}
+/* 平台协议 INIT 消息带 gameId（inline/srcDoc 模式下唯一来源） */
+window.addEventListener('message',function(e){
+  var d=e.data;
+  if(d&&d.type==='PROTOCOL:INIT'&&d.gameId){A1G_EXT.gameId=d.gameId;a1gLoadCustomLevels();}
+});
+a1gLoadCustomLevels();
+</script>
+
+<!-- ===================== 代码段 B：内容工坊接收器（内容凭证按次生效） ===================== -->
+<script>
+function __onMinePack(pack){
+  /* pack={contentId,type,slot,name,data,assets,assetBase}；内容凭证是按次消费，不写入持久化存档 */
+  if(pack&&applyMine(pack.data)){renderMines();toast('🧩 内容凭证矿区「'+((pack.data&&pack.data.name)||pack.name)+'」已临时加入（本局有效）');}
+}
+/* 主通道：全局 ContentHandlers 对象（loader apply() 时才读取，无注册时序依赖） */
+window.AllinONE_ContentHandlers=window.AllinONE_ContentHandlers||{};
+window.AllinONE_ContentHandlers.levels=__onMinePack;
+/* 兜底：loader 若已就绪也直接挂上（与主通道指向同一函数，loader 只会调用其一，幂等） */
+if(window.AllinONE_ContentLoader&&AllinONE_ContentLoader.on){AllinONE_ContentLoader.on('levels',__onMinePack);}
+window.addEventListener('allinone:content-pack-applied',function(ev){
+  if(ev.detail&&ev.detail.slot==='levels')console.log('[Content] 矿区内容已应用:',ev.detail.name);
+});
+</script>
+
+<!-- ===================== 代码段 C：道具双通道（UGC 道具工坊 + 兑换码） ===================== -->
+<style>
+  .ugc-bar{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:8px;align-items:center;
+    padding:8px 16px;background:rgba(0,0,0,.85);border-radius:12px;z-index:9999;font-family:system-ui;min-height:40px;max-width:92vw;flex-wrap:wrap}
+  .ugc-label{color:#4caf50;font-weight:bold;font-size:12px;margin-right:4px}
+  .ugc-item{padding:4px 10px;background:#333;border-radius:8px;cursor:pointer;color:#fff;font-size:13px;border:1px solid #555;transition:all .2s}
+  .ugc-item:hover{background:#4caf50;border-color:#4caf50}
+  .ugc-empty{color:#666;font-size:12px}
+  .harvest-bar{position:fixed;bottom:64px;left:12px;display:flex;flex-direction:column;gap:6px;z-index:9998;max-width:240px}
+  .harvest-item{display:flex;gap:6px;align-items:center;padding:6px 10px;background:rgba(20,34,26,.95);
+    border:1px solid #3ddc8466;border-radius:10px;color:#eafff2;font-size:12px}
+  .harvest-item button{background:#2f7d52;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:12px}
+</style>
+<div id="ugc-bar" class="ugc-bar"><span class="ugc-label">PROPS</span><span class="ugc-empty">暂无道具</span></div>
+<div id="harvest-bar" class="harvest-bar"></div>
+<script>
+(function(){
+  'use strict';
+  function showToast(msg,type){ /* 复用游戏内 toast */
+    try{toast((type==='error'?'❌ ':'')+msg);}catch(e){console.log('[A1G]',msg);}
+  }
+  /* ===== 内置效果表（与道具 SOP availableEffects 一一对应） ===== */
+  var EFFECT_HANDLERS={
+    add_coins:function(p){var n=Math.max(1,Math.round(Number(p&&p.bonus)||1000));gameAPI.addCoins(n);return{message:'✨ 玉币 +'+fmt(n)};},
+    flash_plus:function(p){var t=Math.max(1,Math.round(Number(p&&p.times)||3));gameAPI.addFlash(t);return{message:'🔦 强光手电 +'+t+' 次'};},
+    lucky_cut:function(p){var c=Math.max(1,Math.round(Number(p&&p.cuts)||1));gameAPI.setLuck(c);return{message:'🍀 幸运加持 ×'+c};},
+    market_up:function(p){var m=Number(p&&p.mult)||1.4,s=Number(p&&p.seconds)||60;gameAPI.boostMarket(m,s);return{message:'📈 行情拉升 ×'+m.toFixed(2)};},
+    mine_pass:function(p){var t=Math.max(1,Math.round(Number(p&&p.times)||1));gameAPI.addMinePass(t);return{message:'🎫 场口入场券 ×'+t};}
+  };
+  /* ===== effectCode 沙箱引擎（自定义效果函数，注入 gameAPI） ===== */
+  var _cache={};
+  function registerDynamicEffect(name,codeStr){
+    if(EFFECT_HANDLERS[name])return true;
+    if(_cache[name]){EFFECT_HANDLERS[name]=_cache[name];return true;}
+    if(!codeStr||typeof codeStr!=='string'||codeStr.length>4000)return false;
+    var blocked=['eval(','new function','import(','require(','__proto__','prototype','constructor',
+      'window.','document.','parent.','top.','globalthis','self.','fetch(','xmlhttprequest',
+      'websocket','worker(','localstorage','sessionstorage','cookie','alert(','confirm(','prompt('];
+    var lower=codeStr.toLowerCase();
+    for(var i=0;i<blocked.length;i++)if(lower.indexOf(blocked[i])!==-1)return false;
+    try{
+      var fn=new Function('game','Math','JSON','console','return ('+codeStr+');');
+      var raw=fn(window.gameAPI||{},Math,JSON,console);
+      if(typeof raw!=='function')return false;
+      var wrapped=function(params){try{return raw(params)||{message:'效果已执行'};}catch(e){return{error:true,message:'效果出错: '+(e.message||e)};}};
+      _cache[name]=wrapped;EFFECT_HANDLERS[name]=wrapped;return true;
+    }catch(e){return false;}
+  }
+  /* ===== 道具库存 ===== */
+  var customPowerUps=[];
+  function renderCustomPowerUps(){
+    var bar=document.getElementById('ugc-bar');bar.innerHTML='';
+    var label=document.createElement('span');label.className='ugc-label';label.textContent='PROPS';bar.appendChild(label);
+    if(!customPowerUps.length){var e=document.createElement('span');e.className='ugc-empty';e.textContent='暂无道具';bar.appendChild(e);return;}
+    customPowerUps.forEach(function(item,index){
+      var el=document.createElement('span');el.className='ugc-item';
+      el.textContent=(item.icon||'⚡')+' '+item.name;
+      el.title=item.description||item.effect;
+      el.onclick=function(){useCustomPowerUp(index);};
+      bar.appendChild(el);
+    });
+  }
+  function useCustomPowerUp(index){
+    var item=customPowerUps[index];if(!item)return;
+    if(item.effectCode&&!EFFECT_HANDLERS[item.effect]){
+      if(!registerDynamicEffect(item.effect,item.effectCode)){showToast('效果注册失败','error');return;}
+    }
+    var handler=EFFECT_HANDLERS[item.effect];
+    if(handler){var r=handler(item.params);if(r&&r.message)showToast(r.message,r.error?'error':'success');}
+    else showToast('未找到效果: '+item.effect,'error');
+    customPowerUps.splice(index,1);renderCustomPowerUps();
+  }
+  function addPowerUp(effect,name,params,extra){
+    customPowerUps.push({id:(extra&&extra.id)||('ugc_'+Date.now()),name:name||effect,effect:effect,
+      params:params||{},description:(extra&&extra.description)||'',effectCode:(extra&&extra.effectCode)||null,
+      icon:(extra&&extra.icon)||'⚡'});
+    renderCustomPowerUps();showToast('🎁 获得道具: '+(name||effect));
+  }
+  /* 通道 1：EXTENSION_VOUCHER（UGC 道具工坊下发） */
+  window.addEventListener('message',function(e){
+    if(!e.data||e.data.type!=='EXTENSION_VOUCHER')return;
+    var v=e.data.voucher;
+    if(!v||!v.data||!v.data.effect)return;
+    addPowerUp(v.data.effect,v.data.name,v.data.params,v.data);
+  });
+  /* 通道 2：allinone:item-redeemed（兑换码兑换下发；真效果名在 detail.itemId） */
+  var _redeemedIds={};
+  function handleRedeemedItem(detail){
+    var key=detail.code||detail.itemId;
+    if(_redeemedIds[key])return;
+    _redeemedIds[key]=true;
+    var vd=detail.voucherData||{};
+    var realEffect=(vd.effect&&vd.effect!=='custom')?vd.effect:null;
+    if(!realEffect&&detail.itemId&&detail.itemId!=='custom')realEffect=detail.itemId;
+    if(!realEffect)return;
+    addPowerUp(realEffect,vd.name||detail.itemName,vd.params||detail.effects,vd);
+  }
+  window.addEventListener('allinone:item-redeemed',function(e){handleRedeemedItem(e.detail);});
+  renderCustomPowerUps();
+})();
+</script>
+
+<!-- ===================== 代码段 D：道具提取通道（ITEM_HARVEST · 打金闭环） ===================== -->
+<script>
+(function(){
+  'use strict';
+  var harvestItems=[];      /* 可提取成品池（加工产出时逐件 spawn，碎石边角除外） */
+  var pendingHarvest={};    /* harvestId → true（待平台确认，防重复提交） */
+  /* 平台模式懒检测：掉落时机动态检测，直接双击打开 HTML 不掉落 */
+  function ensurePlatformMode(){
+    var cfg=window['__ALL'+'INONE_CONFIG__'];
+    var bridge=window.AllinONE;
+    return !!(cfg&&typeof cfg==='object')||!!(bridge&&(bridge.__GAME_ID__||bridge.GAME_ID));
+  }
+  function spawnHarvestItem(name,effect,params,description){
+    if(!ensurePlatformMode())return;
+    var item={id:'harvest_'+Date.now()+'_'+Math.floor(Math.random()*1e6),
+      name:name,effect:effect,params:params||{},description:description||'',origin:'gameplay'};
+    harvestItems.push(item);renderHarvest();
+    toast('💎 成品「'+name+'」已入铸造栏，可提取为平台凭证交易');
+  }
+  function extractHarvestItem(itemId){
+    var item=null;
+    for(var i=0;i<harvestItems.length;i++)if(harvestItems[i].id===itemId){item=harvestItems[i];break;}
+    if(!item||item.origin!=='gameplay'||pendingHarvest[item.id])return;
+    pendingHarvest[item.id]=true;renderHarvest();
+    window.parent.postMessage({type:'GAME_EVENT',event:'ITEM_HARVEST',
+      data:{schemaName:'gushi-powerup',harvestId:item.id,
+        itemData:{name:item.name,effect:item.effect,params:item.params,description:item.description},
+        quantity:1,source:'gameplay'},timestamp:Date.now()},'*');
+    (function(hid){setTimeout(function(){if(pendingHarvest[hid]){delete pendingHarvest[hid];renderHarvest();}},10000);})(item.id);
+  }
+  function renderHarvest(){
+    var bar=document.getElementById('harvest-bar');if(!bar)return;
+    bar.innerHTML='';
+    harvestItems.forEach(function(p){
+      var el=document.createElement('div');el.className='harvest-item';
+      var span=document.createElement('span');span.textContent='💎 '+p.name;
+      var btn=document.createElement('button');btn.textContent='提取凭证';
+      btn.onclick=function(){extractHarvestItem(p.id);};
+      el.appendChild(span);el.appendChild(btn);bar.appendChild(el);
+    });
+  }
+  window.addEventListener('message',function(e){
+    var d=e.data;
+    if(!d||d.type!=='PLATFORM_EVENT')return;
+    if(d.event==='ITEM_HARVEST_RESULT'){
+      var r=d.data||{};
+      delete pendingHarvest[r.harvestId];
+      if(r.success){
+        harvestItems=harvestItems.filter(function(p){return p.id!==r.harvestId;});
+        toast('📤 已提取为平台凭证「'+(r.voucherName||'美玉')+'」，可在市场交易');
+      }else if(r.message){toast('提取失败：'+r.message);}
+      renderHarvest();return;
+    }
+    if(d.event==='REQUEST_GAME_ITEMS'){
+      window.parent.postMessage({type:'GAME_EVENT',event:'GAME_ITEMS',
+        data:{items:harvestItems.map(function(p){
+          return{itemId:p.id,schemaName:'gushi-powerup',
+            itemData:{name:p.name,effect:p.effect,params:p.params||{},description:p.description||''}};
+        })},timestamp:Date.now()},'*');
+      return;
+    }
+    if(d.event==='ITEM_CONSUMED'){
+      var consumedId=(d.data||{}).itemId;
+      harvestItems=harvestItems.filter(function(p){return p.id!==consumedId;});
+      delete pendingHarvest[consumedId];renderHarvest();return;
+    }
+  });
+  window.AllinONEHarvest={spawn:spawnHarvestItem,extract:extractHarvestItem};
+})();
+</script>
+
+<!-- ===================== 代码段 E：游戏奖励活动上报（GAME_EVENT） ===================== -->
+<script>
+var AllinONE_Reward={
+  _doneSet:{},
+  _done:function(k){return !!this._doneSet[k];},
+  mark:function(k){this._doneSet[k]=true;},
+  inPlatform:function(){try{return !!(window.parent&&window.parent!==window);}catch(e){return false;}},
+  report:function(event,data){
+    if(!AllinONE_Reward.inPlatform())return;
+    try{
+      window.parent.postMessage({type:'GAME_EVENT',event:event,data:data||{},timestamp:Date.now()},'*');
+      console.log('[Reward] 已上报',event,data||'');
+    }catch(e){/* 上报失败绝不影响游戏 */}
+  }
+};
+</script>
+</body>
+</html>

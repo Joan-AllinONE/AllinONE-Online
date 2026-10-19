@@ -1,7 +1,11 @@
 # AllinONE 游戏发布完整指南
 
 > **目标读者**：游戏开发者 / 使用 AI 辅助改编游戏的开发者
-> **版本**：v3.1 | **适用平台**：AllinONE Gaming Platform
+> **版本**：v3.2 | **适用平台**：AllinONE Gaming Platform
+>
+> ### ⚠️ v3.2 相对 v3.1 的重大变化
+>
+> **Schema 平台持久注册成为提取凭证的硬性前提**：游戏要用代码段 D 提取道具凭证，其 `schemaName` 必须在平台 SchemaRegistry **持久注册**（仅上传道具 SOP 不够——动态注册是内存态，页面刷新即丢）。游戏方需产出一份**《Schema 注册指引》**交给平台 AI 完成内置注册（见 [4.4 前置条件](#44-代码段-d道具提取通道-item-harvest--v31-新增强烈建议)）。赌石小游戏 `gushi-powerup` 已按此流程接入。
 >
 > ### ⚠️ v3.1 相对 v3.0 的重大变化
 >
@@ -42,7 +46,7 @@
 |---|---|---|---|---|---|
 | **道具工坊** `/workshop` | 玩家自由创作 | 单个道具 JSON | 兑换后长期持有 | 上架需社区投票 | 实现 `EFFECT_HANDLERS` + 双通道监听（**必须**） |
 | **任务广场** `/quests` | 有人发悬赏，玩家接单 | 内容包 ContentPack | **永久发行，所有玩家可见** | 开发者直审 / 社区投票 | 预留 **slot 挂载点** + 内容应用函数（**必须**） |
-| **内容工坊** `/content-workshop` | 玩家自由创作 | 完整内容数据包（data + assets） | **个人、按次、本次会话** | 铸造不审；上架 remix 强制审核 | 一行注册 `AllinONE_ContentLoader.on`（**可选，强烈建议**） |
+| **内容工坊** `/content-workshop` | 玩家自由创作 | 完整内容数据包（data + assets） | **个人、按次、本次会话** | 铸造不审；上架 remix 强制审核 | 注册 `AllinONE_ContentHandlers` 挂载表（**可选，强烈建议**） |
 
 **关键区别（务必理解）**：
 
@@ -366,29 +370,36 @@ window.addEventListener('message', function(e){
 
 ### 4.2 代码段 B：内容工坊接收器（内容创作 · 强烈建议）
 
-**你不需要自己写 loader**——平台在分发时会自动注入 `AllinONE_ContentLoader` 骨架（空操作）。你只需在游戏里**注册接收函数**：
+**你不需要自己写 loader**——平台在分发时会自动在 `</head>` 前（head 末尾、游戏业务代码之前）注入 `AllinONE_ContentLoader` 骨架（空操作；文件分发层 / GamePlay inline / 云函数 / Service Worker 四条通道行为一致）。你只需在游戏里**注册接收函数**：
 
 ```html
 <script>
-  // 方式一：链式注册（推荐）
-  window.AllinONE_ContentLoader.on('levels', function(pack){
+  // 方式一：全局挂载表注册（推荐，时序安全）
+  // loader 在 apply() 时才读取 AllinONE_ContentHandlers，任何时机设置都有效，
+  // 不依赖 loader 是否已注入/已定义。
+  function __onContentPack(pack){
     // pack = { contentId, type, slot, name, data, assets, assetBase }
     a1gApplyLevel(pack.data);        // 复用代码段 A 的应用函数
     startGame();                     // 本次会话立即生效
-  });
-
-  // 方式二：对象表注册
+  }
   window.AllinONE_ContentHandlers = window.AllinONE_ContentHandlers || {};
-  window.AllinONE_ContentHandlers.levels = function(pack){ a1gApplyLevel(pack.data); };
+  window.AllinONE_ContentHandlers.levels = __onContentPack;
 
-  // 方式三：监听全局事件
+  // 方式二：loader 链式注册（兜底，与方式一指向同一函数，loader 只会触发其一）
+  if (window.AllinONE_ContentLoader && AllinONE_ContentLoader.on) {
+    AllinONE_ContentLoader.on('levels', __onContentPack);
+  }
+
+  // 方式三：监听全局事件（一般只用于日志）
   window.addEventListener('allinone:content-pack-applied', function(ev){
     console.log('内容已应用:', ev.detail.name);
   });
 </script>
 ```
 
-loader 会按顺序做：`data.code` 内联执行 → `assets` 里的 `.js` 依次执行 → 派发 `allinone:content-pack-applied` → 调用你的 slot handler。
+> ⚠️ **时序铁律**：不要只写 `window.AllinONE_ContentLoader.on(...)` 直接调用。若该脚本执行时 loader 尚未就绪，包一层条件守卫会被**静默跳过**（无任何报错），注册就此丢失——玩家使用内容凭证时 handler 落空、内容不生效。真实案例：赌石小游戏内容凭证矿区不出现，根因即代码段 B 的条件守卫 `on()` 注册早于 loader 定义（2026-09-18 平台已改为 head 注入根治，但挂载表写法对任何注入顺序都安全，请一律采用方式一）。
+
+loader 会按顺序做：`data.code` 内联执行 → `assets` 里的 `.js` 依次执行 → 派发 `allinone:content-pack-applied` → 调用你的 slot handler（优先查 loader 内部 `_handlers`，回退 `window.AllinONE_ContentHandlers`）。
 
 读取内容包里的图片/音频等资产，用内置帮助器：
 
@@ -715,6 +726,31 @@ if (totalMatches >= 6) {
 | 高价值审核 | `itemData` 含 `effectCode` / `effectScript`、或稀有度为高价值档位、或 `highValue: true` → 凭证标记 `pending`，审核通过前禁止上架与兑换 |
 | 跨游戏适配 | 买家可将 A 游戏的道具凭证「适配到」B 游戏使用：B 的 SOP 声明包含原 schema → 保持；有声明但不含且效果可通用执行 → 映射到 B 的第一个 schema；B 无声明 → 保持原 schema |
 
+#### ⚠️ 前置条件：Schema 平台持久注册（v3.2 起，必须）
+
+`schemaName` 必须在平台 SchemaRegistry **持久注册**后提取才能成功，否则平台返回「道具类型 "xxx" 未注册，无法提取」。注册有两条路径：
+
+| 路径 | 生效方式 | 可靠性 |
+|---|---|---|
+| ① **平台内置注册** | 平台侧把 Schema 写入 `SchemaRegistry.registerBuiltinSchemas()`，随平台前端发版生效 | ✅ **唯一可靠路径**（永久生效） |
+| ② 道具 SOP 动态注册 | 玩家打开道具工坊选中该游戏时在内存中注册 | ❌ 页面刷新即丢，**仅作道具工坊创作辅助，不能作为提取依据** |
+
+> **真实案例**：赌石小游戏 `gushi-powerup` 起初只靠动态注册，玩家刷新页面后提取必报「未注册」，最终由平台内置注册根治（2026-09-19）。
+
+**游戏方需要做的——产出一份《Schema 注册指引》交给平台 AI**，由平台 AI 把 Schema 写入平台内置注册。指引必须包含：
+
+| 项 | 要求 |
+|---|---|
+| `schemaName` | `{游戏名}-powerup` 全小写连字符（如 `gushi-powerup`），与代码段 D、道具 SOP **三处一致** |
+| `availableEffects` | 效果名清单，与游戏 `EFFECT_HANDLERS` 一一对应 |
+| `effectRules` | 每个效果的语义与参数说明 |
+| `constraints` | 每个参数的合法区间（如 `"add_coins.bonus": {"min":500,"max":50000}`） |
+| `forbidden` | 会破坏游戏平衡的禁止事项（平台 AI 据此写进 Schema 的 forbidden 校验） |
+| `presetItems`（可选） | 3-6 个预设道具示例 |
+| `effectCodeSandbox`（可选） | 使用 effectCode 时的沙箱变量清单 |
+
+> 💡 发布时上传的 `item-sop.json` 与注册指引字段同构，可直接作为底稿。平台完成内置注册后会回执确认，此后游戏即可上线提取通道。已有内置 Schema（match3-powerup / zuma-powerup / perler-artwork / gushi-powerup / weapon / shop / quest）无需重复提交。
+
 > 完整可运行版本见 `AllinONE Online/Match3Game_effectcode.html`（搜索 `dropHarvestItem` / `extractHarvestItem` / `REQUEST_GAME_ITEMS`）。
 >
 > ⚠️ **平台模式检测**：发布管线会在 `<head>` 注入 `window.__ALLINONE_CONFIG__`（v3.1 起）。请在**掉落时机**动态检测（懒检测，如上方 `ensurePlatformMode`），不要只在 `init()` 时检测一次——历史版本管线不注入该变量，仅靠 init 检测会导致掉落被静默关闭且零报错。直接双击打开 HTML 时两个注入物都不存在，提取功能应保持关闭。
@@ -728,6 +764,7 @@ if (totalMatches >= 6) {
 | C · 道具双通道 | ✅ 必须 | 中（填效果表） | 道具工坊与兑换码道具到不了游戏 |
 | D · 道具提取通道（v3.1） | 强烈建议 | 中（改 3 处 TODO） | 游戏内道具无法提取为凭证交易，玩家失去「打金」动机 |
 | E · 游戏奖励活动上报（v3.2） | 可选加入 | 小（1 个工具函数 + 每个触发点 1 行） | 只能有「进入游戏」的点击奖励，无法奖励通关/成就等真实游戏行为 |
+| F · 合约贡献上报（v3.3） | 可选加入 | 小（1 个工具函数 + 每个触发点 1 行） | 组团合约进度只能靠团长在合约中心人工代报 |
 
 ---
 
@@ -868,6 +905,60 @@ if (player.x >= DOOR_X) {
 >
 > ⚠️ **改完游戏 HTML 必须重新发布**，上报代码才会进入线上包；行为奖励生效还需要运营者已在「游戏绑定」中为该游戏创建绑定且奖池有余额。
 
+### 4.8 代码段 F：合约贡献上报（智能合约 team-quest · v3.3 新增，可选加入）
+
+当你的游戏被「组团合约」（team-quest，拼任务/组队挑战）关联时，玩家进度可以由**游戏内真实行为自动触发**——游戏在关键时刻上报贡献事件，平台转发给合约引擎记账，团长无需人工收集进度。
+
+**触发机制（平台侧自动执行，无需你实现转发逻辑）**：
+1. 游戏内 postMessage 上报 `PROTOCOL_CONTRIBUTE` 事件；
+2. 平台自动附上玩家身份（JWT）与通道令牌（channelToken），转发至合约引擎 `__protocol`；
+3. 合约引擎校验：合约存在且为进行中（active）、上报者是合约成员（本人自报）或团长（代报）——冒名上报返回 403，重复上报由分钟窗幂等挡住。
+
+**上报时机铁律（与代码段 E 一致）**：只在状态切换点上报（单次触发），绝不在渲染/游戏循环里调用——重复上报虽被幂等，但会产生无谓的隧道请求。
+
+#### 代码段 F：贡献上报骨架
+
+```html
+<script>
+// ===== AllinONE 合约贡献上报（代码段 F）=====
+var AllinONE_Contract = {
+  report: function (contractId, amount, note, questId) {
+    try {
+      parent.postMessage({
+        type: 'GAME_EVENT',
+        event: 'PROTOCOL_CONTRIBUTE',
+        data: {
+          contractId: contractId,   // 合约实例 ID（见下方「contractId 从哪来」）
+          amount: amount,           // 本次贡献量（正整数：击杀数/通关次数/积分等）
+          note: note || '',         // 可选：人类可读说明，展示在合约详情
+          questId: questId || undefined // 可选：关联的 GameQuest 任务 ID
+        },
+        timestamp: Date.now()
+      }, '*');
+    } catch (e) { /* 上报失败不影响游戏运行 */ }
+  }
+};
+
+// ✅ 正例：Boss 被击杀（状态切换点）上报一次
+function onBossKilled() {
+  AllinONE_Contract.report('ctr_xxx', 1, 'Boss 击杀', 'quest-001');
+}
+
+// ❌ 反例：放在 requestAnimationFrame / update() 里，每帧都会上报
+</script>
+```
+
+**数据字段**：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `contractId` | ✅ | 合约实例 ID（`ctr_` 开头）。**从哪来**：玩家在合约中心发起拼团后，建议你把该 ID 通过游戏的「合约任务说明」告知玩家由平台透传；MVP 阶段也可由团长在合约详情复制后通过关卡参数下发 |
+| `amount` | ✅ | 本次贡献量（正整数），如击杀数/通关次数/积分 |
+| `note` | | 人类可读说明，展示在合约详情 |
+| `questId` | | 关联的 GameQuest 任务 ID（合约表单 questIdLink 一致时才计入） |
+
+> ⚠️ **改完游戏 HTML 必须重新发布**；埋点生效还需要：合约已部署且为 active 状态、上报玩家在合约成员名单内（私域合约受 whitelist 门禁）。
+
 ---
 
 ## 5. 第三步：发布中心配置
@@ -899,6 +990,8 @@ if (player.x >= DOOR_X) {
 | 塔防 | auth, wallet, inventory |
 
 ### 5.3 道具 SOP（GameItemSop）
+
+> ⚠️ **道具 SOP ≠ Schema 注册**：上传道具 SOP 只让玩家能在道具工坊创作该游戏道具（动态注册，刷新即丢）。要让游戏内**提取凭证**（代码段 D）可用，还必须按 [4.4 前置条件](#44-代码段-d道具提取通道-item-harvest--v31-新增强烈建议)产出《Schema 注册指引》交平台 AI 完成内置注册。
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
@@ -1122,12 +1215,19 @@ AllinONE 是一个 UGC 游戏平台。玩家可以通过三条通道为游戏贡
 【任务 3 · 集成代码段 B：内容工坊接收器】
 ═══════════════════════════════════════
 
-注册内容包接收函数（平台会自动注入 AllinONE_ContentLoader 骨架，你只需注册回调）：
+注册内容包接收函数（平台会在 </head> 前自动注入 AllinONE_ContentLoader 骨架，你只需注册回调）。
+必须用全局挂载表 window.AllinONE_ContentHandlers 注册（时序安全：loader apply 时才读取，任何时机设置都有效）；
+不要只写 window.AllinONE_ContentLoader.on(...) 直接调用（loader 未就绪时条件守卫会静默跳过，内容永不生效）：
 
-window.AllinONE_ContentLoader.on('<slot>', function(pack){
+function __onContentPack(pack){
   // pack = { contentId, type, slot, name, data, assets, assetBase }
   applyContent(pack.data);   // 复用任务 1 的应用函数
-});
+}
+window.AllinONE_ContentHandlers = window.AllinONE_ContentHandlers || {};
+window.AllinONE_ContentHandlers['<slot>'] = __onContentPack;
+if (window.AllinONE_ContentLoader && AllinONE_ContentLoader.on) {
+  AllinONE_ContentLoader.on('<slot>', __onContentPack);   // 兜底，与挂载表幂等共存
+}
 
 注意：内容凭证是按次消费（1 张 = 1 次会话），不要写进持久化存档。
 
@@ -1180,25 +1280,27 @@ window.AllinONE_ContentLoader.on('<slot>', function(pack){
    effectRules、constraints（数值上限）、forbidden（禁止事项）、
    effectCodeEnabled、effectCodeSignature="function(params)"、effectCodeReturns="{ message: string }"、
    effectCodeSandbox（沙箱可用变量清单）、presetItems（3-6 个预设道具）
+2. 《Schema 注册指引》.md（交给平台 AI 完成内置注册，提取凭证的硬性前提）：
+   schemaName、availableEffects、effectRules、constraints、forbidden、presetItems（可与道具 SOP 同构）
 
-2. 内容创作 SOP（GameContentSop JSON）：
+3. 内容创作 SOP（GameContentSop JSON）：
    { enabled: true, contentTypes: [{ type, slot, label, description, modes, apiGuide }] }
    modes 从 data / inject / extension / fragment 中选；apiGuide 写清你的构建 API
 
-3. 内容创作指南 .md：玩法说明、创作 API、数据结构、资产打包规范、安全约束。
+4. 内容创作指南 .md：玩法说明、创作 API、数据结构、资产打包规范、安全约束。
    这份文档会作为上下文喂给玩家的 AI，请写详细
 
-4. 《任务开发说明》.md（玩家版，7 节）：
+5. 《任务开发说明》.md（玩家版，7 节）：
    ① 游戏简介（玩法+操作）② 你能为这个游戏做什么（任务类型×难度×slot 表格）③ 通用约定
    ④ 游戏方开放的接口（数据字段表+效果表+脚本沙箱）⑤ 让 AI 帮你完成任务的提示词模板
    ⑥ 提交格式与步骤（data/assets/entryPoint + 提交前自检）⑦ 常见问题
    原则：只公开接口与数据格式，不出现任何游戏源码
 
-5. 推荐 Skills 列表（auth 必须有，wallet 建议有，其余按游戏类型选）
+6. 推荐 Skills 列表（auth 必须有，wallet 建议有，其余按游戏类型选）
 
-6. 建议 2-3 个兑换道具
+7. 建议 2-3 个兑换道具
 
-7. 建议 2-3 个种子任务（标题 + 描述 + slot + 报酬 + 审核方式），用于发到任务广场
+8. 建议 2-3 个种子任务（标题 + 描述 + slot + 报酬 + 审核方式），用于发到任务广场
 
 ═══════════════════════════════════════
 【输出格式】
@@ -1208,12 +1310,13 @@ window.AllinONE_ContentLoader.on('<slot>', function(pack){
 1. 可扩展性改造说明（你改了哪些地方、为什么）
 2. 修改后的完整 HTML（标注新增的 AllinONE 集成代码段 A / B / C / D）
 3. 道具 SOP JSON
-4. 内容创作 SOP JSON
-5. 内容创作指南 .md
-6. 《任务开发说明》.md
-7. 推荐的 Skills 列表
-8. 建议的兑换道具配置
-9. 建议的种子任务
+4. 《Schema 注册指引》.md（提取凭证硬性前提，交平台 AI 内置注册）
+5. 内容创作 SOP JSON
+6. 内容创作指南 .md
+7. 《任务开发说明》.md
+8. 推荐的 Skills 列表
+9. 建议的兑换道具配置
+10. 建议的种子任务
 
 ═══════════════════════════════════════
 【参考实现】
@@ -1233,11 +1336,12 @@ window.AllinONE_ContentLoader.on('<slot>', function(pack){
 
 1. 复制上面的提示词，在末尾粘贴你的游戏 HTML
 2. 发给 AI（ChatGPT / Claude / 其他）
-3. AI 输出改造后的 HTML + 两份 SOP JSON + 两份 .md + Skills + 种子任务
-4. HTML 打包成 ZIP 上传发布中心
-5. 「道具 SOP」页签 → JSON 模式 → 粘贴；「内容创作 SOP」页签 → 粘贴 + 开 `enabled`
-6. 「兑换道具」填好 → 一键发布
-7. 发布后去 `/quests` 发种子任务，上传《任务开发说明》.md
+3. AI 输出改造后的 HTML + 两份 SOP JSON + 《Schema 注册指引》 + 两份 .md + Skills + 种子任务
+4. **把《Schema 注册指引》交给平台 AI 完成内置注册**（提取凭证的硬性前提，见 4.4）
+5. HTML 打包成 ZIP 上传发布中心
+6. 「道具 SOP」页签 → JSON 模式 → 粘贴；「内容创作 SOP」页签 → 粘贴 + 开 `enabled`
+7. 「兑换道具」填好 → 一键发布
+8. 发布后去 `/quests` 发种子任务，上传《任务开发说明》.md
 
 ---
 
@@ -1265,7 +1369,7 @@ window.AllinONE_ContentLoader.on('<slot>', function(pack){
 
 ### 代码段 B · 内容 loader
 
-- [ ] 注册了 `window.AllinONE_ContentLoader.on('<slot>', handler)`
+- [ ] 通过 `window.AllinONE_ContentHandlers['<slot>'] = handler` 注册（时序安全），`loader.on()` 仅作兜底
 - [ ] 复用代码段 A 的应用函数，没有重复实现
 - [ ] 内容凭证按次生效，未写入持久化存档
 
@@ -1287,6 +1391,7 @@ window.AllinONE_ContentLoader.on('<slot>', function(pack){
 - [ ] 平台模式懒检测：**掉落时机**动态检测 `__ALLINONE_CONFIG__` / `AllinONE.__GAME_ID__`/`GAME_ID`，非平台环境不掉落（不要只在 init 时检测一次）
 - [ ] 可提取道具带唯一 `id`（harvestId 幂等键）+ `origin: 'gameplay'` 标记；演示/示例道具不带该标记
 - [ ] `ITEM_HARVEST` 的 `schemaName` 与道具 SOP 一致，`effect` 在 `availableEffects` 内
+- [ ] `schemaName` 已通过《Schema 注册指引》完成**平台内置注册**（仅上传道具 SOP 不够，动态注册刷新即丢）
 - [ ] 监听 `ITEM_HARVEST_RESULT`：success 删除游戏内道具（防双花），失败解锁重试（10s 超时兜底）
 - [ ] 监听 `REQUEST_GAME_ITEMS` → 回 `GAME_ITEMS`（只报 `origin='gameplay'` 的道具）
 - [ ] 监听 `ITEM_CONSUMED` → 删除对应道具
@@ -1300,6 +1405,13 @@ window.AllinONE_ContentLoader.on('<slot>', function(pack){
 - [ ] 全程 try/catch，上报失败不影响游戏运行
 - [ ] （活动生效条件）游戏已重新发布 + 运营者已在凭证系统「游戏绑定」为该游戏创建绑定且奖池有余额
 
+### 代码段 F · 合约贡献上报（v3.3，可选）
+
+- [ ] `AllinONE_Contract.report()` 已实现，且独立双击打开 HTML 时上报失败静默（不影响游戏运行）
+- [ ] 只在**状态切换点**上报（单次触发），未放在渲染/游戏循环里
+- [ ] `contractId` 传递方式已明确（关卡参数/说明页/团长下发）
+- [ ] 游戏已重新发布 + 关联合约为 active 状态 + 上报玩家是合约成员
+
 ### 发布中心配置
 
 - [ ] 上传了改造后的 ZIP 包
@@ -1307,6 +1419,7 @@ window.AllinONE_ContentLoader.on('<slot>', function(pack){
 - [ ] Skills 含 `auth` + `wallet`
 - [ ] 配置了 1-3 个兑换道具
 - [ ] **道具 SOP** 已填写（schemaName + aiPrompt + availableEffects）
+- [ ] **《Schema 注册指引》已交平台 AI 完成内置注册**（提取凭证前置条件，schemaName 三处一致）
 - [ ] **内容创作 SOP** 已填且 `enabled: true`，contentTypes 与代码段 B 的 slot 一致
 - [ ] 上传了内容创作指南 .md
 - [ ] 封面与简介已填
@@ -1363,19 +1476,22 @@ window.AllinONE_ContentLoader.on('<slot>', function(pack){
 
 ### 10.3 消息与事件
 
+> 🆕 **B1 防刷（2026-09-22）**：协议引擎已收紧——上行消息的通道匹配**只认 `event.source`**，且 `PROTOCOL:READY` 不再允许凭空注册通道。平台在 `PROTOCOL:INIT.config.params.channelToken` 下发一次性通道令牌，**游戏侧上行消息应携带 `channelToken` 字段**（平台注入 SDK v1.1 已自动透传）。灰度期缺失 token 仅告警放行（存量游戏不受影响）；平台切换强制模式后，缺 token 的上行消息将被丢弃——已发布游戏届时需重新发布。
+
 | 方向 | 事件 | 载荷 |
 |---|---|---|
-| 平台 → 游戏 | `postMessage { type:'PROTOCOL:INIT', gameId }` | gameId 唯一来源（inline/srcDoc 模式） |
+| 平台 → 游戏 | `postMessage { type:'PROTOCOL:INIT', gameId, config.params.channelToken }` | gameId 唯一来源（inline/srcDoc 模式）；🆕 携带通道令牌，游戏侧保存并在上行消息透传 |
 | 平台 → 游戏 | `postMessage { type:'EXTENSION_VOUCHER', voucher }` | UGC 道具工坊下发 |
 | 平台 → 游戏 | `postMessage { type:'CONTENT_PACK_APPLY', content }` | 内容凭证使用 |
 | 平台 → 游戏 | `CustomEvent 'allinone:item-redeemed'` | 兑换码兑换下发 |
 | 内容 loader → 游戏 | `CustomEvent 'allinone:content-pack-applied'` | `{ contentId, type, slot, data, assets, assetBase }` |
-| 🆕 游戏 → 平台 | `postMessage { type:'GAME_EVENT', event:'ITEM_HARVEST', data:{ schemaName, harvestId, itemData:{name,effect,params,description}, quantity, source } }` | 道具提取为平台凭证（见代码段 D） |
-| 🆕 游戏 → 平台 | `postMessage { type:'GAME_EVENT', event:'GAME_COMPLETE' \| 'GAME_WIN' \| 'LEVEL_COMPLETE' \| 'ACHIEVEMENT_UNLOCK' \| 'SCORE_MILESTONE', data:{ score, level, ... } }` | 游戏奖励活动上报：平台按「游戏绑定」配置自动发放 A 币凭证（见 4.7 代码段 E，可选加入） |
+| 🆕 游戏 → 平台 | `postMessage { type:'GAME_EVENT', event:'ITEM_HARVEST', channelToken, data:{ schemaName, harvestId, itemData:{name,effect,params,description}, quantity, source } }` | 道具提取为平台凭证（见代码段 D）；🆕 携带 channelToken |
+| 🆕 游戏 → 平台 | `postMessage { type:'GAME_EVENT', event:'GAME_COMPLETE' \| 'GAME_WIN' \| 'LEVEL_COMPLETE' \| 'ACHIEVEMENT_UNLOCK' \| 'SCORE_MILESTONE', channelToken, data:{ score, level, ... } }` | 游戏奖励活动上报：平台按「游戏绑定」配置自动发放 A 币凭证（见 4.7 代码段 E，可选加入） |
 | 🆕 平台 → 游戏 | `postMessage { type:'PLATFORM_EVENT', event:'ITEM_HARVEST_RESULT', data:{ harvestId, success, voucherName?, message? } }` | 提取结果；success 必须删游戏内道具 |
 | 🆕 平台 → 游戏 | `postMessage { type:'PLATFORM_EVENT', event:'REQUEST_GAME_ITEMS' }` | 平台「游戏道具」面板请求清单（反向提取） |
-| 🆕 游戏 → 平台 | `postMessage { type:'GAME_EVENT', event:'GAME_ITEMS', data:{ items:[{ itemId, schemaName, itemData }] } }` | 回应反向提取（只报 `origin='gameplay'` 的） |
+| 🆕 游戏 → 平台 | `postMessage { type:'GAME_EVENT', event:'GAME_ITEMS', channelToken, data:{ items:[{ itemId, schemaName, itemData }] } }` | 回应反向提取（只报 `origin='gameplay'` 的） |
 | 🆕 平台 → 游戏 | `postMessage { type:'PLATFORM_EVENT', event:'ITEM_CONSUMED', data:{ itemId } }` | 反向提取完成确认 → 删除对应道具 |
+| 🆕 游戏 → 平台 | `postMessage { type:'GAME_EVENT', event:'PROTOCOL_CONTRIBUTE', channelToken, data:{ contractId, amount, note?, questId? } }` | 合约贡献上报：平台附玩家身份转发合约引擎 `__protocol`（见 4.8 代码段 F，可选加入） |
 
 ### 10.4 体积与限制
 
@@ -1391,3 +1507,42 @@ window.AllinONE_ContentLoader.on('<slot>', function(pack){
 提交内容默认扫描并拦截：`eval(`、`new Function`、`import(`、`require(`、`__proto__`、`prototype`、`constructor`、`window.`、`document.`、`parent.`、`top.`、`fetch(`、`XMLHttpRequest`、`WebSocket`、`localStorage`、`sessionStorage`、`cookie`、`alert(` 等。
 
 > ⚠️ 模式 E（注入 MOD）只做**提示**不做拦截——代码会在玩家浏览器里真实运行，由审核流程 + 权限管控兜底。
+
+### 10.6 道具凭证安全边界与协议变更（2026-09-22 防刷改造）
+
+#### 10.6.1 诚实边界（平台与游戏方的共同认知）
+
+纯前端游戏运行在玩家浏览器里，玩家**永远可以**在本地控制台调 `dropHarvestItem()`、`AllinONE.Effects.apply()` 让自己本地变强——这拦不住，也不是防御目标。平台的防御目标是：
+
+> **本地作弊变不成平台资产**：本地伪造的道具/凭证进不了云端账本、上不了市场、影响不了其他玩家的钱包。
+
+#### 10.6.2 凭证铸造与流通的唯一通道（B2/B4 生效后）
+
+云端 `vouchers / voucher_transactions / market_listings / purchases` 四个集合已**摘除公开写**（GET 公开读保留）。云写入唯一入口：
+
+| 端点 | 用途 | 服务端校验 |
+|---|---|---|
+| `POST /__item/mint` | 道具提取铸造（唯一道具铸造口） | JWT 身份 → schema 白名单 → 效果参数范围（如 match3-powerup 的 11 种 effect 与 radius/seconds/count 上限）→ 每日限额（云端计数 10 个/游戏/日）→ harvestId 云端幂等 → HMAC 签名（`integrity.mintedBy='server'`） |
+| `POST /__item/sync` | 凭证/交易记录通用同步 | 结构+大小校验；服务端签名文档只允许流通字段变更；新建道具凭证执行与 mint 同源的校验+限额+幂等 |
+| `POST /__item/update` | 状态迁移（核销/冻结/转移/审核） | 不创建新文档；持有者核对；`reviewStatus` 变更需 admin 角色 |
+| `POST /__item/verify` | 流通前批量校验 | 云端存在性 + 持有者 + 状态 + 审核状态 + 签名 |
+| `POST /__market/list` / `buy` / `unlist` | 市场上架/成交/下架 | 操作者身份取自 JWT（绝不信 body）；上架核对凭证云端存在+持有者+审核状态；成交原子置 sold + 写 purchases 快照 |
+
+**流通校验以云端文档为准**（存在性 + `currentHolderId` + 冻结态），签名仅对 `mintedBy='server'` 的新凭证强制增量校验。市场上架与兑换入口已接入 verify 守卫。
+
+#### 10.6.3 对游戏方的影响
+
+1. **游戏内道具提取**（代码段 D）行为不变：`ITEM_HARVEST` 上报 → `ITEM_HARVEST_RESULT` 回执。区别：铸造在服务端执行，**失败/超时不会回发 success**——游戏侧务必只在 `success === true` 时删除游戏内道具（防双花保护玩家）。
+2. **协议通道令牌（channelToken）**：平台经 `PROTOCOL:INIT` 下发，上行消息透传（平台注入 SDK 自动处理；游戏手写 `postMessage` 的，建议改为经 `window.AllinONE.__CHANNEL_TOKEN__` 透传，或在切换强制模式前完成 SDK 化）。
+3. **道具内容受 schema 参数范围约束**：掉落道具的 effect/params 超出 schema 声明范围（如 `add_time` 秒数 >30）将被服务端拒绝——游戏侧生成道具时请遵守 schema 的 `aiGuide.constraints`。
+
+#### 10.6.4 部署要求（运维）
+
+- 云函数部署前**必须**配置环境变量 `JWT_SECRET`（当前默认值 `allinone-platform-2026` 等于公开了签名密钥；审核后台 JWT 与凭证 mint 签名同源，轮换即全部轮换）。
+- 云函数（`tcb fn deploy gamesApi --force`）与前端构建产物（`dist/static` → hosting）应**同一发布窗口上线**：云函数先行会 403 旧前端的凭证直写（只影响云同步，本地功能不中断）。
+- 渠道令牌强制模式（`ProtocolEngine.ts` 的 `CHANNEL_TOKEN_ENFORCED`）在**存量游戏重新发布完成后**再切换为 `true`。
+
+#### 10.6.5 存量数据说明
+
+- 存量无签名凭证**不迁移**（用户决策）：继续流通，云同步走 `__item/sync`（普通文档不受影响）。
+- 旧本地凭证无法再直写云端（公开写已摘除）——这些凭证仅本机可见，跨浏览器以云端已有文档为准。

@@ -14,8 +14,9 @@ import { voucherService } from '@/voucher-system/services/VoucherService';
 import { voucherDB } from '@/voucher-system';
 import { ItemDataArtwork, extractArtworkFromVoucher } from '@/components/ItemDataArtwork';
 import { useWallet } from '@/hooks/useWallet';
-import { MARKET_COMMISSION_RATE, loadTreasury } from '@/types/marketplace';
+import { loadTreasury } from '@/types/marketplace';
 import type { MarketListing, PlatformTreasury } from '@/types/marketplace';
+import { getRuleValue, ensureRulesReady } from '@/services/platformRulesService';
 import { VoucherStatus, VoucherSourceType } from '@/voucher-system/types';
 import type { Voucher } from '@/voucher-system/types';
 import {
@@ -59,6 +60,16 @@ export default function Marketplace() {
   // 上架弹窗状态
   const [userItemVouchers, setUserItemVouchers] = useState<Voucher[]>([]);
   const [treasury, setTreasury] = useState<PlatformTreasury>(() => loadTreasury());
+
+  // 佣金率读取规则注册中心（初始为兜底值，规则加载完成后刷新展示）
+  const [commissionRate, setCommissionRate] = useState(() => getRuleValue('market.commission_rate'));
+  useEffect(() => {
+    let alive = true;
+    ensureRulesReady().then(() => {
+      if (alive) setCommissionRate(getRuleValue('market.commission_rate'));
+    });
+    return () => { alive = false; };
+  }, []);
 
   const refreshListings = () => {
     refreshWalletData();
@@ -119,7 +130,8 @@ export default function Marketplace() {
   const handleDelist = async (listingId: string) => {
     if (!currentUser) return;
     const uid = currentUser.uid || currentUser.id || '';
-    const result = marketplaceService.delistItem(listingId, uid);
+    // 🆕 B4：delistItem 服务端化后为 async
+    const result = await marketplaceService.delistItem(listingId, uid);
     if (result.success) {
       setSuccess('下架成功，凭证已退还');
       refreshListings();
@@ -269,7 +281,7 @@ export default function Marketplace() {
               <div className="flex items-center gap-2">
                 <span className="text-lg">🏛️</span>
                 <span className="text-sm font-medium text-amber-300">平台金库</span>
-                <span className="text-xs text-slate-500">（{MARKET_COMMISSION_RATE * 100}% 交易佣金累积）</span>
+                <span className="text-xs text-slate-500">（{commissionRate * 100}% 交易佣金累积）</span>
               </div>
               <div className="flex items-center gap-4 text-sm">
                 <div className="flex items-center gap-1.5">
@@ -564,7 +576,7 @@ function ListingCard({
                 ) : (
                   <ShoppingCart className="w-4 h-4" />
                 )}
-                {isPurchasing ? '处理中...' : `立即购买 · 佣金 ${Math.round(MARKET_COMMISSION_RATE * 100)}%`}
+                {isPurchasing ? '处理中...' : `立即购买 · 佣金 ${Math.round(commissionRate * 100)}%`}
               </button>
             )}
           </>
@@ -593,13 +605,14 @@ function ListingModal({
 
   const selectedVoucher = userItemVouchers.find(v => v.id === selectedVoucherId);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setError('');
     if (!selectedVoucherId) { setError('请选择要上架的道具凭证'); return; }
     if (price <= 0) { setError('价格必须大于 0'); return; }
 
     const uid = currentUser?.uid || currentUser?.id || '';
-    const result = marketplaceService.listItem(
+    // 🆕 B4/B5：listItem 服务端化后为 async（含 __item/verify 流通校验 + __market/list 服务端写入）
+    const result = await marketplaceService.listItem(
       selectedVoucherId,
       uid,
       currentUser?.nickname || currentUser?.username || '玩家',
@@ -717,7 +730,7 @@ function ListingModal({
 
             {/* 佣金提示 */}
             <div className="p-2 bg-purple-500/10 border border-purple-500/20 rounded-lg text-xs text-purple-400">
-              平台佣金: {Math.round(MARKET_COMMISSION_RATE * 100)}%，从卖家收入中扣除。
+              平台佣金: {Math.round(commissionRate * 100)}%，从卖家收入中扣除。
               {currency === 'aCoins' && ' A币支付将通过凭证系统完成（大面额匹配 + 找零）。'}
             </div>
 

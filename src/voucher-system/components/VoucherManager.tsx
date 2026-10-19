@@ -101,10 +101,38 @@ export const VoucherManager: React.FC<VoucherManagerProps> = ({
   });
 
   // 加载数据
-  const loadData = useCallback(() => {
+  const loadData = useCallback(async () => {
     try {
       setIsLoading(true);
-      
+
+      // 下行同步（交易闭环最后一环）：先从服务端拉取转移给本人的凭证（合约交割/商店发货），
+      // 否则服务端已到账的道具在浏览器永远不可见
+      try {
+        const { VoucherDatabase } = await import('../storage/VoucherDatabase');
+        await VoucherDatabase.getInstance().pullMyVouchersFromBackend(currentUserId);
+      } catch { /* 下行失败不阻塞本地展示 */ }
+
+      // 拼团合约交割闭环：为交割到账但缺兑换码的道具凭证补挂（与购买流程同源），有新码则重载一次
+      try {
+        const { voucherItemService } = await import('../../services/voucherItemService');
+        const pulled = voucherService.getUserVouchers(currentUserId);
+        const needCode = pulled.filter((v: any) =>
+          v.sourceType === 'item' && v.metadata?.customData?.itemTemplateId && !(v as any).redeemCode
+          && !['redeemed', 'destroyed'].includes(String(v.status))
+        ).slice(0, 20);
+        if (needCode.length > 0) {
+          const results = await Promise.all(
+            needCode.map((v: any) =>
+              voucherItemService.ensureRedeemCodeForVoucher(v, currentUserId, currentUsername).catch(() => undefined)
+            )
+          );
+          if (results.some(Boolean)) {
+            await loadData(); // 补挂成功 → 重载一次让兑换码出现在列表
+            return;
+          }
+        }
+      } catch { /* 补挂失败不阻塞展示 */ }
+
       // 加载我的凭证
       const myList = voucherService.getUserVouchers(currentUserId);
       console.log('[VoucherManager] 我的凭证:', myList.length);

@@ -8,7 +8,14 @@
       "handler": "index.main",
       "installDependency": true,
       "timeout": 15,
-      "memorySize": 256
+      "memorySize": 256,
+      "triggers": [
+        {
+          "name": "contractTick",
+          "type": "timer",
+          "config": "0 */5 * * * * *"
+        }
+      ]
     }
   ]
 }

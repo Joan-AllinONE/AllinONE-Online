@@ -118,6 +118,9 @@ const GameProposalCreateModal: React.FC<GameProposalCreateModalProps> = ({
   const [gameShare, setGameShare] = useState(40);
   const [platformShare, setPlatformShare] = useState(30);
   const [creatorShare, setCreatorShare] = useState(30);
+  // 🆕 创作者归属（creatorShare > 0 时必填）
+  const [creatorId, setCreatorId] = useState('');
+  const [creatorName, setCreatorName] = useState('');
 
   /** 校验铸造提案的供应量，返回错误消息或 null */
   const validateMintSupply = (tpl: ItemVoucherTemplate | undefined, count: number): string | null => {
@@ -194,6 +197,8 @@ const GameProposalCreateModal: React.FC<GameProposalCreateModalProps> = ({
             gameShare: gameShare / 100,
             platformShare: platformShare / 100,
             creatorShare: creatorShare / 100,
+            creatorId: creatorShare > 0 ? creatorId.trim() : undefined,
+            creatorName: creatorShare > 0 ? creatorName.trim() || undefined : undefined,
           }
         : undefined,
     });
@@ -216,8 +221,15 @@ const GameProposalCreateModal: React.FC<GameProposalCreateModalProps> = ({
   const canProceed = step === 1 && title.trim() && description.trim() && reason.trim()
     && (proposalType !== GameProposalType.MINT_ITEM || !!selectedTemplateId)
     && !mintSupplyExhausted;  // 铸造上限耗尽时禁止下一步
+
+  // 🆕 三方分成校验：之和必须为 100%（硬性）；creatorShare > 0 时创作者 ID 必填
+  const revenueSumInvalid = revenueEnabled
+    && gameShare + platformShare + creatorShare !== 100;
+  const creatorRequiredMissing = revenueEnabled && creatorShare > 0 && !creatorId.trim();
   const canSubmit = step === 2 && title.trim()
-    && !mintSupplyExhausted;  // 铸造上限耗尽时禁止提交
+    && !mintSupplyExhausted  // 铸造上限耗尽时禁止提交
+    && !revenueSumInvalid
+    && !creatorRequiredMissing;
 
   const playerTypes = getPlayersByType(VoteStakeholderType.PLAYER_COMMUNITY);
 
@@ -585,8 +597,26 @@ const GameProposalCreateModal: React.FC<GameProposalCreateModalProps> = ({
                               min="0" max="100" className="w-full px-2 py-1.5 rounded border border-slate-600 bg-slate-700 text-white text-sm" />
                           </div>
                         </div>
-                        {gameShare + platformShare + creatorShare !== 100 && (
-                          <p className="text-xs text-amber-400">注意：三方比例之和应为 100%（当前 {gameShare + platformShare + creatorShare}%）</p>
+                        {gameShare + platformShare + creatorShare !== 100 ? (
+                          <p className="text-xs text-red-400">三方比例之和必须为 100%（当前 {gameShare + platformShare + creatorShare}%），未通过前无法提交</p>
+                        ) : (
+                          <p className="text-xs text-slate-500">提案通过后写入该游戏的分成配置，此后每笔道具销售按此比例三方分账</p>
+                        )}
+                        {creatorShare > 0 && (
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <label className="text-xs text-slate-400">创作者 userId <span className="text-red-400">*</span></label>
+                              <input type="text" value={creatorId} onChange={e => setCreatorId(e.target.value)}
+                                placeholder="创作者用户ID（必填）"
+                                className="w-full px-2 py-1.5 rounded border border-slate-600 bg-slate-700 text-white text-sm" />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs text-slate-400">创作者名称（展示用）</label>
+                              <input type="text" value={creatorName} onChange={e => setCreatorName(e.target.value)}
+                                placeholder="创作者昵称"
+                                className="w-full px-2 py-1.5 rounded border border-slate-600 bg-slate-700 text-white text-sm" />
+                            </div>
+                          </div>
                         )}
                       </div>
                     )}

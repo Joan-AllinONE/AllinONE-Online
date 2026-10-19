@@ -12,6 +12,7 @@ import { getPublishedGame, type PublishedGame } from '@/services/publishedGameSe
 import { skillGateway } from '@/skills';
 import { voucherService } from '@/voucher-system';
 import { voucherItemService, type ItemVoucherPurchase } from '@/services/voucherItemService';
+import { itemHarvestService } from '@/services/itemHarvestService';
 import { voucherPaymentService } from '@/services/voucherPaymentService';
 import { redeemCodeService } from '@/services/redeemCodeService';
 import { gameDeveloperService } from '@/services/gameDeveloperService';
@@ -31,7 +32,9 @@ import {
   Copy, CheckCircle, ArrowLeft, Gem, ShoppingCart,
   LayoutGrid, FlaskConical, Sword, Shield, Crown,
   X, Trash2, PackageOpen, Check, Zap, Wine, Tag, Target,
+  ThumbsUp, ThumbsDown,
 } from 'lucide-react';
+import { fetchItemVotes, sendItemVote, type VoteSnapshot } from '@/services/voteService';
 
 interface StoreProduct {
   id: string;
@@ -186,6 +189,51 @@ export default function GameStore() {
   const [showQuestCreate, setShowQuestCreate] = useState(false);
   // 跨游戏兑换：待选择兑换方式的来自其他游戏的道具凭证
   const [exchangeVoucher, setExchangeVoucher] = useState<Voucher | null>(null);
+
+  // ==================== 道具凭证点赞/点倒赞 ====================
+  const [voteData, setVoteData] = useState<VoteSnapshot>({ counts: {}, mine: {} });
+  const [votePending, setVotePending] = useState<Record<string, boolean>>({});
+
+  // 切到道具凭证标签且商品就绪后拉取投票快照（云端聚合 + 我的投票）
+  useEffect(() => {
+    if (activeTab !== 'itemShop' || !gameId || itemTemplates.length === 0) return;
+    let alive = true;
+    fetchItemVotes(gameId).then(snap => {
+      if (alive && snap) setVoteData(snap);
+    });
+    return () => { alive = false; };
+  }, [activeTab, gameId, itemTemplates.length]);
+
+  /**
+   * 投票：点同方向再点一次=取消，点另一方向=切换；乐观更新 + 服务端快照校准
+   */
+  const handleItemVote = useCallback(async (itemId: string, choice: 'up' | 'down') => {
+    if (!gameId || votePending[itemId]) return;
+    const current = voteData.mine[itemId];
+    const next: 'up' | 'down' | 'cancel' = current === choice ? 'cancel' : choice;
+
+    // 乐观更新（失败时以服务端返回快照校准，请求失败保持乐观值可重试）
+    setVoteData(prev => {
+      const c = { ...(prev.counts[itemId] || { up: 0, down: 0 }) };
+      if (current === 'up') c.up = Math.max(0, c.up - 1);
+      if (current === 'down') c.down = Math.max(0, c.down - 1);
+      if (next === 'up') c.up += 1;
+      if (next === 'down') c.down += 1;
+      const counts = { ...prev.counts, [itemId]: c };
+      const mine = { ...prev.mine };
+      if (next === 'cancel') delete mine[itemId];
+      else mine[itemId] = next;
+      return { counts, mine };
+    });
+
+    setVotePending(prev => ({ ...prev, [itemId]: true }));
+    try {
+      const snap = await sendItemVote(gameId, itemId, next);
+      if (snap) setVoteData(snap);
+    } finally {
+      setVotePending(prev => ({ ...prev, [itemId]: false }));
+    }
+  }, [gameId, voteData.mine, votePending]);
 
   useEffect(() => {
     if (!gameId) return;
@@ -487,6 +535,17 @@ export default function GameStore() {
           buyerName: currentUser.username || '玩家',
         });
 
+        // 🆕 GSO store_sale 记账点（2026-10-15）：服务端 revenue_ledger（分钟窗幂等）
+        void gameDeveloperService.reportGsoRevenue({
+          gameId: gameId!,
+          source: 'store_sale',
+          amount: price,
+          buyerId: currentUser.id,
+          buyerName: currentUser.username || '玩家',
+          itemName: product.name,
+          idempotencyKey: `st_${currentUser.id}_${gameId}_${product.id}_${Math.floor(Date.now() / 60000)}`,
+        });
+
         // 如果有找零，创建新凭证还给用户（由开发者账户铸造找零凭证）
         const change = totalSelected - price;
         if (change > 0) {
@@ -527,14 +586,24 @@ export default function GameStore() {
           throw new Error(spendResult.error?.message || '支付失败');
         }
 
-        // 🆕 记录收入到游戏开发者账户
-        await gameDeveloperService.recordPurchaseRevenue({
+        // 🆕 游戏币支付：服务端三方即时分账（gameCoins 为平台通用货币）
+        await gameDeveloperService.settleGameCoinsSplit({
           gameId: gameId!,
-          gameName: game?.name || '未知游戏',
           amount: product.price,
-          itemName: product.name,
           buyerId: currentUser?.id || 'anonymous',
           buyerName: currentUser?.username || '玩家',
+          itemName: product.name,
+        });
+
+        // 🆕 GSO store_sale 记账点（2026-10-15）：服务端 revenue_ledger（分钟窗幂等）
+        void gameDeveloperService.reportGsoRevenue({
+          gameId: gameId!,
+          source: 'store_sale',
+          amount: product.price,
+          buyerId: currentUser?.id || 'anonymous',
+          buyerName: currentUser?.username || '玩家',
+          itemName: product.name,
+          idempotencyKey: `st_${currentUser?.id || 'anonymous'}_${gameId}_${product.id}_${Math.floor(Date.now() / 60000)}`,
         });
       }
 
@@ -665,6 +734,14 @@ export default function GameStore() {
     });
 
     try {
+      // 🆕 B5：兑换前服务端流通校验（云端为准：凭证存在+持有者+未使用+审核状态；
+      // 校验服务不可达时放行——伪造凭证进不了云端）
+      const circ = await itemHarvestService.verifyVoucherForRedeem(voucher.id, currentUser.id);
+      if (!circ.ok) {
+        setPurchaseState({ isPurchasing: false, productId: null, success: false, error: circ.reason });
+        return;
+      }
+
       const result = voucherItemService.redeemItemVoucher({
         userId: currentUser.id,
         userName: currentUser.username || '玩家',
@@ -1298,6 +1375,43 @@ export default function GameStore() {
                             })()
                           )}
                         </div>
+
+                        {/* 点赞/点倒赞（云端跨浏览器聚合，再点一次取消，切换即改投） */}
+                        {(() => {
+                          const vc = voteData.counts[item.id] || { up: 0, down: 0 };
+                          const myVote = voteData.mine[item.id];
+                          const pending = !!votePending[item.id];
+                          return (
+                            <div className="flex items-center gap-2 mb-3">
+                              <button
+                                onClick={() => handleItemVote(item.id, 'up')}
+                                disabled={pending}
+                                title={myVote === 'up' ? '取消点赞' : '点赞'}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                  myVote === 'up'
+                                    ? 'bg-cyan-600 text-white'
+                                    : 'bg-slate-700/60 text-slate-300 hover:bg-slate-700 hover:text-white'
+                                } disabled:opacity-50`}
+                              >
+                                <ThumbsUp className="w-3.5 h-3.5" />
+                                <span>{vc.up}</span>
+                              </button>
+                              <button
+                                onClick={() => handleItemVote(item.id, 'down')}
+                                disabled={pending}
+                                title={myVote === 'down' ? '取消点倒赞' : '点倒赞'}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                  myVote === 'down'
+                                    ? 'bg-red-600 text-white'
+                                    : 'bg-slate-700/60 text-slate-300 hover:bg-slate-700 hover:text-white'
+                                } disabled:opacity-50`}
+                              >
+                                <ThumbsDown className="w-3.5 h-3.5" />
+                                <span>{vc.down}</span>
+                              </button>
+                            </div>
+                          );
+                        })()}
 
                         {/* 支付方式选择 */}
                         <div className="flex items-center gap-2 mb-3 p-2 bg-slate-900/50 rounded-lg">

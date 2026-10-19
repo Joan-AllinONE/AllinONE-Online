@@ -624,18 +624,27 @@ function PropReviewList() {
 
   useEffect(() => { loadItems(); }, [loadItems]);
 
-  const decide = (voucher: Voucher, approved: boolean, note: string) => {
+  const decide = async (voucher: Voucher, approved: boolean, note: string) => {
     setBusyId(voucher.id);
-    const r = itemHarvestService.decideItemReview(voucher.id, approved, note, getReviewSession()?.adminName || 'admin');
-    setBusyId(null);
-    if (r.success) {
-      toast.success(r.message);
-      setRejectTarget(null);
-      setRejectReason('');
-      const fresh = voucherDB.getVoucherById(voucher.id);
-      setVouchers(prev => prev.map(v => (v.id === voucher.id && fresh ? fresh : v)));
-    } else {
-      toast.error(r.message);
+    try {
+      // 🆕 B5：审核裁决走 __item/update（服务端要求 admin 角色），防止玩家 token 自行洗白
+      const session = getReviewSession();
+      const r = await itemHarvestService.decideItemReview(
+        voucher.id, approved, note,
+        session?.adminName || 'admin',
+        session?.token,
+      );
+      if (r.success) {
+        toast.success(r.message);
+        setRejectTarget(null);
+        setRejectReason('');
+        const fresh = voucherDB.getVoucherById(voucher.id);
+        setVouchers(prev => prev.map(v => (v.id === voucher.id && fresh ? fresh : v)));
+      } else {
+        toast.error(r.message);
+      }
+    } finally {
+      setBusyId(null);
     }
   };
 

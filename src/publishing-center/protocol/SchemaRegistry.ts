@@ -1349,6 +1349,86 @@ export class SchemaRegistry {
       },
     });
 
+    // ═══════════════════════════════════════════════════════════════
+    // GUSHI 缅川公盘（翡翠赌石）道具 Schema
+    // 商人随身宝物 + 加工成品折算（提取→凭证→市场交易→兑换回游戏折算玉币）
+    // 内置注册原因：此前仅道具工坊选中游戏时动态注册（内存态），页面刷新即丢，
+    // 导致游戏内 ITEM_HARVEST 提取报「schema 未注册」。
+    // ═══════════════════════════════════════════════════════════════
+    this.registerSchema({
+      name: 'gushi-powerup',
+      version: '1.0.0',
+      description: '缅川公盘（翡翠赌石）道具 — 商人随身宝物与加工成品折算（提取→凭证→市场交易→兑换回游戏闭环）',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '道具/成品名称（如 冰种手镯、粤帮抬价），≤50 字符' },
+          effect: {
+            type: 'string',
+            description: '效果类型：add_coins 补玉币 / flash_plus 补手电 / lucky_cut 提出绿率 / market_up 拉行情 / mine_pass 场口入场券',
+            enum: ['add_coins', 'flash_plus', 'lucky_cut', 'market_up', 'mine_pass'],
+          },
+          params: {
+            type: 'object',
+            description: '效果参数（按 effect 取对应字段）',
+            properties: {
+              bonus: { type: 'number', description: 'add_coins：增加玉币数量（500~50000）', minimum: 500, maximum: 50000 },
+              times: { type: 'number', description: 'flash_plus/mine_pass：次数（1~9）', minimum: 1, maximum: 9 },
+              cuts: { type: 'number', description: 'lucky_cut：持续石头数（1~9）', minimum: 1, maximum: 9 },
+              mult: { type: 'number', description: 'market_up：行情系数（1.1~1.5）', minimum: 1.1, maximum: 1.5 },
+              seconds: { type: 'number', description: 'market_up：冻结秒数（15~600）', minimum: 15, maximum: 600 },
+            },
+          },
+          description: { type: 'string', description: '道具/成品描述（≤200 字符）' },
+        },
+        required: ['name', 'effect'],
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          effect: { type: 'string' },
+          params: { type: 'object' },
+          description: { type: 'string' },
+        },
+      },
+      adapters: {},
+      examples: [
+        {
+          name: '冰种手镯',
+          effect: 'add_coins',
+          params: { bonus: 8000 },
+          description: '取自「冰种翡翠」的冰种手镯，兑换后折算玉币',
+        },
+      ],
+      tags: ['gushi', 'jade', 'gambling-stone'],
+      aiGuide: {
+        prompt: '《缅川公盘》翡翠赌石游戏道具。两类来源：①商人随身宝物（补玉币/补手电/提出绿率/拉行情/场口入场券）；②加工坊成品折算（手镯/玉牌/平安扣等，兑换后按 bonus 折算玉币，估值=成品价值×0.85）。数值必须克制，不得破坏「一刀穷一刀富」的核心随机乐趣。',
+        availableEffects: ['add_coins', 'flash_plus', 'lucky_cut', 'market_up', 'mine_pass'],
+        effectRules: [
+          'add_coins: 直接增加玉币，params.bonus 范围 500~50000，经济兜底类',
+          'flash_plus: 补充强光手电次数，params.times 范围 1~9',
+          'lucky_cut: 接下来购买的石头出绿率 ×1.6，params.cuts 范围 1~9',
+          'market_up: 行情拉升并冻结，params.mult 1.1~1.5、params.seconds 15~600',
+          'mine_pass: 场口入场券，params.times 范围 1~9，购石 1 次后失效',
+        ],
+        constraints: {
+          'add_coins.bonus': { min: 500, max: 50000 },
+          'flash_plus.times': { min: 1, max: 9 },
+          'lucky_cut.cuts': { min: 1, max: 9 },
+          'market_up.mult': { min: 1.1, max: 1.5 },
+          'market_up.seconds': { min: 15, max: 600 },
+          'mine_pass.times': { min: 1, max: 9 },
+        },
+        forbidden: [
+          '禁止直接修改玩家等级、爵位（学徒→玉皇必须靠解玉攒经验晋升；mine_pass 只提供一次性进入资格）',
+          '禁止直接给仓库添加任何种水的玉石（破坏赌石随机体验）',
+          '禁止把行情系数拉到 1.5 以上或 1.0 以下',
+          '禁止一次性发放超过 50000 玉币',
+        ],
+      },
+    });
+
     // 武器 Schema（通用，保留兼容）
     this.registerSchema({
       name: 'weapon',

@@ -9,8 +9,19 @@
  * 诊断:   window.__seedDiag()  查看当前 localStorage 数据
  */
 
+import { isCloudHosting } from '../services/backendSync';
+import { saveVoucherToBackend } from '../services/voucherBackend';
+
 // 模块级日志 — 必须在控制台可见，用于确认脚本已加载
-console.log('🔧 [Seed] 模块已加载 (seedTestData.ts v2)');
+console.log(`🔧 [Seed] 模块已加载 (seedTestData.ts v2) | 环境=${isCloudHosting() ? 'PROD（云端真实数据）' : 'DEV（本地测试环境）'}`);
+
+/** 测试数据标识 tag：所有 seed 铸造的凭证带此 tag，prod 环境云同步时据此拒推，防污染真实库 */
+export const SEED_DATA_TAG = 'seed_test_data';
+
+/** 是否允许自动播种：仅 dev/本地环境（prod 静态托管下绝不自动填测试数据） */
+function autoSeedAllowed(): boolean {
+  return !isCloudHosting();
+}
 
 // ============================================================
 // 公开 API
@@ -355,7 +366,7 @@ function seedPlatformGameStoresForce(): void {
           name: tpl.name,
           description: tpl.description,
           category: 'item',
-          tags: ['item_voucher', tpl.gameId, tpl.itemType],
+          tags: ['item_voucher', tpl.gameId, tpl.itemType, SEED_DATA_TAG],
           issuer: tpl.gameId,
           customData: {
             itemTemplateId: tpl.id,
@@ -377,6 +388,22 @@ function seedPlatformGameStoresForce(): void {
 
   const allVouchers = [...filteredVouchers, ...mintedVouchers];
   localStorage.setItem('allinone_vouchers', JSON.stringify(allVouchers));
+
+  // 根因修复（2026-10-17）：seed 直接写 localStorage 绕过 VoucherDatabase 脏标记 → 服务端池永远空。
+  // 播种后直接推送平台备货凭证到 dev 服务端（platform_pool 免玩家频控，300/分钟足够）。
+  // 铁律：这些凭证带 SEED_DATA_TAG，prod 环境的云同步守卫会拒推，这里 dev 才执行。
+  if (!isCloudHosting() && mintedVouchers.length > 0) {
+    let pushed = 0;
+    for (const v of mintedVouchers) {
+      saveVoucherToBackend('vouchers', v)
+        .then((r: { success?: boolean; error?: string }) => {
+          if (!r || !r.success) console.warn(`[Seed] 备货凭证 ${v.id} 同步失败:`, r?.error);
+        })
+        .catch((e: any) => console.warn(`[Seed] 备货凭证 ${v.id} 同步异常:`, e?.message || e));
+      pushed++;
+    }
+    console.log(`[Seed] 已异步推送 ${pushed} 张平台备货凭证到 dev 服务端`);
+  }
 
   console.log(`[Seed] 平台商店: ${stores.length} 个游戏 | ${platformTemplates.length} 个道具模板 | ${mintedVouchers.length} 张凭证`);
 }
@@ -464,8 +491,14 @@ if (typeof window !== 'undefined') {
     }
   };
 
-  // 立即执行 + 延迟兜底（确保 localStorage 可读写）
-  autoSeed();
-  setTimeout(autoSeed, 100);
-  setTimeout(autoSeed, 1000);
+  // 环境隔离（方案 A）：prod（tcloudbaseapp.com 静态托管）绝不自动播种——
+  // 服务器数据是真实数据，测试数据只存在于本地 dev。
+  if (autoSeedAllowed()) {
+    // 立即执行 + 延迟兜底（确保 localStorage 可读写）
+    autoSeed();
+    setTimeout(autoSeed, 100);
+    setTimeout(autoSeed, 1000);
+  } else {
+    console.warn('🚫 [Seed] 当前为线上环境，已禁用测试数据自动填充（防止污染真实数据）。手动触发 window.__seedAll(true) 需自行承担风险。');
+  }
 }

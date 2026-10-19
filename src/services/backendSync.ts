@@ -15,7 +15,7 @@
  * - 新增后端路由一律走 /api/v1/games/<collection>，绝不新增顶层 /api/v1/<feature>
  */
 
-import { getCurrentUserId } from './authTokenService';
+import { getCurrentUserId, getCurrentUserRole } from './authTokenService';
 
 // 永久云函数后端地址（与 SW 兜底 PRODUCTION_BACKEND_URL 保持一致）
 // ⚠️ 环境隔离铁律（修复 dev 数据泄漏到线上）：
@@ -24,11 +24,17 @@ import { getCurrentUserId } from './authTokenService';
 // 与线上云函数完全隔离。
 const PROD_BACKEND = 'https://allinonegaming-d4gmsmrzz573264f6.service.tcloudbase.com';
 
-function isCloudHosting(): boolean {
+/**
+ * 是否运行在 prod 云端静态托管域名下（云端账本可达且为权威）。
+ * 🆕 导出供 __item/__market 守卫做环境门控：dev/本地环境无云端账本，
+ * verify/市场服务端校验须降级放行，否则阻断正常功能。
+ */
+export function isCloudHosting(): boolean {
   return typeof window !== 'undefined' && /tcloudbaseapp\.com$/.test(window.location.hostname);
 }
 
-const API_BASE = isCloudHosting() ? `${PROD_BACKEND}/api` : '/api';
+/** 后端 API 基址（导出供 __item/__market 等隧道客户端复用，保持同一环境隔离策略） */
+export const API_BASE = isCloudHosting() ? `${PROD_BACKEND}/api` : '/api';
 
 const DEV_TOKEN_PATH = '/v1/games/dev-token';
 
@@ -71,12 +77,22 @@ export const READ_ONLY_COLLECTIONS: ReadonlySet<string> = new Set([
   'users',
   'transactions',
   'inventories',
+  // 🆕 B2 防刷（2026-09-22）：以下集合公开写已被云端摘除（写 403），
+  // 必须经业务隧道写入（__item/sync、__item/purchase、__market/*），
+  // 此处兜底拦截防止未来代码误用直写通道。
+  'vouchers',
+  'voucher_transactions',
+  'market_listings',
+  'purchases',
 ]);
 
 let _backendToken: string | null = null;
+let _backendTokenUserId: string | null = null;
 
 async function getBackendToken(): Promise<string | null> {
-  if (_backendToken) return _backendToken;
+  const uid = getCurrentUserId();
+  // 🆕 缓存绑定 userId：切换账号（player1 → admin）后旧 token 的 role 已失效，必须重新签发
+  if (_backendToken && _backendTokenUserId === uid) return _backendToken;
   try {
     const res = await fetch(`${API_BASE}${DEV_TOKEN_PATH}`, {
       method: 'POST',
@@ -84,18 +100,21 @@ async function getBackendToken(): Promise<string | null> {
       // 🆕 必须携带 userId：本地/云函数 dev-token 路由按 body.userId 签发
       // JWT（云函数缺省回退 'anonymous'，本地严格校验 400）。空 body 曾致
       // 400 → extension_vouchers 401（跨游戏道具列表读取失败）。
-      body: JSON.stringify({ userId: getCurrentUserId() }),
+      // 🆕 携带 role：合约隧道 requireAdmin 依赖 JWT role（'admin'/'platform' 放行）。
+      body: JSON.stringify({ userId: uid, role: getCurrentUserRole() }),
     });
     if (!res.ok) return null;
     const json = await res.json();
     _backendToken = json?.data?.token ?? null;
+    _backendTokenUserId = uid;
     return _backendToken;
   } catch {
     return null;
   }
 }
 
-async function authHeaders(withJson = false): Promise<Record<string, string>> {
+/** 带鉴权头的 fetch headers（导出供 __item/__market 等隧道客户端复用） */
+export async function authHeaders(withJson = false): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};
   if (withJson) headers['Content-Type'] = 'application/json';
   const token = await getBackendToken();

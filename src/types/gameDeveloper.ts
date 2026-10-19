@@ -6,6 +6,27 @@
  * 每日结算：每日 00:00 自动将平台分成从游戏商账户转入 platform_treasury。
  */
 
+/**
+ * 三方分成配置（GameProposal 通过后写入，source 记来源可追溯）
+ * 未设置时账户走 legacy 单极分成（平台抽 revenueSharePercent%，其余游戏方）
+ */
+export interface RevenueSharingConfig {
+  /** 游戏方份额 (0-1) */
+  gameShare: number;
+  /** 平台份额 (0-1) */
+  platformShare: number;
+  /** 创作者份额 (0-1) */
+  creatorShare: number;
+  /** 创作者 userId（creatorShare > 0 时必填） */
+  creatorId?: string;
+  /** 创作者名称（展示用） */
+  creatorName?: string;
+  /** 配置来源：'default' | 'proposal:<提案id>' */
+  source: string;
+  /** 生效时间戳 */
+  effectiveAt: number;
+}
+
 /** 游戏开发者账户 */
 export interface GameDeveloperAccount {
   /** 账户ID, 格式: "game-{gameId}" */
@@ -34,6 +55,15 @@ export interface GameDeveloperAccount {
   
   /** 上次每日结算时间戳 */
   lastDailySettlement: number;
+
+  /** 三方分成配置（GameProposal 通过后写入；未设置走 legacy 单极 revenueSharePercent） */
+  revenueSharing?: RevenueSharingConfig;
+  /** 创作者待结算分成（尚未提取） */
+  creatorOwed?: number;
+  /** 创作者已结算分成累计 */
+  creatorSettled?: number;
+  /** 游戏币（gameCoins）收入累计——封闭货币，不参与 A币三方分成结算 */
+  gameCoinsRevenue?: number;
   
   /** 销售统计 */
   stats: {
@@ -92,6 +122,12 @@ export interface GameDeveloperOverview {
   totalSoldItems: number;
   status: string;
   lastDailySettlement: number;
+  /** 三方分成配置（可选，未设置走 legacy 单极） */
+  revenueSharing?: RevenueSharingConfig;
+  /** 创作者待结算分成 */
+  creatorOwed?: number;
+  /** 创作者已结算分成累计 */
+  creatorSettled?: number;
 }
 
 /** 平台系统账户 ID 常量 */

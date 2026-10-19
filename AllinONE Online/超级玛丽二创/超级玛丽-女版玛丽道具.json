@@ -1,0 +1,8 @@
+{
+  "name": "玛丽变身",
+  "effect": "become_maria",
+  "params": {},
+  "description": "将马里奥变身为女版玛丽：粉色连衣裙 + 马尾辫，并奖励 +50 分。纯外观变身，不改变任何物理属性、控制方式或关卡地形。",
+  "icon": "👧",
+  "effectCode": "function(params) {\n  if (api.getState && api.getState() !== 'play') return { error: true, message: '⚠️ 请先按 Enter 开始游戏再使用道具' };\n  var already = !!(player && player.skin === 'maria');\n  if (api.becomeMaria) api.becomeMaria();\n  else if (player) player.skin = 'maria';\n  api.addScore(50);\n  return { message: (already ? '👧 玛丽再次登场！' : '👧 马里奥变身女版玛丽！') + ' +50 分' };\n}"
+}

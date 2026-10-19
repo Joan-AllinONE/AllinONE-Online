@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/authContext';
-import { platformTreasuryService, type TreasuryReport, type TreasuryTransaction, type RevenueBreakdown, type PlatformVoucherHolding } from '@/services/platformTreasuryService';
+import { platformTreasuryService, type TreasuryReport, type TreasuryTransaction, type RevenueBreakdown, type PlatformVoucherHolding, TREASURY_SOURCE_LABEL } from '@/services/platformTreasuryService';
 import { gameDeveloperService } from '@/services/gameDeveloperService';
 import type { GameDeveloperOverview } from '@/types/gameDeveloper';
 import PlatformGameStoreManager from '@/components/PlatformGameStoreManager';
@@ -191,6 +191,17 @@ function OverviewTab({ report, loading }: { report: TreasuryReport | null; loadi
 // ==================== Tab: 收入明细 ====================
 
 function RevenueTab({ report, loading }: { report: TreasuryReport | null; loading: boolean }) {
+  const [detailTxs, setDetailTxs] = useState<TreasuryTransaction[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    // 与平台数据中心同一数据源（getDetailTransactions），保证三处明细一致
+    platformTreasuryService.getDetailTransactions().then(txs => {
+      if (alive) setDetailTxs(txs);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [report]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -204,6 +215,13 @@ function RevenueTab({ report, loading }: { report: TreasuryReport | null; loadin
   }
 
   const items: { source: string; icon: string; label: string; description: string; color: string }[] = [
+    {
+      source: 'three_way_split',
+      icon: '🎮',
+      label: '游戏币三方分成',
+      description: '道具销售（游戏币支付）按三方比例即时分账的平台份额',
+      color: 'text-sky-400',
+    },
     {
       source: 'p2p_commission',
       icon: '🏪',
@@ -239,6 +257,7 @@ function RevenueTab({ report, loading }: { report: TreasuryReport | null; loadin
       {items.map(item => {
         let amount = 0;
         switch (item.source) {
+          case 'three_way_split': amount = report.cumulative.threeWaySplit; break;
           case 'p2p_commission': amount = report.cumulative.p2pCommission; break;
           case 'proposal_forfeit': amount = report.cumulative.proposalForfeit; break;
           case 'voucher_recycle': amount = report.cumulative.voucherRecycle; break;
@@ -270,6 +289,55 @@ function RevenueTab({ report, loading }: { report: TreasuryReport | null; loadin
       {Object.values(report.cumulative).every(v => v === 0) && (
         <p className="py-10 text-center text-slate-500">暂未产生任何平台收入</p>
       )}
+
+      {/* 🆕 每笔收入明细（与数据中心/交易历史同源） */}
+      <div className="p-4 bg-slate-800/60 rounded-xl border border-slate-700/50">
+        <h4 className="font-semibold text-white mb-3 flex items-center gap-2">
+          <Receipt className="w-4 h-4 text-emerald-400" />
+          最近收入明细（每笔，最近 {detailTxs.length} 条）
+        </h4>
+        {detailTxs.length === 0 ? (
+          <p className="text-sm text-slate-500 py-4 text-center">暂无收入明细</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-500 border-b border-slate-700/50">
+                  <th className="pb-2 pr-4 font-medium">时间</th>
+                  <th className="pb-2 pr-4 font-medium">来源</th>
+                  <th className="pb-2 pr-4 font-medium text-right">金额</th>
+                  <th className="pb-2 font-medium">描述</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detailTxs.map(tx => (
+                  <tr key={tx.id} className="border-b border-slate-700/20 hover:bg-slate-800/40 transition-colors">
+                    <td className="py-2.5 pr-4 text-slate-400 whitespace-nowrap">
+                      {(() => {
+                        const d = new Date(tx.timestamp);
+                        const p = (n: number) => String(n).padStart(2, '0');
+                        return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+                      })()}
+                    </td>
+                    <td className="py-2.5 pr-4">
+                      <span className={`px-1.5 py-0.5 rounded text-xs whitespace-nowrap ${tx.source === 'three_way_split' ? 'bg-sky-500/15 text-sky-300' : 'bg-slate-700 text-slate-300'}`}>
+                        {TREASURY_SOURCE_LABEL[tx.source] || tx.source}
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-4 text-right font-mono font-bold text-green-400 whitespace-nowrap">
+                      +{tx.amount.toLocaleString()}
+                      <span className="ml-1 text-[10px] font-normal text-slate-500">
+                        {tx.currency === 'gameCoins' ? '游戏币' : 'A币'}
+                      </span>
+                    </td>
+                    <td className="py-2.5 text-slate-400 max-w-xs truncate">{tx.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -469,19 +537,16 @@ function HistoryTab({ report, loading }: { report: TreasuryReport | null; loadin
   const [txs, setTxs] = useState<TreasuryTransaction[]>([]);
 
   useEffect(() => {
-    setTxs(platformTreasuryService.getTransactions());
+    let alive = true;
+    // 🆕 与平台数据中心同一数据源（本地 + 服务端 platform_treasury 分账流水合并），
+    // 保证两处明细一致；此前用纯 localStorage 的 getTransactions() 导致对不上。
+    platformTreasuryService.getDetailTransactions().then(txs => {
+      if (alive) setTxs(txs);
+    }).catch(() => {});
+    return () => { alive = false; };
   }, [report]);
 
-  const sourceLabel = (s: string): string => {
-    const map: Record<string, string> = {
-      p2p_commission: 'P2P 佣金',
-      proposal_forfeit: '提案没收',
-      voucher_recycle: '凭证回收',
-      voucher_expire: '凭证过期',
-      platform_collect: '平台手续费',
-    };
-    return map[s] || s;
-  };
+  const sourceLabel = (s: string): string => TREASURY_SOURCE_LABEL[s] || s;
 
   const formatTime = (ts: number) => {
     const d = new Date(ts);

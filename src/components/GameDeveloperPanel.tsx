@@ -56,13 +56,56 @@ export default function GameDeveloperPanel({ gameId, onBack }: Props) {
 
   const handleSettle = async () => {
     if (!account) return;
-    const result = await gameDeveloperService.executeDailySettlement(gameId);
+    // 「立即结算」= 手动强制结算，跳过 24h 日结周期门槛（platformOwed > 0 即结）
+    const result = await gameDeveloperService.executeDailySettlement(gameId, { force: true });
     if (result.settledAccounts > 0) {
       alert(result.message);
     } else {
       alert('当前无待结算的分成');
     }
     setShowSettleConfirm(false);
+    loadData();
+  };
+
+  // 🆕 创作者分成发放：把 creatorOwed 累积的份额转移到创作者（提案配置的 creatorId）
+  const [showCreatorPayConfirm, setShowCreatorPayConfirm] = useState(false);
+  const handlePayCreator = async () => {
+    if (!account?.revenueSharing?.creatorId) return;
+    const amount = account.creatorOwed || 0;
+    if (amount <= 0) {
+      alert('创作者暂无待结算分成');
+      setShowCreatorPayConfirm(false);
+      return;
+    }
+    const result = await gameDeveloperService.withdrawCreatorRevenue({
+      gameId,
+      amount,
+      creatorId: account.revenueSharing.creatorId,
+      creatorName: account.revenueSharing.creatorName || account.revenueSharing.creatorId,
+    });
+    alert(result.message);
+    setShowCreatorPayConfirm(false);
+    loadData();
+  };
+
+  // 🆕 游戏方提现：可提现净额转入发布者个人账户
+  const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
+  const handleWithdraw = async () => {
+    if (!account) return;
+    const amount = availableForWithdraw;
+    if (amount <= 0) {
+      alert('暂无可提现余额');
+      setShowWithdrawConfirm(false);
+      return;
+    }
+    const result = await gameDeveloperService.withdrawRevenue({
+      gameId,
+      amount,
+      toUserId: account.publisherId,
+      toUserName: account.publisherName,
+    });
+    alert(result.message);
+    setShowWithdrawConfirm(false);
     loadData();
   };
 
@@ -94,7 +137,10 @@ export default function GameDeveloperPanel({ gameId, onBack }: Props) {
     );
   }
 
-  const availableForWithdraw = account ? Math.max(0, account.availableBalance - account.platformOwed) : 0;
+  // 可提现 = 总余额 - 平台待结算 - 创作者待结算（creatorOwed 是余额上的留置权）
+  const availableForWithdraw = account
+    ? Math.max(0, account.availableBalance - account.platformOwed - (account.creatorOwed || 0))
+    : 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-purple-900 via-slate-900 to-slate-900">
@@ -163,6 +209,13 @@ export default function GameDeveloperPanel({ gameId, onBack }: Props) {
             suffix="A币"
             color="purple"
           />
+          <StatCard
+            icon={<Coins className="w-5 h-5 text-sky-400" />}
+            label="游戏币收入"
+            value={(account?.gameCoinsRevenue || 0).toLocaleString()}
+            suffix="gameCoins · 即时分账"
+            color="cyan"
+          />
         </div>
 
         {/* 每日结算 & 分成信息 */}
@@ -171,7 +224,7 @@ export default function GameDeveloperPanel({ gameId, onBack }: Props) {
             <Clock className="w-4 h-4 text-purple-400" />
             结算信息
           </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
             <div>
               <span className="text-slate-400">平台分成比例：</span>
               <span className="text-white font-bold">{account?.revenueSharePercent || 10}%</span>
@@ -183,6 +236,11 @@ export default function GameDeveloperPanel({ gameId, onBack }: Props) {
             <div>
               <span className="text-slate-400">上次结算：</span>
               <span className="text-slate-300">{account?.lastDailySettlement ? formatTime(account.lastDailySettlement) : '暂无'}</span>
+            </div>
+            <div>
+              <span className="text-slate-400">游戏币（gameCoins）：</span>
+              <span className="text-sky-300 font-bold">已即时分账</span>
+              <span className="text-slate-500 text-xs ml-1">累计 {(account?.gameCoinsRevenue || 0).toLocaleString()}</span>
             </div>
           </div>
           <div className="mt-4">
@@ -196,8 +254,162 @@ export default function GameDeveloperPanel({ gameId, onBack }: Props) {
             </button>
             <p className="text-xs text-slate-500 mt-2">
               系统会在每日 00:00 自动结算平台分成。此处可手动触发即时结算。
+              本环节仅结算 <span className="text-amber-400/80">A币凭证</span>分成（实物进游戏商账户沉淀为待结算）；
+              <span className="text-sky-300/80">游戏币收入不经过待结算环节</span>——玩家支付时已按分成比例即时入账各方钱包：游戏方→发布者个人钱包、平台→平台金库、创作者→创作者个人钱包。
             </p>
           </div>
+        </div>
+
+        {/* 🆕 三方分成（GameProposal 通过后生效；每笔道具销售按此分账） */}
+        <div className="mb-8 p-5 bg-slate-800/60 rounded-xl border border-amber-700/40">
+          <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-amber-400" />
+            三方分成
+          </h3>
+          {account?.revenueSharing ? (
+            <>
+              <div className="flex h-5 overflow-hidden rounded-full mb-3 max-w-md">
+                <div className="flex items-center justify-center bg-purple-500 text-[10px] text-white"
+                  style={{ width: `${Math.round(account.revenueSharing.gameShare * 100)}%` }}>
+                  游戏 {Math.round(account.revenueSharing.gameShare * 100)}%
+                </div>
+                <div className="flex items-center justify-center bg-pink-500 text-[10px] text-white"
+                  style={{ width: `${Math.round(account.revenueSharing.platformShare * 100)}%` }}>
+                  平台 {Math.round(account.revenueSharing.platformShare * 100)}%
+                </div>
+                {account.revenueSharing.creatorShare > 0 && (
+                  <div className="flex items-center justify-center bg-amber-500 text-[10px] text-white"
+                    style={{ width: `${Math.round(account.revenueSharing.creatorShare * 100)}%` }}>
+                    创作者 {Math.round(account.revenueSharing.creatorShare * 100)}%
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                <div>
+                  <span className="text-slate-400">创作者：</span>
+                  <span className="text-amber-300 font-bold">
+                    {account.revenueSharing.creatorName || account.revenueSharing.creatorId || '未指定（未配置创作者分成）'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400">创作者待领取：</span>
+                  <span className="text-amber-400 font-bold">{(account.creatorOwed || 0).toLocaleString()} A币</span>
+                  <span className="text-slate-500 text-xs ml-1">已领 {(account.creatorSettled || 0).toLocaleString()}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400">来源：</span>
+                  <span className="font-mono text-xs text-slate-300">{account.revenueSharing.source}</span>
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  onClick={() => setShowCreatorPayConfirm(true)}
+                  disabled={(account.creatorOwed || 0) <= 0 || !account.revenueSharing.creatorId}
+                  className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-lg font-medium text-sm transition-colors"
+                >
+                  <Coins className="w-4 h-4" />
+                  发放创作者分成（{(account.creatorOwed || 0).toLocaleString()} A币）
+                </button>
+                <button
+                  onClick={() => setShowWithdrawConfirm(true)}
+                  disabled={availableForWithdraw <= 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-lg font-medium text-sm transition-colors"
+                >
+                  <Wallet className="w-4 h-4" />
+                  游戏方提现（{availableForWithdraw.toLocaleString()} A币）
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                创作者份额发放至提案配置的创作者账户（{account.revenueSharing.creatorId || '未指定'}）；游戏方净额提现至发布者（{account.publisherName}）。凭证均从本游戏商账户（game-{account.gameId}）转移。
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500">
+              该游戏未配置三方分成，走平台默认：平台抽成 {account?.revenueSharePercent || 10}%，其余归游戏方。
+              如需三方分成，发起带收益分配的 GameProposal 并投票通过。
+              <br />
+              <span className="text-xs text-slate-400">
+                说明：本游戏的收入归属方是发布者（{account?.publisherName || account?.publisherId || '未知'}）；
+                「创作者」是提案中显式指定的额外分成对象，不会自动取发布者身份——未配置时显示「未指定」属正常状态。
+              </span>
+            </p>
+          )}
+          {(account?.gameCoinsRevenue || 0) > 0 && (() => {
+            // 从交易记录聚合游戏币分账去向（metadata.credits 由服务端 gamecoins-split 写入）
+            const agg = { game: 0, platform: 0, creator: 0 };
+            const creatorIds = new Set<string>();
+            for (const tx of transactions) {
+              if (tx.currency !== 'gameCoins' || !Array.isArray(tx.metadata?.credits)) continue;
+              for (const c of tx.metadata.credits) {
+                if (c?.role === 'game') agg.game += Number(c.amount) || 0;
+                else if (c?.role === 'platform') agg.platform += Number(c.amount) || 0;
+                else if (c?.role === 'creator') {
+                  agg.creator += Number(c.amount) || 0;
+                  if (c.userId) creatorIds.add(c.userId);
+                }
+              }
+            }
+            return (
+              <div className="mt-3 border-t border-slate-700 pt-3">
+                <p className="text-xs text-sky-300/90">
+                  🎮 游戏币收入累计 {(account!.gameCoinsRevenue || 0).toLocaleString()} gameCoins——购买时已按分成比例【即时分账】至各方服务端钱包，无待结算环节：
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2 text-xs">
+                  <div className="p-2 bg-slate-900/40 rounded border border-slate-700/40">
+                    <div className="text-slate-400">游戏方（发布者 {account?.publisherId || '未知'}）</div>
+                    <div className="text-green-400 font-bold">+{agg.game.toLocaleString()} gameCoins</div>
+                  </div>
+                  <div className="p-2 bg-slate-900/40 rounded border border-slate-700/40">
+                    <div className="text-slate-400">平台（platform_treasury 金库）</div>
+                    <div className="text-blue-400 font-bold">+{agg.platform.toLocaleString()} gameCoins</div>
+                  </div>
+                  <div className="p-2 bg-slate-900/40 rounded border border-slate-700/40">
+                    <div className="text-slate-400">创作者（{creatorIds.size > 0 ? Array.from(creatorIds).join('、') : '未配置'}）</div>
+                    <div className="text-amber-400 font-bold">+{agg.creator.toLocaleString()} gameCoins</div>
+                  </div>
+                </div>
+                {(() => {
+                  const detail = transactions
+                    .filter(t => t.currency === 'gameCoins' && t.metadata?.split)
+                    .slice(0, 10);
+                  if (detail.length === 0) return null;
+                  return (
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-slate-500 text-left border-b border-slate-700/40">
+                            <th className="py-1.5 pr-3 font-normal">时间</th>
+                            <th className="py-1.5 pr-3 font-normal">明细</th>
+                            <th className="py-1.5 pr-3 font-normal text-right">游戏方</th>
+                            <th className="py-1.5 pr-3 font-normal text-right">平台</th>
+                            <th className="py-1.5 font-normal text-right">创作者</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detail.map(tx => {
+                            const sp = tx.metadata?.split || {};
+                            return (
+                              <tr key={tx.id} className="border-b border-slate-800/60">
+                                <td className="py-1.5 pr-3 text-slate-400 whitespace-nowrap">{formatTime(tx.timestamp)}</td>
+                                <td className="py-1.5 pr-3 text-slate-300 max-w-xs truncate">{tx.description}</td>
+                                <td className="py-1.5 pr-3 text-right text-green-400 font-mono">+{Number(sp.gameCut || 0)}</td>
+                                <td className="py-1.5 pr-3 text-right text-blue-400 font-mono">+{Number(sp.platformCut || 0)}</td>
+                                <td className="py-1.5 text-right text-amber-400 font-mono">+{Number(sp.creatorCut || 0)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      <p className="text-[10px] text-slate-500 mt-1">最近 {detail.length} 笔分账明细（每列即该方实际入账 gameCoins）。</p>
+                    </div>
+                  );
+                })()}
+                <p className="text-[10px] text-slate-500 mt-1.5">
+                  口径：最近 {transactions.length} 笔交易聚合。入账在服务端账本（users.gameCoins），浏览器钱包页以对应账号登录即可看到（本地 dev 需后端可达）。
+                </p>
+              </div>
+            );
+          })()}
         </div>
 
         {/* 道具销售统计 */}
@@ -269,6 +481,9 @@ export default function GameDeveloperPanel({ gameId, onBack }: Props) {
                           <span className={tx.type === 'withdrawal' ? 'text-red-400' : 'text-green-400'}>
                             {tx.type === 'withdrawal' ? '-' : '+'}{tx.amount.toLocaleString()}
                           </span>
+                          <span className={`ml-1 text-[10px] font-normal ${tx.currency === 'gameCoins' ? 'text-sky-400' : 'text-amber-400/70'}`}>
+                            {tx.currency === 'gameCoins' ? '游戏币' : 'A币'}
+                          </span>
                         </td>
                         <td className="py-2.5 text-slate-400 max-w-xs truncate">{tx.description}</td>
                       </tr>
@@ -320,6 +535,92 @@ export default function GameDeveloperPanel({ gameId, onBack }: Props) {
                   className="flex-1 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors"
                 >
                   确认结算
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 🆕 创作者分成发放确认弹窗 */}
+      <AnimatePresence>
+        {showCreatorPayConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-slate-800 rounded-xl p-6 max-w-sm w-full mx-4 border border-slate-700"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-white">确认发放创作者分成</h3>
+                <button onClick={() => setShowCreatorPayConfirm(false)} className="text-slate-400 hover:text-white">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-slate-300 text-sm mb-2">
+                将发放 <span className="text-amber-400 font-bold">{(account?.creatorOwed || 0).toLocaleString()} A币</span>
+                至创作者 <span className="text-amber-300">{account?.revenueSharing?.creatorName || account?.revenueSharing?.creatorId}</span>。
+              </p>
+              <p className="text-slate-500 text-xs mb-6">
+                凭证从游戏商账户（game-{account?.gameId}）转移，发放后不可撤销。
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowCreatorPayConfirm(false)}
+                  className="flex-1 py-2 px-4 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium text-sm transition-colors">
+                  取消
+                </button>
+                <button onClick={handlePayCreator}
+                  className="flex-1 py-2 px-4 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium text-sm transition-colors">
+                  确认发放
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 🆕 游戏方提现确认弹窗 */}
+      <AnimatePresence>
+        {showWithdrawConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-slate-800 rounded-xl p-6 max-w-sm w-full mx-4 border border-slate-700"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-white">确认游戏方提现</h3>
+                <button onClick={() => setShowWithdrawConfirm(false)} className="text-slate-400 hover:text-white">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-slate-300 text-sm mb-2">
+                将提现净额 <span className="text-green-400 font-bold">{availableForWithdraw.toLocaleString()} A币</span>
+                至发布者 <span className="text-green-300">{account?.publisherName}</span>。
+              </p>
+              <p className="text-slate-500 text-xs mb-6">
+                净额 = 总余额 − 平台待结算 − 创作者待结算。发放后不可撤销。
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowWithdrawConfirm(false)}
+                  className="flex-1 py-2 px-4 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium text-sm transition-colors">
+                  取消
+                </button>
+                <button onClick={handleWithdraw}
+                  className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium text-sm transition-colors">
+                  确认提现
                 </button>
               </div>
             </motion.div>

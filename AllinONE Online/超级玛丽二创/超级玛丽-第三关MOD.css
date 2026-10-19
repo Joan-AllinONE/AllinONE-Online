@@ -1,0 +1,12 @@
+/* 超级玛丽 第三关 MOD —— 暗色主题补充样式
+ * 本文件为「可选」扩展：MOD 的 JS 已自带等效内联样式，无需本文件也能运行。
+ * 若想用外部 CSS 管理夜色外框，可在 改造6.html 的 <head> 内加：
+ *   <link rel="stylesheet" href="超级玛丽-第三关MOD.css">
+ */
+html, body {
+  background: #05060f !important;   /* 页面底色压到近黑，强化夜景 */
+}
+#game, canvas {
+  box-shadow: 0 0 42px rgba(80, 110, 220, .28);  /* 画布夜光描边 */
+  border-radius: 6px;
+}

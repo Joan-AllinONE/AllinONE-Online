@@ -55,6 +55,14 @@ initCloudBase()
     // 即使 CloudBase 失败也启动队列（它会等待 CloudBase 恢复后重试）
     writeQueue.startProcessor();
     return initializeSkills();
+  })
+  .then(() => {
+    // 🆕 注册提案自动执行监听器（2026-10-09 修复：该方法此前定义了但从未被调用，
+    // 导致提案 PASSED 后 proposal-auto-execute 事件无人接听，
+    // applyRevenueSharingConfig 从未执行 → 三方分成配置从未写入服务端账户）
+    import('./services/voucherItemService').then(({ voucherItemService }) => {
+      voucherItemService.initAutoExecuteListener();
+    });
   });
 
 // 🧩 注册游戏文件 Service Worker：拦截 /api/* 实现后端代理 + 游戏文件离线回放
@@ -86,7 +94,7 @@ if ('serviceWorker' in navigator) {
   // 立即注册（不等待 load），配合 skipWaiting + clients.claim，
   // 让 SW 激活后尽快接管当前页面，缩小首屏 /api 请求命中静态托管 rewrite 的竞态窗口。
   navigator.serviceWorker
-    .register('/gameFileServiceWorker-v17.js')
+    .register('/gameFileServiceWorker-v19.js')
     .then((reg) => {
       console.log('[SW] 游戏文件 Service Worker 已注册:', reg.scope);
       void syncApiConfigToSW();

@@ -212,8 +212,61 @@ export class WalletSkill extends BaseSkill {
     const userId = context.userId || 'anonymous';
     console.log(`[WalletSkill] getBalance(userId=${userId})`);
 
-    // 🔑 先读 localStorage 缓存（adjustBalance 每次都会同步写入）
+    // 🔑 先读 localStorage 缓存（仅作服务端不可达时的回退展示）
     const cachedBalance = readLocalWallet(userId);
+
+    // ============ 主路径：服务端平台钱包隧道（唯一可信账本，与合约托管同源） ============
+    // 修复双账本：此前读路径直读 CloudBase/本地兜底造 1000 币，与合约扣款的
+    // users.gameCoins 服务端账本割裂 → 钱包显示有钱、合约托管报「余额不足」。
+    try {
+      const token = await getToken();
+      if (token) {
+        const resp = await fetch(`${getApiBase()}/__wallet/platform/balance`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (resp.ok) {
+          const json = await resp.json();
+          const b = json?.data?.balance;
+          if (b && json?.data?.exists === true) {
+            const balance: WalletBalance = {
+              gameCoins: Number(b.gameCoins) || 0,
+              instantVouchers: Number(b.instantVouchers) || 0,
+              algorithmVouchers: Number(b.algorithmVouchers) || 0,
+              lastUpdated: b.lastUpdated || Date.now(),
+            };
+            writeLocalWallet(userId, balance);
+            return balance;
+          }
+          if (b && json?.data?.exists === false) {
+            // 服务端无钱包文档 → 通过服务端通道发注册礼（幂等 txId），保持单账本
+            try {
+              const adj = await fetch(`${getApiBase()}/__wallet/platform/adjust`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ delta: 1000, txId: `signup_${userId}`, description: '新钱包注册礼' }),
+              });
+              if (adj.ok) {
+                const ab = (await adj.json())?.data?.balance;
+                if (ab) {
+                  const balance: WalletBalance = {
+                    gameCoins: Number(ab.gameCoins) || 0,
+                    instantVouchers: Number(ab.instantVouchers) || 0,
+                    algorithmVouchers: Number(ab.algorithmVouchers) || 0,
+                    lastUpdated: ab.lastUpdated || Date.now(),
+                  };
+                  writeLocalWallet(userId, balance);
+                  console.log(`[WalletSkill] 服务端发放注册礼 1000 (userId=${userId})`);
+                  return balance;
+                }
+              }
+            } catch { /* 发放失败按 0 处理 */ }
+            return { gameCoins: 0, instantVouchers: 0, algorithmVouchers: 0, lastUpdated: Date.now() };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[WalletSkill] 服务端钱包隧道不可用，回退 CloudBase/本地:', (e && e.message) || e);
+    }
 
     try {
       if (!isCloudBaseReady()) {
@@ -233,7 +286,7 @@ export class WalletSkill extends BaseSkill {
           algorithmVouchers: doc.algorithmVouchers || 0,
           lastUpdated: doc.updatedAt || Date.now(),
         };
-        // 如果 localStorage 缓存更新（adjustBalance 刚扣款但 writeQueue 未处理），优先使用缓存
+        // 服务端隧道不可用时的兼容路径：缓存更新（刚扣款未同步）优先
         if (cachedBalance && cachedBalance.lastUpdated > cloudBalance.lastUpdated) {
           console.log(`[WalletSkill] 使用更新的 localStorage 缓存 (cached=${cachedBalance.gameCoins}, cloud=${cloudBalance.gameCoins})`);
           return cachedBalance;
@@ -242,32 +295,11 @@ export class WalletSkill extends BaseSkill {
         writeLocalWallet(userId, cloudBalance);
         return cloudBalance;
       }
-      // 用户文档不存在，创建初始文档（通过写入队列）
-      const defaultBalance: WalletBalance = {
-        gameCoins: 1000,
-        instantVouchers: 0,
-        algorithmVouchers: 0,
-        lastUpdated: Date.now(),
-      };
-      writeQueue.enqueue({
-        collection: 'users',
-        operation: 'upsert',
-        where: { _openid: userId },
-        data: {
-          _openid: userId,
-          gameCoins: defaultBalance.gameCoins,
-          instantVouchers: 0,
-          algorithmVouchers: 0,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-      });
-      // 如果缓存中有数据（说明 adjustBalance 已经创建过文档并扣款），优先使用缓存
+      // CloudBase 也无文档：不再客户端凭空造 1000 币（假余额根源），回退缓存或 0
       if (cachedBalance) {
         return cachedBalance;
       }
-      writeLocalWallet(userId, defaultBalance);
-      return defaultBalance;
+      return { gameCoins: 0, instantVouchers: 0, algorithmVouchers: 0, lastUpdated: Date.now() };
     } catch {
       // CloudBase SDK 不可用 → 先尝试后端只读同步（跨浏览器），再回退 localStorage
       console.log(`[WalletSkill] CloudBase 不可用，尝试后端只读同步 (userId=${userId})`);
@@ -279,10 +311,8 @@ export class WalletSkill extends BaseSkill {
       if (cachedBalance) {
         return cachedBalance;
       }
-      // 无任何数据，返回默认余额
-      const defaultBalance: WalletBalance = { gameCoins: 1000, instantVouchers: 0, algorithmVouchers: 0, lastUpdated: Date.now() };
-      writeLocalWallet(userId, defaultBalance);
-      return defaultBalance;
+      // 无任何数据：返回 0（服务端为准，不再造本地假余额）
+      return { gameCoins: 0, instantVouchers: 0, algorithmVouchers: 0, lastUpdated: Date.now() };
     }
   }
 
@@ -310,6 +340,28 @@ export class WalletSkill extends BaseSkill {
     context: SkillContext
   ): Promise<WalletTransaction[]> {
     const userId = context.userId;
+    // ============ 主路径：服务端平台钱包隧道（与余额同源，跨浏览器一致） ============
+    try {
+      const token = await getToken();
+      if (token) {
+        const resp = await fetch(`${getApiBase()}/__wallet/platform/transactions?limit=${params.limit || 50}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (resp.ok) {
+          const rows = (await resp.json())?.data?.transactions;
+          if (Array.isArray(rows) && rows.length > 0) {
+            // 服务端流水 balanceAfter 是数字，前端展示层兼容补齐
+            return rows.map((r: any) => ({
+              ...r,
+              id: r.id || r.txId,
+              balanceAfter: typeof r.balanceAfter === 'number'
+                ? { gameCoins: r.balanceAfter, instantVouchers: 0, algorithmVouchers: 0, lastUpdated: r.timestamp }
+                : r.balanceAfter,
+            })) as WalletTransaction[];
+          }
+        }
+      }
+    } catch { /* 回退既有链路 */ }
     try {
       if (!isCloudBaseReady()) {
         // CloudBase SDK 不可用 → 先尝试后端只读同步（跨浏览器），失败再回退本地
@@ -447,6 +499,8 @@ export class WalletSkill extends BaseSkill {
               balanceAfter: { ...balance },
               timestamp: Date.now(),
             });
+            // 通知钱包 UI 刷新（与其他模块的 wallet-updated 事件约定一致）
+            try { window.dispatchEvent(new CustomEvent('wallet-updated', { detail: { userId } })); } catch { /* SSR/测试环境 */ }
             return balance;
           }
         }
@@ -530,6 +584,9 @@ export class WalletSkill extends BaseSkill {
     };
     writeLocalTransaction(userId, tx);
     writeQueue.enqueue({ collection: 'transactions', operation: 'upsert', data: { ...tx, createdAt: tx.timestamp } });
+
+    // 通知钱包 UI 刷新（回退路径同样触发）
+    try { window.dispatchEvent(new CustomEvent('wallet-updated', { detail: { userId } })); } catch { /* SSR/测试环境 */ }
 
     return balance;
   }

@@ -1,0 +1,25 @@
+{
+  "type": "map",
+  "slot": "levels",
+  "name": "莫西沙场口",
+  "description": "帕敢名场，白盐砂脱砂皮，主出冰玻种，棉少裂少，赌性大。",
+  "data": {
+    "id": "moxisha_keng",
+    "name": "莫西沙场口",
+    "icon": "⛰️",
+    "lv": 10,
+    "price": 3000,
+    "green": 0.18,
+    "cap": 58000,
+    "skin": "white",
+    "skinName": "脱砂皮",
+    "desc": "帕敢名场，白盐砂脱砂见底，冰玻种频出，赌性大。",
+    "w": [
+      ["dou", 200],
+      ["nuo", 300],
+      ["bing", 320],
+      ["boli", 172],
+      ["diwang", 8]
+    ]
+  }
+}

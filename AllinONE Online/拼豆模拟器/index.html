@@ -1,0 +1,1643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>豆趣工坊 · 像素熨斗</title>
+<style>
+  :root{
+    --bg1:#fff6f0; --bg2:#eef6ff; --card:#ffffff; --ink:#3a3a4a;
+    --muted:#8a8a9a; --accent:#ff7a59; --accent2:#36c2b4; --line:#ececf2;
+    --shadow:0 8px 24px rgba(80,80,120,.10);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0; height:100%;}
+  body{
+    font-family:"PingFang SC","Microsoft YaHei",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    color:var(--ink);
+    background:linear-gradient(135deg,var(--bg1),var(--bg2));
+    min-height:100%;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  header.app{text-align:center; padding:18px 16px 8px;}
+  header.app h1{
+    margin:0; font-size:26px; letter-spacing:1px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  header.app p{margin:6px 0 0; color:var(--muted); font-size:13px;}
+  .wrap{max-width:1180px; margin:0 auto; padding:0 14px 40px;}
+
+  .card{background:var(--card); border-radius:18px; box-shadow:var(--shadow); padding:14px;}
+
+  .palette{margin:14px 0; display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+  .palette .cur{width:42px; height:42px; border-radius:12px; border:3px solid #fff; box-shadow:0 0 0 2px var(--line); flex:0 0 auto;}
+  .swatch{width:38px; height:38px; border-radius:11px; cursor:pointer; flex:0 0 auto;
+    border:3px solid #fff; box-shadow:0 0 0 1px var(--line); position:relative; transition:transform .08s ease;}
+  .swatch:active{transform:scale(.92);}
+  .swatch.sel{box-shadow:0 0 0 3px var(--accent); transform:scale(1.06);}
+  .swatch.eraser{background:linear-gradient(45deg,#fff 45%,#ffd2d2 45%,#ffd2d2 55%,#fff 55%); display:flex; align-items:center; justify-content:center; font-size:18px; color:#c0392b;}
+
+  .tools{display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; align-items:center;}
+  .grp-label{font-size:12px; color:var(--muted); margin-left:4px;}
+  button.btn{border:none; cursor:pointer; font-size:14px; font-weight:600; color:var(--ink);
+    background:#f3f4fb; padding:10px 14px; border-radius:12px; transition:.12s;
+    display:inline-flex; align-items:center; gap:6px;}
+  button.btn:hover{background:#e9ebf6;}
+  button.btn:active{transform:translateY(1px);}
+  button.btn.primary{background:linear-gradient(90deg,var(--accent),#ff9a7d); color:#fff;}
+  button.btn.teal{background:linear-gradient(90deg,var(--accent2),#5fd6c8); color:#fff;}
+  button.btn.on{outline:3px solid var(--accent2); background:#e8f7f4;}
+  select.sel{border:1px solid var(--line); background:#fafbff; border-radius:12px; padding:9px 12px; font-size:14px; color:var(--ink); font-weight:600;}
+  input.name{border:1px solid var(--line); background:#fafbff; border-radius:12px; padding:9px 12px; font-size:14px; color:var(--ink); width:140px;}
+
+  .content{display:flex; gap:16px; align-items:flex-start; margin-top:8px;}
+  .canvas-col{flex:1 1 auto; min-width:0;}
+  .sidebar{flex:0 0 330px; display:flex; flex-direction:column; gap:16px;}
+
+  .canvas-area{display:flex; flex-direction:column; align-items:center;}
+  .canvas-wrap{width:100%; display:flex; justify-content:center; padding:10px; position:relative;
+    background:repeating-conic-gradient(#f7f8fc 0% 25%, #eef0f7 0% 50%) 50%/22px 22px; border-radius:16px;}
+  canvas#board{border-radius:10px; background:#fff; box-shadow:0 6px 18px rgba(60,60,100,.12);
+    touch-action:none; cursor:crosshair; max-width:100%;}
+  .canvas-meta{margin-top:10px; color:var(--muted); font-size:13px; text-align:center;}
+  .canvas-meta b{color:var(--ink);}
+  .hint{font-size:12px; color:var(--muted); margin-top:6px; line-height:1.6;}
+
+  .iron-overlay{position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(255,255,255,.66); border-radius:16px; z-index:5; overflow:hidden;}
+  .iron-overlay.show{display:flex;}
+  .iron-anim{position:relative; width:86%; height:96px;}
+  .iron-emoji{position:absolute; top:6px; left:0; font-size:42px; filter:drop-shadow(0 4px 6px rgba(0,0,0,.2)); animation:ironMove 2s ease-in-out infinite;}
+  @keyframes ironMove{0%{left:-8%; transform:rotate(-10deg);}50%{left:92%; transform:rotate(10deg);}100%{left:-8%; transform:rotate(-10deg);}}
+  .smoke{position:absolute; bottom:34px; width:14px; height:14px; border-radius:50%; background:rgba(170,175,185,.7); animation:rise 1.2s ease-in infinite;}
+  .smoke.b{animation-delay:.4s; left:30%;} .smoke.c{animation-delay:.8s; left:60%;}
+  @keyframes rise{0%{transform:translateY(0) scale(1); opacity:.7;}100%{transform:translateY(-46px) scale(1.8); opacity:0;}}
+  .iron-tip{position:absolute; bottom:4px; width:100%; text-align:center; font-weight:700; color:var(--accent);}
+
+  .ch-hud{display:none; flex-direction:column; gap:6px; width:100%; margin-top:10px;
+    background:#fff7f3; border:1px solid #ffd9cc; border-radius:12px; padding:10px 12px;}
+  .ch-row{display:flex; justify-content:space-between; font-size:13px; align-items:center;}
+  .ch-row b{color:var(--accent);}
+  .ch-bar{height:10px; background:#ffe6dc; border-radius:6px; overflow:hidden;}
+  .ch-fill{height:100%; width:0%; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .25s;}
+
+  .sec-title{font-size:15px; font-weight:700; margin:0 0 12px; display:flex; align-items:center; gap:8px;}
+  .sec-title .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);}
+  .preset-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
+  .preset{border:1px solid var(--line); border-radius:14px; padding:8px; text-align:center; background:#fff; display:flex; flex-direction:column; align-items:center; gap:6px; position:relative;}
+  .preset canvas{width:100%; height:auto; image-rendering:pixelated; border-radius:8px; background:#fff;}
+  .preset .pname{font-size:13px; font-weight:600;}
+  .preset .pbtns{display:flex; gap:4px; width:100%;}
+  .preset .pbtns button{flex:1; font-size:11px; padding:6px 0; border-radius:9px; border:none; cursor:pointer; font-weight:600;}
+  .pbtn-trace{background:#fff0ea; color:var(--accent);}
+  .pbtn-fill{background:#e8f7f4; color:var(--accent2);}
+  .pbtn-ch{background:#fff7d6; color:#c79a00;}
+  .badge{position:absolute; top:-8px; right:-6px; background:#ffd23f; color:#7a5b00; font-size:11px; font-weight:700; padding:2px 7px; border-radius:20px; box-shadow:0 2px 6px rgba(0,0,0,.15);}
+  .pbtn-fill.locked{background:#f0f0f4; color:#b5b5c0; cursor:not-allowed; position:relative;}
+  .pbtn-fill.locked::after{content:'🔒'; position:absolute; top:-7px; right:-4px; font-size:11px;}
+  .fill-chip{margin-left:auto; font-size:11px; font-weight:600; padding:2px 9px; border-radius:20px; background:#fdecec; color:#d6453f;}
+  .fill-chip.has{background:#e8f7f4; color:var(--accent2);}
+
+  .fav-list{display:flex; flex-direction:column; gap:10px;}
+  .fav-empty{color:var(--muted); font-size:13px; text-align:center; padding:18px 6px;}
+  .fav{display:flex; gap:10px; align-items:center; border:1px solid var(--line); border-radius:14px; padding:8px; background:#fff;}
+  .fav img{width:62px; height:62px; border-radius:10px; background:#fff; image-rendering:pixelated; flex:0 0 auto; border:1px solid var(--line);}
+  .fav .finfo{flex:1; min-width:0;}
+  .fav .fname{font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .fav .fdate{font-size:11px; color:var(--muted); margin-top:2px;}
+  .fav .fbtns{display:flex; flex-direction:column; gap:5px;}
+  .fav .fbtns button{font-size:11px; padding:5px 9px; border-radius:8px; border:none; cursor:pointer; font-weight:600;}
+  .fload{background:#eef0fb; color:#5560d6;} .fdel{background:#ffeaea; color:#d6453f;}
+  .fharvest{background:#fff3e0; color:#e67e22;}
+  .fharvest.minted{background:#e8f7f4; color:var(--accent2); cursor:default;}
+  .fharvest:disabled{opacity:.85;}
+
+  .modal{position:fixed; inset:0; background:rgba(40,40,55,.5); display:none; align-items:center; justify-content:center; z-index:60; padding:20px;}
+  .modal.show{display:flex;}
+  .modal-card{background:#fff; border-radius:20px; padding:24px; max-width:340px; width:100%; text-align:center; box-shadow:0 20px 50px rgba(0,0,0,.25);}
+  .modal-card h2{margin:0 0 10px; font-size:22px;}
+  .modal-card .stars{font-size:40px; color:#ffd23f; letter-spacing:4px; margin:6px 0;}
+  .modal-card p{color:var(--muted); font-size:14px; margin:8px 0 18px;}
+  .modal-btns{display:flex; gap:10px; justify-content:center;}
+
+  .toast{position:fixed; left:50%; bottom:28px; transform:translateX(-50%) translateY(20px);
+    background:rgba(40,40,55,.92); color:#fff; padding:11px 18px; border-radius:30px; font-size:14px;
+    opacity:0; pointer-events:none; transition:.25s; z-index:80; max-width:90vw; text-align:center;}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+  @media (max-width:820px){
+    .content{flex-direction:column;}
+    .sidebar{flex:1 1 auto; width:100%;}
+    header.app h1{font-size:22px;}
+    .palette{justify-content:center;}
+    input.name{width:100%;}
+    .grp-label{width:100%; margin:2px 0;}
+  }
+</style>
+</head>
+<body>
+<header class="app">
+  <h1>🧸 豆趣工坊 · 像素熨斗</h1>
+  <p>夹豆摆放 → 一键熨烫定型 → 展示收藏 ｜ 支持手机触屏</p>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="palette" id="palette"><div class="cur" id="curColor"></div></div>
+
+    <div class="tools">
+      <select class="sel" id="gridSize" title="网格大小">
+        <option value="13">网格 13×13（小）</option>
+        <option value="21" selected>网格 21×21（中）</option>
+        <option value="29">网格 29×29（大）</option>
+        <option value="43">网格 43×43（高清）</option>
+        <option value="59">网格 59×59（超清）</option>
+      </select>
+      <button class="btn" id="undoBtn">↶ 撤销</button>
+      <button class="btn" id="redoBtn">↷ 重做</button>
+      <button class="btn" id="clearBtn">🧹 清空</button>
+      <button class="btn" id="ghostBtn">👁 参考</button>
+      <button class="btn teal" id="imgBtn" title="导入精度由上方「网格大小」决定（13/21/29 简单，43/59 高清）">🖼 上传图片</button>
+      <input type="file" id="imgInput" accept="image/*" hidden>
+    </div>
+
+    <div class="tools">
+      <span class="grp-label">工具</span>
+      <button class="btn tool-btn on" data-tool="pen">✏️ 画笔</button>
+      <button class="btn tool-btn" data-tool="eye">💉 吸管</button>
+      <span class="grp-label">对称</span>
+      <button class="btn sym-btn on" data-sym="none">关</button>
+      <button class="btn sym-btn" data-sym="h">水平</button>
+      <button class="btn sym-btn" data-sym="v">垂直</button>
+      <button class="btn sym-btn" data-sym="center">中心</button>
+      <span class="grp-label">熨烫效果</span>
+      <button class="btn eff-btn on" data-eff="glossy">光面</button>
+      <button class="btn eff-btn" data-eff="towel">毛巾</button>
+      <button class="btn eff-btn" data-eff="corduroy">灯芯绒</button>
+      <button class="btn eff-btn" data-eff="frosted">磨砂</button>
+      <button class="btn primary" id="ironBtn">🔥 熨烫定型</button>
+    </div>
+
+    <div class="tools">
+      <input class="name" id="workName" placeholder="作品名称" maxlength="20">
+      <button class="btn primary" id="saveBtn">💾 收藏（需先熨烫）</button>
+      <button class="btn" id="exportBtn">⬇ 导出PNG</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="canvas-col">
+      <div class="card canvas-area">
+        <div class="canvas-wrap">
+          <canvas id="board"></canvas>
+          <div class="iron-overlay" id="ironOverlay">
+            <div class="iron-anim">
+              <div class="iron-emoji">🪨</div>
+              <div class="smoke a"></div><div class="smoke b"></div><div class="smoke c"></div>
+              <div class="iron-tip">熨烫定型中…</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ch-hud" id="chHud">
+          <div class="ch-row"><span>挑战：<b id="chName"></b></span><span>⏱ <b id="chTimer">00:00</b></span><span>⭐ <b id="chStarPrev">—</b></span></div>
+          <div class="ch-bar"><div class="ch-fill" id="chFill"></div></div>
+          <button class="btn" id="chExit" style="align-self:flex-end">退出挑战</button>
+        </div>
+
+        <div class="canvas-meta">
+          当前颜色：<b id="curName">红</b> ｜ 网格 <b id="dimLabel">21×21</b> ｜ 已用拼豆 <b id="countLabel">0</b> 颗
+          <span id="ironState"></span>
+        </div>
+        <div class="hint">操作：单击/拖拽填色 · 右键或长按擦除 · 吸管取色 · 对称减少重复劳动 · 上传图片的像素精度由上方「网格大小」决定（选 13/21/29 更简单、选 43/59 更贴近原图），生成后出现在「我的导入图片」中，可像预设一样选 临摹/填充/挑战（不会直接铺满画布） · 完成后点「🔥熨烫定型」生成成品，再收藏/导出。</div>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="card">
+        <div class="sec-title"><span class="dot"></span>预设图纸（临摹 / 挑战）<span id="fillChip" class="fill-chip">🔒 填充需道具</span></div>
+        <div class="preset-grid" id="presetGrid"></div>
+      </div>
+      <div class="card" id="extCard" style="display:none">
+        <div class="sec-title"><span class="dot" style="background:#8b5cf6"></span>社区图纸（扩展）
+          <select id="extPatternSelect" class="sel" style="margin-left:auto; font-size:11px; padding:2px 6px; max-width:130px" title="社区图纸快速选择"></select>
+        </div>
+        <div class="preset-grid" id="extPatternGrid"></div>
+      </div>
+      <div class="card">
+        <div class="sec-title"><span class="dot" style="background:var(--accent2)"></span>我的导入图片<span id="fillChip2" class="fill-chip">🔒 填充需道具</span></div>
+        <div class="preset-grid" id="importGrid"></div>
+      </div>
+      <div class="card">
+        <div class="sec-title"><span class="dot" style="background:var(--accent2)"></span>我的收藏</div>
+        <div class="fav-list" id="favList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="resultModal">
+  <div class="modal-card">
+    <h2>🎉 挑战完成！</h2>
+    <div class="stars" id="resultStars">★★★</div>
+    <p id="resultInfo"></p>
+    <div class="modal-btns">
+      <button class="btn primary" id="resultAgain">再玩一次</button>
+      <button class="btn" id="resultClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="confirmModal">
+  <div class="modal-card">
+    <h2 id="confirmTitle">请确认</h2>
+    <p id="confirmMsg"></p>
+    <div class="modal-btns">
+      <button class="btn primary" id="confirmOk">确定</button>
+      <button class="btn" id="confirmCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+(function(){
+  /* ---------- palette ---------- */
+  const PALETTE = [
+    {key:'R', name:'红',   hex:'#e63946'}, {key:'O', name:'橙',   hex:'#ff8c1a'},
+    {key:'Y', name:'黄',   hex:'#ffd23f'}, {key:'G', name:'绿',   hex:'#2a9d4a'},
+    {key:'B', name:'蓝',   hex:'#2d6cdf'}, {key:'C', name:'青',   hex:'#18c5c5'},
+    {key:'P', name:'粉',   hex:'#ff8fb3'}, {key:'M', name:'紫',   hex:'#9b5de5'},
+    {key:'N', name:'棕',   hex:'#8b5a2b'}, {key:'S', name:'肤',   hex:'#ffcba4'},
+    {key:'L', name:'浅蓝', hex:'#8ed1fc'}, {key:'W', name:'白',   hex:'#ffffff'},
+    {key:'A', name:'灰',   hex:'#b0b6bc'}, {key:'D', name:'深灰', hex:'#4a4a4a'},
+    {key:'K', name:'黑',   hex:'#1a1a1a'}, {key:'E', name:'橡皮', hex:null}
+  ];
+  const keyToHex = {}; PALETTE.forEach(p=>keyToHex[p.key]=p.hex);
+  const hexToName = {}; PALETTE.forEach(p=>{ if(p.hex) hexToName[p.hex]=p.name; });
+
+  /* ---------- presets ---------- */
+  const PRESETS = {
+    heart: { name:'爱心', rows:[
+      '..RRR...RRR..','.RRRRR.RRRRR.','RRRRRRRRRRRRR','RRRRRRRRRRRRR','RRRRRRRRRRRRR',
+      '.RRRRRRRRRRR.','..RRRRRRRRR..','...RRRRRRR...','....RRRRR....','.....RRR.....','......R......']},
+    smile: { name:'笑脸', rows:[
+      '.....YYY.....','...YYYYYYY...','..YYYYYYYYY..','.YYYYYYYYYYY.','.YYKYYYYKYYY.',
+      '.YYYYYYYYYYY.','.YYYYYYYYYYY.','.YYYKKKYYYY..','.YYYYYYYYYYY.','..YYYYYYYYY..','...YYYYYYY...','.....YYY.....']},
+    flower: { name:'小花', rows:[
+      '......PPP......','.....PPPPP.....','....PPPPPPP....','...PPPPPPPPP...','..PPPOOOOPPP...',
+      '..PPPOOOOPPP...','..PPPPOOOOPPPP.','PPPPPOOOOOPPPPP','..PPPPOOOOPPPP.','..PPPOOOOPPP...',
+      '..PPPGGGGPP....','...PGGGGGP.....','....PGGGP......','....GGGGG......','.....GGG.......']}
+  };
+  function parsePattern(rows){
+    const g = rows.map(r=>r.split('').map(ch=> ch==='.'?null:(keyToHex[ch]||null)));
+    return { rows:g.length, cols:g[0].length, grid:g };
+  }
+  function countFilled(g){ let n=0; for(const row of g) for(const v of row) if(v) n++; return n; }
+
+  /* ---------- state ---------- */
+  let cols=21, rows=21;
+  let grid = makeEmpty(cols,rows);
+  let currentColor = '#e63946';
+  let strokeColor = null;
+  let ghostGrid = null, ghostOn = false;
+  let ironed = false, ironEffect = 'glossy';
+  let tool = 'pen';            // 'pen' | 'eye'
+  let symMode = 'none';        // 'none'|'h'|'v'|'center'
+  let history=[], histIndex=-1, beforeStroke=null;
+  let painting=false, lastCell=null, longPressTimer=null;
+  let challenge = {active:false, started:false, startTime:0, timerId:null, name:'', key:'', target:null, targetCells:0};
+  let pulseVal=0.28, pulseDir=1, pulseRAF=null;
+  let customColors=[];        // 运行时解锁的自定义颜色（UGC 道具 unlock_color 注入）
+  let fillCharges=0;          // 一键填充券剩余次数（填充模式需道具激活；0 时锁定）
+  const FAV_KEY='beadFavorites', DRAFT_KEY='beadDraft', CH_KEY='beadChallenges', IMPORT_KEY='beadImports', FILL_KEY='beadFillCharges';
+  let importedPatterns=[];
+
+  function makeEmpty(c,r){ return Array.from({length:r},()=>Array.from({length:c},()=>null)); }
+  function cloneGrid(g){ return g.map(row=>row.slice()); }
+
+  /* ---------- color helpers ---------- */
+  function hexToRgb(h){h=h.replace('#','');return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+  function rgbToHex(r,g,b){const t=v=>('0'+Math.max(0,Math.min(255,Math.round(v))).toString(16)).slice(-2);return '#'+t(r)+t(g)+t(b);}
+  function lighten(h,a){const[r,g,b]=hexToRgb(h);return rgbToHex(r+(255-r)*a,g+(255-g)*a,b+(255-b)*a);}
+  function darken(h,a){const[r,g,b]=hexToRgb(h);return rgbToHex(r*(1-a),g*(1-a),b*(1-a));}
+
+  /* ---------- canvas / sprites ---------- */
+  const canvas=document.getElementById('board'), ctx=canvas.getContext('2d');
+  let cell=22, dpr=Math.max(1, window.devicePixelRatio||1), sprites={};
+
+  function roundRect(c,x,y,w,h,r){
+    c.beginPath(); c.moveTo(x+r,y);
+    c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r);
+    c.arcTo(x,y+h,x,y,r);     c.arcTo(x,y,x+w,y,r);
+    c.closePath();
+  }
+  function makeBead(hex, s, ironed, effect){
+    const cv=document.createElement('canvas'); cv.width=s; cv.height=s;
+    const c=cv.getContext('2d');
+    const cx=s/2, cy=s/2, r=s*0.42;
+    if(!hex){
+      c.beginPath(); c.arc(cx,cy,r*0.82,0,Math.PI*2); c.fillStyle='#e4e8ee'; c.fill();
+      c.lineWidth=1; c.strokeStyle='#cfd6df'; c.stroke(); return cv;
+    }
+    if(!ironed){
+      const light=lighten(hex,0.4), dark=darken(hex,0.28);
+      const g=c.createRadialGradient(cx-r*0.3,cy-r*0.3,r*0.1,cx,cy,r);
+      g.addColorStop(0,light); g.addColorStop(0.62,hex); g.addColorStop(1,dark);
+      c.beginPath(); c.arc(cx,cy,r,0,Math.PI*2); c.fillStyle=g; c.fill();
+      c.lineWidth=Math.max(1,s*0.045); c.strokeStyle=dark; c.stroke();
+      c.beginPath(); c.arc(cx-r*0.32,cy-r*0.34,r*0.22,0,Math.PI*2); c.fillStyle='rgba(255,255,255,0.55)'; c.fill();
+      return cv;
+    }
+    // ironed fused tile
+    const pad=s*0.06, x=pad, y=pad, w=s-2*pad, h=s-2*pad, rad=s*0.16;
+    const light=lighten(hex,0.26), dark=darken(hex,0.22);
+    const g=c.createLinearGradient(0,0,0,s);
+    g.addColorStop(0,light); g.addColorStop(0.5,hex); g.addColorStop(1,dark);
+    roundRect(c,x,y,w,h,rad); c.fillStyle=g; c.fill();
+    if(effect==='glossy'){
+      const hg=c.createLinearGradient(0,y,0,y+h*0.6);
+      hg.addColorStop(0,'rgba(255,255,255,0.55)'); hg.addColorStop(1,'rgba(255,255,255,0)');
+      roundRect(c,x,y,w,h*0.6,rad); c.fillStyle=hg; c.fill();
+      c.beginPath(); c.arc(x+w*0.3,y+h*0.3,w*0.08,0,Math.PI*2); c.fillStyle='rgba(255,255,255,0.85)'; c.fill();
+    } else if(effect==='corduroy'){
+      c.save(); roundRect(c,x,y,w,h,rad); c.clip();
+      const step=Math.max(2,s*0.22);
+      c.strokeStyle='rgba(0,0,0,0.10)'; c.lineWidth=Math.max(1,s*0.05);
+      for(let i=x;i<=x+w;i+=step){ c.beginPath(); c.moveTo(i,y); c.lineTo(i,y+h); c.stroke(); }
+      c.strokeStyle='rgba(255,255,255,0.20)'; c.lineWidth=Math.max(1,s*0.03);
+      for(let i=x+s*0.1;i<=x+w;i+=step){ c.beginPath(); c.moveTo(i,y); c.lineTo(i,y+h); c.stroke(); }
+      c.restore();
+    } else if(effect==='frosted'){
+      c.save(); roundRect(c,x,y,w,h,rad); c.clip();
+      c.fillStyle='rgba(255,255,255,0.16)';
+      for(let i=0;i<10;i++){ c.beginPath(); c.arc(x+Math.random()*w,y+Math.random()*h,Math.max(0.5,s*0.03),0,Math.PI*2); c.fill(); }
+      c.fillStyle='rgba(0,0,0,0.08)';
+      for(let i=0;i<8;i++){ c.beginPath(); c.arc(x+Math.random()*w,y+Math.random()*h,Math.max(0.5,s*0.03),0,Math.PI*2); c.fill(); }
+      c.restore();
+    }
+    c.lineWidth=Math.max(1,s*0.04); c.strokeStyle=darken(hex,0.3); roundRect(c,x,y,w,h,rad); c.stroke();
+    return cv;
+  }
+  function buildSprites(cs){
+    sprites={}; const s=Math.ceil(cs);
+    sprites['__empty']=makeBead(null,s,ironed,ironEffect);
+    PALETTE.concat(customColors).forEach(p=>{ if(p.hex) sprites[p.hex]=makeBead(p.hex,s,ironed,ironEffect); });
+  }
+
+  function layout(){
+    const wrap=canvas.parentElement;
+    const avail=wrap.clientWidth-20;
+    let cs=Math.floor(avail/cols); cs=Math.min(cs,30); cs=Math.max(cs,6); cell=cs;
+    const W=cell*cols, H=cell*rows;
+    canvas.style.width=W+'px'; canvas.style.height=H+'px';
+    canvas.width=Math.round(W*dpr); canvas.height=Math.round(H*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    buildSprites(cell); render();
+  }
+  function renderTo(context, cs, cCount, rCount, srcGrid, gGrid, gOn, gA){
+    gA = (gA==null)?0.22:gA;
+    const W=cs*cCount, H=cs*rCount;
+    context.clearRect(0,0,W,H); context.fillStyle='#ffffff'; context.fillRect(0,0,W,H);
+    for(let r=0;r<rCount;r++) for(let c=0;c<cCount;c++){
+      const x=c*cs, y=r*cs;
+      if(gOn && gGrid && gGrid[r] && gGrid[r][c]){
+        const gh=gGrid[r][c];
+        context.globalAlpha=gA;
+        if(cs < 11){
+          // 小格子（高清导入图）改用平铺色块，保证颜色提示清晰可辨
+          const pad=Math.max(0.4, cs*0.07);
+          roundRect(context, x+pad, y+pad, cs-2*pad, cs-2*pad, Math.max(1, cs*0.18));
+          context.fillStyle=gh; context.fill();
+          context.lineWidth=Math.max(0.5, cs*0.04); context.strokeStyle=darken(gh,0.25); context.stroke();
+        } else {
+          const sp=sprites[gh]||sprites['__empty']; if(sp) context.drawImage(sp,x,y);
+        }
+        context.globalAlpha=1;
+      }
+      const hex=srcGrid[r][c];
+      const sp=hex?(sprites[hex]||sprites['__empty']):sprites['__empty'];
+      if(sp) context.drawImage(sp,x,y);
+    }
+  }
+  function render(){
+    const gA=(challenge.active && ghostOn && !ironed)?pulseVal:0.36;
+    renderTo(ctx, cell, cols, rows, grid, ghostGrid, ghostOn && !ironed, gA);
+    updateCount();
+    if(challenge.active) updateChallengeHUD();
+  }
+  function updateCount(){
+    let n=0; for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) if(grid[r][c]) n++;
+    document.getElementById('countLabel').textContent=n;
+    document.getElementById('dimLabel').textContent=cols+'×'+rows;
+    document.getElementById('ironState').innerHTML = ironed
+      ? ' ｜ <b style="color:var(--accent2)">已熨烫·'+effectName(ironEffect)+'</b>' : '';
+  }
+  function effectName(e){ return ({glossy:'光面',towel:'毛巾',corduroy:'灯芯绒',frosted:'磨砂'})[e]||e; }
+
+  /* ---------- painting ---------- */
+  function getCell(e){
+    const rect=canvas.getBoundingClientRect();
+    const c=Math.floor((e.clientX-rect.left)/rect.width*cols);
+    const r=Math.floor((e.clientY-rect.top)/rect.height*rows);
+    if(c<0||c>=cols||r<0||r>=rows) return null; return {c,r};
+  }
+  function applySym(c,r,color){
+    const pts=[[c,r]];
+    if(symMode==='h'||symMode==='center') pts.push([cols-1-c,r]);
+    if(symMode==='v'||symMode==='center') pts.push([c,rows-1-r]);
+    if(symMode==='center') pts.push([cols-1-c,rows-1-r]);
+    pts.forEach(([cc,rr])=>{ if(cc>=0&&cc<cols&&rr>=0&&rr<rows) grid[rr][cc]=color; });
+  }
+  function paintCell(c,r){ applySym(c,r,strokeColor); }
+  function lineFill(a,b){
+    let x0=a.c,y0=a.r,x1=b.c,y1=b.r;
+    const dx=Math.abs(x1-x0), dy=Math.abs(y1-y0), sx=x0<x1?1:-1, sy=y0<y1?1:-1;
+    let err=dx-dy;
+    while(true){ paintCell(x0,y0); if(x0===x1&&y0===y1) break; const e2=2*err;
+      if(e2>-dy){err-=dy;x0+=sx;} if(e2<dx){err+=dx;y0+=sy;} }
+  }
+
+  function onDown(e){
+    const cl=getCell(e); if(!cl) return;
+    e.preventDefault();
+    try{ canvas.setPointerCapture(e.pointerId); }catch(_){}
+    if(tool==='eye'){
+      const h=grid[cl.r][cl.c];
+      if(h){ setCurrentColor(h); setTool('pen'); toast('已吸取颜色：'+hexToName[h]); }
+      else toast('此处没有可吸取的颜色');
+      return;
+    }
+    painting=true; beforeStroke=cloneGrid(grid);
+    if(ironed){ ironed=false; buildSprites(cell); render(); toast('画布已修改，请重新熨烫'); }
+    strokeColor = (e.button===2) ? null : currentColor;
+    paintCell(cl.c,cl.r); lastCell=cl; render();
+    longPressTimer=setTimeout(()=>{ strokeColor=null; paintCell(cl.c,cl.r); lastCell=cl; render(); }, 480);
+    if(challenge.active && !challenge.started){ challenge.started=true; challenge.startTime=Date.now(); startChallengeTimer(); startPulse(); }
+  }
+  function onMove(e){
+    if(!painting) return;
+    const cl=getCell(e); if(!cl) return; e.preventDefault();
+    if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; }
+    if(lastCell && (cl.c!==lastCell.c||cl.r!==lastCell.r)) lineFill(lastCell,cl);
+    else if(!lastCell) paintCell(cl.c,cl.r);
+    lastCell=cl; render();
+  }
+  function onUp(e){
+    if(!painting) return; painting=false; lastCell=null;
+    if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; }
+    commitStroke();
+  }
+  canvas.addEventListener('pointerdown', onDown);
+  canvas.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  canvas.addEventListener('pointercancel', onUp);
+  canvas.addEventListener('contextmenu', e=>e.preventDefault());
+
+  /* ---------- history ---------- */
+  function snapshot(){ return JSON.stringify(grid); }
+  function resetHistory(){ history=[snapshot()]; histIndex=0; }
+  function commitStroke(){
+    if(!beforeStroke) return;
+    if(beforeStroke!==snapshot()){
+      history=history.slice(0,histIndex+1); history.push(snapshot()); histIndex=history.length-1;
+      if(history.length>60){ history.shift(); histIndex--; }
+    }
+    beforeStroke=null; saveDraft();
+    if(challenge.active && challenge.started && gridExact(challenge.target)) finishChallenge();
+  }
+  function undo(){ if(histIndex>0){ histIndex--; grid=JSON.parse(history[histIndex]); unIron(); render(); saveDraft(); } else toast('没有可撤销的操作'); }
+  function redo(){ if(histIndex<history.length-1){ histIndex++; grid=JSON.parse(history[histIndex]); unIron(); render(); saveDraft(); } else toast('没有可重做的操作'); }
+  function unIron(){ if(ironed){ ironed=false; buildSprites(cell); toast('已撤销，需重新熨烫'); } }
+
+  /* ---------- palette UI ---------- */
+  const paletteEl=document.getElementById('palette');
+  const curColorEl=document.getElementById('curColor'), curNameEl=document.getElementById('curName');
+  function buildPalette(){
+    paletteEl.innerHTML=''; paletteEl.appendChild(curColorEl);
+    PALETTE.concat(customColors).forEach(p=>{
+      const sw=document.createElement('div');
+      sw.className='swatch'+(p.hex===currentColor?' sel':'')+(p.key==='E'?' eraser':'');
+      sw.dataset.hex = p.hex||'eraser';
+      if(p.key!=='E') sw.style.background=p.hex; else sw.textContent='⌫';
+      sw.title=p.name;
+      sw.addEventListener('click',()=>setCurrentColor(p.hex));
+      paletteEl.appendChild(sw);
+    });
+    refreshSwatchSel();
+  }
+  function refreshSwatchSel(){
+    document.querySelectorAll('.swatch').forEach(s=>s.classList.remove('sel'));
+    const key = currentColor||'eraser';
+    const el=paletteEl.querySelector('.swatch[data-hex="'+CSS.escape(key)+'"]');
+    if(el) el.classList.add('sel');
+    curColorEl.style.background = currentColor || 'repeating-conic-gradient(#fff 0% 25%,#ffd2d2 0% 50%) 50%/12px 12px';
+    curNameEl.textContent = hexToName[currentColor]||'橡皮';
+  }
+  function setCurrentColor(hex){ currentColor=hex; setTool('pen'); refreshSwatchSel(); }
+  function addCustomColor(hex,name){
+    if(!hex || hex[0]!=='#') return {message:'颜色无效'};
+    const key='C'+customColors.length;
+    const nm=name||('自定义'+(customColors.length+1));
+    customColors.push({key:key,name:nm,hex:hex});
+    keyToHex[key]=hex; if(hex) hexToName[hex]=nm;
+    buildPalette(); buildSprites(cell); render();
+    return {message:'🎨 已解锁新颜色：'+nm};
+  }
+
+  /* ---------- tool / sym / effect UI ---------- */
+  function setTool(t){ tool=t; document.querySelectorAll('.tool-btn').forEach(b=>b.classList.toggle('on', b.dataset.tool===t)); }
+  document.querySelectorAll('.tool-btn').forEach(b=> b.onclick=()=>setTool(b.dataset.tool));
+  document.querySelectorAll('.sym-btn').forEach(b=> b.onclick=()=>{ symMode=b.dataset.sym; document.querySelectorAll('.sym-btn').forEach(x=>x.classList.toggle('on',x===b)); });
+  document.querySelectorAll('.eff-btn').forEach(b=> b.onclick=()=>{
+    ironEffect=b.dataset.eff; document.querySelectorAll('.eff-btn').forEach(x=>x.classList.toggle('on',x===b));
+    if(ironed){ buildSprites(cell); render(); }
+  });
+
+  /* ---------- presets UI ---------- */
+  const presetGrid=document.getElementById('presetGrid');
+  const importGrid=document.getElementById('importGrid');
+  function drawPatternTo(cv,data,maxW){
+    const cs=Math.max(2,Math.floor(maxW/data.cols));
+    cv.width=data.cols*cs; cv.height=data.rows*cs;
+    const c=cv.getContext('2d'); c.clearRect(0,0,cv.width,cv.height);
+    c.fillStyle='#fff'; c.fillRect(0,0,cv.width,cv.height);
+    for(let r=0;r<data.rows;r++)for(let cc=0;cc<data.cols;cc++){ const h=data.grid[r][cc]; if(!h)continue;
+      c.beginPath(); c.arc(cc*cs+cs/2,r*cs+cs/2,cs*0.45,0,Math.PI*2); c.fillStyle=h; c.fill(); }
+  }
+  function mkPBtn(cls,txt){ const b=document.createElement('button'); b.className=cls; b.textContent=txt; return b; }
+
+  function buildPresets(){
+    presetGrid.innerHTML='';
+    const rec=getChallenges();
+    Object.keys(PRESETS).forEach(k=>{
+      const data=parsePattern(PRESETS[k].rows);
+      const card=document.createElement('div'); card.className='preset';
+      const cv=document.createElement('canvas'); drawPatternTo(cv,data,92);
+      const nm=document.createElement('div'); nm.className='pname'; nm.textContent=PRESETS[k].name;
+      const btns=document.createElement('div'); btns.className='pbtns';
+      const bTrace=mkPBtn('pbtn-trace','临摹'), bFill=mkPBtn('pbtn-fill','填充'), bCh=mkPBtn('pbtn-ch','挑战');
+      bTrace.onclick=()=>loadPreset(data,true);
+      bFill.onclick=()=>loadPreset(data,false);
+      bCh.onclick=()=>loadChallenge(data,k);
+      btns.append(bTrace,bFill,bCh); card.append(cv,nm,btns);
+      if(rec[k]){ const b=document.createElement('div'); b.className='badge'; b.textContent='⭐'+rec[k]; card.appendChild(b); }
+      presetGrid.appendChild(card);
+    });
+    refreshFillUI();
+  }
+
+  function buildImports(){
+    importGrid.innerHTML='';
+    if(!importedPatterns.length){
+      const e=document.createElement('div'); e.className='fav-empty';
+      e.textContent='导入图片后会出现在这里，可像预设图纸一样选择 临摹 / 填充 / 挑战。';
+      importGrid.appendChild(e); return;
+    }
+    const rec=getChallenges();
+    importedPatterns.forEach(pat=>{
+      const card=document.createElement('div'); card.className='preset';
+      const cv=document.createElement('canvas'); drawPatternTo(cv,pat,92);
+      const nm=document.createElement('div'); nm.className='pname'; nm.textContent=pat.name;
+      const btns=document.createElement('div'); btns.className='pbtns';
+      const bTrace=mkPBtn('pbtn-trace','临摹'), bFill=mkPBtn('pbtn-fill','填充'), bCh=mkPBtn('pbtn-ch','挑战');
+      bTrace.onclick=()=>loadPreset(pat,true);
+      bFill.onclick=()=>loadPreset(pat,false);
+      bCh.onclick=()=>loadChallenge(pat,pat.id);
+      btns.append(bTrace,bFill,bCh); card.append(cv,nm,btns);
+      const del=document.createElement('div'); del.className='badge';
+      del.style.background='#ff6b6b'; del.style.color='#fff'; del.style.cursor='pointer'; del.style.left='-6px'; del.style.right='auto';
+      del.textContent='×'; del.title='删除此导入';
+      del.onclick=()=>{ importedPatterns=importedPatterns.filter(x=>x.id!==pat.id); setImports(importedPatterns); buildImports(); };
+      card.appendChild(del);
+      if(rec[pat.id]){ const b=document.createElement('div'); b.className='badge'; b.textContent='⭐'+rec[pat.id]; card.appendChild(b); }
+      importGrid.appendChild(card);
+    });
+    refreshFillUI();
+  }
+
+  /* ---------- 外部图纸（任务广场 / 内容工坊，扩展 slot: levels）---------- */
+  let extPatterns=[];          // 平台合并进来的社区图纸
+  function buildExtPatterns(){
+    const gridEl=document.getElementById('extPatternGrid');
+    const cardEl=document.getElementById('extCard');
+    const selEl=document.getElementById('extPatternSelect');
+    if(!gridEl||!cardEl||!selEl) return;
+    gridEl.innerHTML=''; selEl.innerHTML='';
+    if(!extPatterns.length){ cardEl.style.display='none'; return; }
+    cardEl.style.display='';
+    const rec=getChallenges();
+    const ph=document.createElement('option'); ph.value='-1'; ph.textContent='选择图纸…'; selEl.appendChild(ph);
+    extPatterns.forEach((pat,i)=>{
+      const card=document.createElement('div'); card.className='preset';
+      const cv=document.createElement('canvas'); drawPatternTo(cv,pat,92);
+      const nm=document.createElement('div'); nm.className='pname'; nm.textContent=pat.name||('图纸'+(i+1));
+      const btns=document.createElement('div'); btns.className='pbtns';
+      const bTrace=mkPBtn('pbtn-trace','临摹'), bFill=mkPBtn('pbtn-fill','填充'), bCh=mkPBtn('pbtn-ch','挑战');
+      bTrace.onclick=()=>loadPattern(pat,'trace');
+      bFill.onclick=()=>loadPattern(pat,'fill');
+      bCh.onclick=()=>loadPattern(pat,'challenge');
+      btns.append(bTrace,bFill,bCh); card.append(cv,nm,btns);
+      if(pat._submissionId){ const b=document.createElement('div'); b.className='badge';
+        b.style.background='#8b5cf6'; b.style.color='#fff'; b.textContent='EXT'; b.title='社区扩展图纸'; card.appendChild(b); }
+      if(rec[pat.key]){ const b2=document.createElement('div'); b2.className='badge'; b2.textContent='⭐'+rec[pat.key]; card.appendChild(b2); }
+      gridEl.appendChild(card);
+      const op=document.createElement('option'); op.value=String(i); op.textContent=pat.name||('图纸'+(i+1)); selEl.appendChild(op);
+    });
+    selEl.onchange=()=>{ const i=parseInt(selEl.value,10); if(i>=0 && extPatterns[i]) loadPattern(extPatterns[i],'trace'); selEl.value='-1'; };
+    refreshFillUI();
+  }
+  /* 扩展图纸可能使用调色板以外的颜色：动态注册为自定义色，保证正常渲染 */
+  function ensurePatternColors(g){
+    const known={}; PALETTE.concat(customColors).forEach(p=>{ if(p.hex) known[p.hex]=1; });
+    let added=0;
+    for(const row of g) for(const h of row){ if(!h||known[h]) continue;
+      known[h]=1; customColors.push({key:'X'+customColors.length, name:'扩展色'+(customColors.length+1), hex:h}); added++; }
+    if(added){ buildPalette(); buildSprites(cell); }
+    return added;
+  }
+  /* 内容应用入口：由平台扩展加载器 / 内容 loader 调用 */
+  function loadPattern(data, mode, sessionOnly){
+    if(!data||!data.grid||!data.grid.length){ toast('图纸数据无效'); return {message:'图纸数据无效'}; }
+    ensurePatternColors(data.grid);
+    const key = data.key || (data._submissionId ? ('ext_'+data._submissionId+'_'+(data.id||'')) : ('ext_'+(data.id||Date.now())));
+    const d = {rows:data.rows, cols:data.cols, grid:data.grid, name:data.name||'社区图纸', id:data.id||key, key:key};
+    let msg='';
+    if(mode==='fill'){
+      if(fillCharges<=0){ msg='🔒 一键填充需使用道具【填充券】，请先领取/兑换后再试'; toast(msg); return {message:msg}; }
+      suppressDraft=!!sessionOnly; loadPreset(d,false); suppressDraft=false;
+      msg='已填充图纸：'+d.name;
+    } else if(mode==='challenge'){
+      suppressDraft=!!sessionOnly; loadChallenge(d,key); suppressDraft=false;
+      msg='🏆 挑战开始：'+d.name;
+    } else {
+      suppressDraft=!!sessionOnly; loadPreset(d,true); suppressDraft=false;
+      msg='已进入临摹：'+d.name;
+    }
+    toast(msg);
+    return {message:msg};
+  }
+
+  /* ---------- loading presets / challenges ---------- */
+  function loadPreset(data, trace){
+    // 一键填充为付费道具功能：未持有「填充券」时锁定，临摹模式不受影响
+    if(!trace && fillCharges<=0){
+      toast('🔒 一键填充需使用道具【填充券】，请先领取/兑换后再试');
+      return;
+    }
+    exitChallenge();
+    if(!trace){ fillCharges--; setFillCharges(); refreshFillUI(); }
+    setGridSize(data.cols,data.rows,false);
+    grid = trace ? makeEmpty(data.cols,data.rows) : cloneGrid(data.grid);
+    ghostGrid = trace ? cloneGrid(data.grid) : null; ghostOn = trace;
+    document.getElementById('ghostBtn').classList.toggle('on',ghostOn);
+    resetHistory(); render(); saveDraft();
+    toast(trace?'已进入临摹模式，半透明参考图已显示':'已填充预设图案（消耗 1 张填充券）');
+  }
+  let lastChallenge={key:'', name:''};
+  function loadChallenge(data,key){
+    setGridSize(data.cols,data.rows,false);
+    grid=makeEmpty(data.cols,data.rows);
+    ghostGrid=cloneGrid(data.grid); ghostOn=true; ironed=false;
+    lastChallenge={key:key, name:data.name};
+    challenge={active:true, started:false, startTime:0, timerId:null, name:data.name, key:key, target:cloneGrid(data.grid), targetCells:countFilled(data.grid)};
+    resetHistory(); render(); saveDraft();
+    document.getElementById('chHud').style.display='flex';
+    document.getElementById('chName').textContent=data.name;
+    updateChallengeHUD(); toast('挑战开始！把对应颜色的豆子拖到闪烁提示格上');
+  }
+  function exitChallenge(){
+    if(challenge.timerId){ clearInterval(challenge.timerId); challenge.timerId=null; }
+    if(pulseRAF){ cancelAnimationFrame(pulseRAF); pulseRAF=null; }
+    challenge={active:false,started:false,startTime:0,timerId:null,name:'',key:'',target:null,targetCells:0};
+    ghostOn=false; ghostGrid=null; document.getElementById('ghostBtn').classList.remove('on');
+    const hud=document.getElementById('chHud'); if(hud) hud.style.display='none';
+  }
+  function startChallengeTimer(){
+    challenge.timerId=setInterval(()=>{ if(challenge.active) updateChallengeHUD(); }, 250);
+  }
+  function startPulse(){
+    if(pulseRAF) return;
+    const loop=()=>{
+      pulseVal += pulseDir*0.02;
+      if(pulseVal>0.5){pulseVal=0.5;pulseDir=-1;} if(pulseVal<0.22){pulseVal=0.22;pulseDir=1;}
+      if(challenge.active){ render(); pulseRAF=requestAnimationFrame(loop); } else pulseRAF=null;
+    };
+    pulseRAF=requestAnimationFrame(loop);
+  }
+  function gridExact(t){
+    if(!t||t.length!==rows||t[0].length!==cols) return false;
+    for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) if(grid[r][c]!==t[r][c]) return false;
+    return true;
+  }
+  function updateChallengeHUD(){
+    if(!challenge.active) return;
+    let exact=0; const total=cols*rows;
+    for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) if(grid[r][c]===challenge.target[r][c]) exact++;
+    const pct=Math.round(exact/total*100);
+    document.getElementById('chFill').style.width=pct+'%';
+    const t=challenge.started?(Date.now()-challenge.startTime)/1000:0;
+    document.getElementById('chTimer').textContent=fmtTime(t);
+    const tc=challenge.targetCells||1;
+    document.getElementById('chStarPrev').textContent = t<=tc*0.6?'★★★':(t<=tc*1.4?'★★☆':'★☆☆');
+  }
+  function fmtTime(s){ const m=Math.floor(s/60), ss=Math.floor(s%60); return (m<10?'0':'')+m+':'+(ss<10?'0':'')+ss; }
+
+  function finishChallenge(){
+    const t=(Date.now()-challenge.startTime)/1000;
+    const tc=challenge.targetCells||1, key=challenge.key, name=challenge.name;
+    const stars = t<=tc*0.6?3 : t<=tc*1.4?2 : 1;
+    const rec=getChallenges();
+    if(!rec[key]||stars>rec[key]){ rec[key]=stars; setChallenges(rec); buildPresets(); }
+    exitChallenge();
+    startIroning(()=>{}, true);
+    showResult(stars,t,name);
+  }
+  function showResult(stars,t,name){
+    document.getElementById('resultStars').textContent='★★★☆☆☆'.slice(3-stars,6-stars);
+    document.getElementById('resultInfo').textContent='图纸：'+name+' ｜ 用时 '+fmtTime(t)+' ｜ 获得 '+stars+' 星';
+    document.getElementById('resultModal').classList.add('show');
+  }
+  document.getElementById('resultClose').onclick=()=>document.getElementById('resultModal').classList.remove('show');
+  document.getElementById('resultAgain').onclick=()=>{
+    document.getElementById('resultModal').classList.remove('show');
+    const k=lastChallenge.key;
+    if(PRESETS[k]) loadChallenge(parsePattern(PRESETS[k].rows),k);
+    else { const im=importedPatterns.find(x=>x.id===k); if(im) loadChallenge(im,k); }
+  };
+
+  /* ---------- sandbox-safe confirm ----------
+     平台 iframe sandbox 未授予 allow-modals 时，原生 confirm()/alert() 被浏览器静默忽略
+     （confirm 恒返回 false，导致换网格/清空永远被拒）。统一改用 DOM 弹窗，任何环境可用。 */
+  let confirmResolve=null;
+  function askConfirm(msg, title, okText, cancelText){
+    return new Promise(res=>{
+      confirmResolve=res;
+      document.getElementById('confirmTitle').textContent=title||'请确认';
+      document.getElementById('confirmMsg').textContent=msg||'';
+      document.getElementById('confirmOk').textContent=okText||'确定';
+      document.getElementById('confirmCancel').textContent=cancelText||'取消';
+      document.getElementById('confirmModal').classList.add('show');
+    });
+  }
+  function settleConfirm(v){
+    const m=document.getElementById('confirmModal');
+    if(!m.classList.contains('show')) return;
+    m.classList.remove('show');
+    if(confirmResolve){ confirmResolve(v); confirmResolve=null; }
+  }
+  document.getElementById('confirmOk').onclick=()=>settleConfirm(true);
+  document.getElementById('confirmCancel').onclick=()=>settleConfirm(false);
+  document.getElementById('confirmModal').addEventListener('click',e=>{ if(e.target.id==='confirmModal') settleConfirm(false); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape') settleConfirm(false); });
+
+  /* ---------- grid size ---------- */
+  const gridSizeSel=document.getElementById('gridSize');
+  function setGridSize(c,r,keepHistory){
+    exitChallenge();
+    cols=c; rows=r; grid=makeEmpty(c,r);
+    ghostGrid=null; ghostOn=false; ironed=false;
+    document.getElementById('ghostBtn').classList.remove('on');
+    if(!keepHistory) resetHistory();
+    layout();
+  }
+  gridSizeSel.addEventListener('change',async ()=>{
+    const n=parseInt(gridSizeSel.value,10);
+    if(hasContent()){
+      const ok=await askConfirm('更换网格大小会清空当前画布，确定继续？','更换网格大小','清空并更换','取消');
+      if(!ok){ gridSizeSel.value=String(cols); return; }
+    }
+    setGridSize(n,n,false); saveDraft();
+  });
+  function hasContent(){ for(let r=0;r<rows;r++)for(let c=0;c<cols;c++) if(grid[r][c]) return true; return false; }
+
+  /* ---------- tools buttons ---------- */
+  document.getElementById('undoBtn').onclick=undo;
+  document.getElementById('redoBtn').onclick=redo;
+  document.getElementById('clearBtn').onclick=async ()=>{
+    if(hasContent() && !(await askConfirm('确定清空当前画布？','清空画布','清空','取消'))) return;
+    exitChallenge(); grid=makeEmpty(cols,rows); ironed=false; ghostGrid=null; ghostOn=false;
+    document.getElementById('ghostBtn').classList.remove('on');
+    resetHistory(); render(); saveDraft();
+  };
+  document.getElementById('ghostBtn').onclick=()=>{
+    if(!ghostGrid){ toast('请先选择预设的「临摹」或「挑战」模式'); return; }
+    ghostOn=!ghostOn; document.getElementById('ghostBtn').classList.toggle('on',ghostOn); render();
+  };
+  document.getElementById('chExit').onclick=()=>{ exitChallenge(); render(); toast('已退出挑战'); };
+
+  /* ---------- ironing ---------- */
+  function coverage(){ let n=0; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++) if(grid[r][c]) n++; return n/(cols*rows); }
+  function startIroning(done, force){
+    if(!force && coverage()<0.8){ toast('需覆盖画布 80% 以上才能熨烫定型'); return false; }
+    const ov=document.getElementById('ironOverlay'); ov.classList.add('show');
+    setTimeout(()=>{
+      ov.classList.remove('show');
+      ironed=true; buildSprites(cell); render();
+      toast('熨烫完成，成品已定型 ✨（'+effectName(ironEffect)+'）');
+      if(done) done();
+    }, 2200);
+    return true;
+  }
+  document.getElementById('ironBtn').onclick=()=>{ if(!startIroning(null,false)) return; };
+
+  /* ---------- image upload ---------- */
+  const imgInput=document.getElementById('imgInput');
+  document.getElementById('imgBtn').onclick=()=>imgInput.click();
+  imgInput.onchange=(e)=>{
+    const file=e.target.files&&e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=()=>{ const img=new Image();
+      img.onload=()=>{
+        // 导入精度由顶部「网格大小」决定，用户可自由选 13/21/29（简单）或 43/59（高清还原）
+        const want=cols;
+        const SS=3;                         // 超采样：每格取 SS×SS 块平均色，更贴近原图
+        const bigW=want*SS, bigH=want*SS;
+        const oc=document.createElement('canvas'); oc.width=bigW; oc.height=bigH;
+        const octx=oc.getContext('2d');
+        const scale=Math.max(bigW/img.width, bigH/img.height);
+        const dw=img.width*scale, dh=img.height*scale, dx=(bigW-dw)/2, dy=(bigH-dh)/2;
+        octx.drawImage(img,dx,dy,dw,dh);
+        const id=octx.getImageData(0,0,bigW,bigH).data;
+        const hexGrid=makeEmpty(want,want);
+        for(let r=0;r<want;r++)for(let c=0;c<want;c++){
+          let rr=0,gg=0,bb=0,cnt=0;
+          const bx=c*SS, by=r*SS;
+          for(let yy=0;yy<SS;yy++)for(let xx=0;xx<SS;xx++){
+            const i=((by+yy)*bigW+(bx+xx))*4, a=id[i+3];
+            if(a<10) continue;
+            rr+=id[i]; gg+=id[i+1]; bb+=id[i+2]; cnt++;
+          }
+          hexGrid[r][c]= cnt===0 ? null : nearestColor(rr/cnt, gg/cnt, bb/cnt);
+        }
+        const idName='imp_'+Date.now();
+        const pat={ id:idName, name:(file.name||'导入图片').replace(/\.[^.]+$/,'').slice(0,12)||'导入图片',
+                    cols:want, rows:want, grid:hexGrid, date:new Date().toLocaleString('zh-CN') };
+        importedPatterns.unshift(pat);
+        if(importedPatterns.length>20) importedPatterns.length=20;
+        setImports(importedPatterns); buildImports();
+        toast('图片已生成 '+want+'×'+want+' 拼豆图案，可在「我的导入图片」选 临摹/填充/挑战');
+      };
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(file); imgInput.value='';
+  };
+  function nearestColor(r,g,b){ let best=null,bd=1e9;
+    PALETTE.forEach(p=>{ if(!p.hex) return; const [pr,pg,pb]=hexToRgb(p.hex); const d=(pr-r)**2+(pg-g)**2+(pb-b)**2; if(d<bd){bd=d;best=p.hex;} });
+    return best;
+  }
+
+  /* ---------- favorites ---------- */
+  /* —— 作品凭证编码（palette + base36 cells 紧凑格式，整体 ≤8KB）—— */
+  function artEncode(g){
+    if(!g||!g.length) return null;
+    const palette=[], idx={}, cells=[];
+    for(let r=0;r<g.length;r++){
+      const row=g[r]||[];
+      for(let c=0;c<row.length;c++){
+        const v=row[c];
+        if(!v){ cells.push('.'); continue; }
+        if(!(v in idx)){
+          if(palette.length>=36) return null;   // 超出 base36 单字符容量
+          idx[v]=palette.length; palette.push(v);
+        }
+        cells.push(idx[v].toString(36));
+      }
+    }
+    return {palette:palette, cells:cells.join('')};
+  }
+  /* 解码：palette + cells → grid（行优先，"." 为空格），非法输入返回 null */
+  function artDecode(w,h,palette,cells){
+    w=parseInt(w,10); h=parseInt(h,10);
+    if(!(w>0&&w<=59&&h>0&&h<=59)) return null;
+    if(!Array.isArray(palette)||!palette.length||typeof cells!=='string'||cells.length!==w*h) return null;
+    const g=[];
+    for(let r=0;r<h;r++){
+      const row=[];
+      for(let c=0;c<w;c++){
+        const ch=cells.charAt(r*w+c);
+        if(ch==='.'||ch===''){ row.push(null); continue; }
+        const idx=parseInt(ch,36);
+        row.push((idx>=0&&idx<palette.length)?(palette[idx]||null):null);
+      }
+      g.push(row);
+    }
+    return g;
+  }
+  function artHash(s){ let h=5381; for(let i=0;i<s.length;i++){ h=((h<<5)+h+s.charCodeAt(i))|0; } return (h>>>0).toString(36); }
+  function buildItemData(fav){
+    if(!fav||!fav.grid||!fav.grid.length) return null;
+    const enc=artEncode(fav.grid); if(!enc) return null;
+    const data={ name:(fav.name||'拼豆作品').slice(0,20), effect:'display',
+      params:{ w:fav.cols, h:fav.rows, palette:enc.palette, cells:enc.cells },
+      description:'玩家创作的拼豆作品 · '+fav.cols+'×'+fav.rows };
+    try{ if(JSON.stringify(data).length>8000) return null; }catch(_){ return null; }
+    return data;
+  }
+  /* 稳定内容 hash 作为 harvestId（幂等键）：同一作品无论从收藏按钮还是
+     平台「游戏道具」面板提取，只会铸一张凭证 */
+  function artItemId(d){ const p=(d&&d.params)||{}; return 'perler_'+p.w+'x'+p.h+'_'+artHash(String(p.cells||'')); }
+  function harvestFav(fav){
+    if(window.parent===window){ toast('请在平台游戏页内使用「铸凭证」（独立打开时平台通道不可用）'); return; }
+    const itemData=buildItemData(fav);
+    if(!itemData){ toast('❌ 作品无法编码（颜色超 36 种或超 8KB）'); return; }
+    try{
+      (window.parent||window).postMessage({ type:'GAME_EVENT', event:'ITEM_HARVEST',
+        data:{ schemaName:'perler-artwork', harvestId:artItemId(itemData), itemData:itemData },
+        timestamp:Date.now() }, '*');
+      toast('⏳ 正在铸造作品凭证…');
+    }catch(e){ toast('❌ 平台通道不可用'); }
+  }
+  /* 由网格数据生成缩略图（用于收到的作品） */
+  function gridThumb(g){
+    try{
+      const rr=g.length, cc=g[0].length, cs=4;
+      const cv=document.createElement('canvas'); cv.width=cc*cs; cv.height=rr*cs;
+      const c=cv.getContext('2d'); c.fillStyle='#fff'; c.fillRect(0,0,cv.width,cv.height);
+      for(let y=0;y<rr;y++)for(let x=0;x<cc;x++){ const h=g[y][x]; if(!h)continue;
+        c.beginPath(); c.arc(x*cs+cs/2,y*cs+cs/2,cs*0.45,0,Math.PI*2); c.fillStyle=h; c.fill(); }
+      return cv.toDataURL('image/png');
+    }catch(_){ return ''; }
+  }
+  function getFavs(){ try{ return JSON.parse(localStorage.getItem(FAV_KEY))||[]; }catch(_){ return []; } }
+  function setFavs(a){ localStorage.setItem(FAV_KEY, JSON.stringify(a)); }
+  const favListEl=document.getElementById('favList');
+  function makeThumb(){
+    const cs=6; buildSprites(cs);
+    const cv=document.createElement('canvas'); cv.width=cols*cs; cv.height=rows*cs;
+    const c=cv.getContext('2d'); renderTo(c,cs,cols,rows,grid,null,false,0.22);
+    buildSprites(cell); return cv.toDataURL('image/png');
+  }
+  document.getElementById('saveBtn').onclick=()=>{
+    const doSave=()=>{
+      const name=(document.getElementById('workName').value.trim())||('作品 '+new Date().toLocaleDateString('zh-CN'));
+      const favs=getFavs();
+      favs.unshift({id:Date.now(), name, cols, rows, grid:cloneGrid(grid), thumb:makeThumb(), ironed:true, effect:ironEffect, date:new Date().toLocaleString('zh-CN')});
+      if(favs.length>40) favs.length=40;
+      setFavs(favs); renderFavs(); document.getElementById('workName').value='';
+      toast('已熨烫定型并收藏 💾');
+    };
+    if(!ironed){ if(!startIroning(doSave,false)) return; } else doSave();
+  };
+  function renderFavs(){
+    const favs=getFavs(); favListEl.innerHTML='';
+    if(!favs.length){ const e=document.createElement('div'); e.className='fav-empty'; e.textContent='还没有收藏。拼好图案后点「熨烫定型」再「收藏」保存到这里～'; favListEl.appendChild(e); return; }
+    favs.forEach(f=>{
+      const row=document.createElement('div'); row.className='fav';
+      const img=document.createElement('img'); img.src=f.thumb;
+      const info=document.createElement('div'); info.className='finfo';
+      const nm=document.createElement('div'); nm.className='fname'; nm.textContent=f.name;
+      const dt=document.createElement('div'); dt.className='fdate'; dt.textContent=f.date+' · '+f.cols+'×'+f.rows+(f.effect?' · '+effectName(f.effect):'');
+      info.append(nm,dt);
+      const btns=document.createElement('div'); btns.className='fbtns';
+      const itemData=buildItemData(f);
+      const hid=itemData?artItemId(itemData):null;
+      const isMinted=!!(hid&&f.mintedHash===hid);
+      const bl=document.createElement('button'); bl.className='fload'; bl.textContent='加载';
+      const bh=document.createElement('button'); bh.className='fharvest'+(isMinted?' minted':'');
+      if(!hid){ bh.textContent='不可铸'; bh.disabled=true; bh.title='作品颜色超过 36 种或体积超限，无法编码为凭证'; }
+      else if(isMinted){ bh.textContent='已铸凭证'; bh.disabled=true; bh.title='该作品已铸为道具凭证（同一作品只能铸一张）'; }
+      else { bh.textContent='铸凭证'; bh.title='提取为道具凭证 → 可在市场交易，作品保留在收藏中'; bh.onclick=()=>harvestFav(f); }
+      const bd=document.createElement('button'); bd.className='fdel'; bd.textContent='删除';
+      bl.onclick=()=>{
+        cols=f.cols; rows=f.rows; grid=cloneGrid(f.grid); ironed=!!f.ironed; ironEffect=f.effect||'glossy';
+        ghostGrid=null; ghostOn=false; exitChallenge();
+        gridSizeSel.value=([13,21,29,43,59].includes(cols))?String(cols):'21';
+        document.querySelectorAll('.eff-btn').forEach(x=>x.classList.toggle('on',x.dataset.eff===ironEffect));
+        resetHistory(); layout(); saveDraft(); toast('已加载收藏：'+f.name);
+      };
+      bd.onclick=()=>{ setFavs(getFavs().filter(x=>x.id!==f.id)); renderFavs(); };
+      btns.append(bl,bh,bd); row.append(img,info,btns); favListEl.appendChild(row);
+    });
+  }
+
+  /* ---------- export PNG ---------- */
+  document.getElementById('exportBtn').onclick=()=>{
+    const doExport=()=>{
+      const cs=22; buildSprites(cs);
+      const cv=document.createElement('canvas'); cv.width=cols*cs; cv.height=rows*cs;
+      const c=cv.getContext('2d'); renderTo(c,cs,cols,rows,grid,null,false,0.22); buildSprites(cell);
+      const a=document.createElement('a'); a.download=(document.getElementById('workName').value.trim()||'豆趣工坊作品')+'.png';
+      a.href=cv.toDataURL('image/png'); a.click(); toast('已导出 PNG 图片 ⬇');
+    };
+    if(!ironed){ if(!startIroning(doExport,false)) return; } else doExport();
+  };
+
+  /* ---------- challenges storage ---------- */
+  function getChallenges(){ try{ return JSON.parse(localStorage.getItem(CH_KEY))||{}; }catch(_){ return {}; } }
+  function setChallenges(o){ localStorage.setItem(CH_KEY, JSON.stringify(o)); }
+
+  /* ---------- imports storage ---------- */
+  function getImports(){ try{ return JSON.parse(localStorage.getItem(IMPORT_KEY))||[]; }catch(_){ return []; } }
+  function setImports(a){ try{ localStorage.setItem(IMPORT_KEY, JSON.stringify(a)); }catch(_){} }
+
+  /* ---------- draft ---------- */
+  let suppressDraft=false;   // 内容凭证按次生效：为 true 时不写本地草稿
+  function saveDraft(){ if(suppressDraft) return; try{ localStorage.setItem(DRAFT_KEY, JSON.stringify({cols,rows,grid,ironed,ironEffect})); }catch(_){} }
+  function loadDraft(){
+    try{ const d=JSON.parse(localStorage.getItem(DRAFT_KEY));
+      if(d&&d.grid&&d.grid.length){ cols=d.cols; rows=d.rows; grid=cloneGrid(d.grid);
+        ironed=!!d.ironed; ironEffect=d.ironEffect||'glossy';
+        gridSizeSel.value=([13,21,29,43,59].includes(cols))?String(cols):'21';
+        document.querySelectorAll('.eff-btn').forEach(x=>x.classList.toggle('on',x.dataset.eff===ironEffect));
+        return true; } }catch(_){}
+    return false;
+  }
+
+  /* ---------- toast ---------- */
+  let toastTimer=null;
+  function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),1800); }
+
+  /* ---------- 填充券（道具门控）---------- */
+  function getFillCharges(){ try{ return Math.max(0, parseInt(localStorage.getItem(FILL_KEY),10)||0); }catch(_){ return 0; } }
+  function setFillCharges(){ try{ localStorage.setItem(FILL_KEY, String(fillCharges)); }catch(_){} }
+  function refreshFillUI(){
+    const locked = fillCharges<=0;
+    document.querySelectorAll('.pbtn-fill').forEach(b=>b.classList.toggle('locked', locked));
+    document.querySelectorAll('.fill-chip').forEach(ch=>{
+      if(locked){ ch.textContent='🔒 填充需道具'; ch.classList.remove('has'); }
+      else { ch.textContent='填充券 ×'+fillCharges; ch.classList.add('has'); }
+    });
+  }
+
+  /* ---------- init ---------- */
+  fillCharges=getFillCharges();
+  buildPalette(); buildPresets(); renderFavs();
+  importedPatterns=getImports(); buildImports();
+  refreshFillUI();
+  loadDraft(); resetHistory(); layout();
+  window.addEventListener('resize', ()=>{ clearTimeout(window.__rt); window.__rt=setTimeout(layout,120); });
+  window.addEventListener('keydown',(e)=>{
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey?redo():undo(); }
+    else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); }
+  });
+
+  /* ---------- AllinONE 游戏实例 API（供平台道具工坊 / effectCode 沙箱调用）---------- */
+  window.myGame = {
+    info: function(){ let n=0; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++) if(grid[r][c]) n++; return {cols:cols,rows:rows,beads:n,ironed:ironed}; },
+    fillAll: function(hex){ if(!hex) hex=currentColor; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++) grid[r][c]=hex; if(ironed) ironed=false; buildSprites(cell); render(); saveDraft(); return {message:'🎨 已铺满颜色：'+(hexToName[hex]||hex)}; },
+    rainbowFill: function(){ const cs4=PALETTE.filter(p=>p.hex).map(p=>p.hex); let i=0; for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ grid[r][c]=cs4[(r+c)%cs4.length]; i++; } if(ironed) ironed=false; buildSprites(cell); render(); saveDraft(); return {message:'🌈 已生成彩虹铺豆（'+i+' 颗）'}; },
+    clear: function(){ grid=makeEmpty(cols,rows); if(ironed) ironed=false; render(); saveDraft(); return {message:'🧹 画板已清空'}; },
+    instantIron: function(effect){ if(effect) ironEffect=effect; ironed=true; buildSprites(cell); render(); return {message:'🔥 已瞬间熨烫定型（'+effectName(ironEffect)+'）'}; },
+    setSymmetry: function(mode){ if(['none','h','v','center'].indexOf(mode)<0) mode='center'; symMode=mode; document.querySelectorAll('.sym-btn').forEach(x=>x.classList.toggle('on',x.dataset.sym===mode)); return {message:'🔁 已开启对称：'+(mode==='center'?'中心对称':mode==='h'?'水平':mode==='v'?'垂直':'关闭')}; },
+    unlockColor: function(hex,name){ return addCustomColor(hex,name); },
+    grantFill: function(n){ fillCharges += (parseInt(n,10)||1); if(fillCharges<0) fillCharges=0; setFillCharges(); refreshFillUI(); return {message:'🎟 填充券 +'+(parseInt(n,10)||1)+'（当前 '+fillCharges+'）'}; },
+    /* —— 可扩展性接口（任务广场 levels slot / 内容工坊）—— */
+    loadPattern:   function(data, mode, sessionOnly){ return loadPattern(data, mode, sessionOnly); },
+    setExtPatterns:function(list){ extPatterns = Array.isArray(list) ? list : []; buildExtPatterns(); return extPatterns.length; },
+    getExtPatterns:function(){ return extPatterns.slice(); },
+    patternInfo:   function(){ return {base:Object.keys(PRESETS).length, ext:extPatterns.length, cols:cols, rows:rows}; },
+    scatter: function(count,hex){ count=Math.max(1,Math.min(count||12, cols*rows)); if(!hex) hex=currentColor; let placed=0,tries=0; while(placed<count && tries<count*30){ const r=Math.floor(Math.random()*rows), c=Math.floor(Math.random()*cols); if(!grid[r][c]){ grid[r][c]=hex; placed++; } tries++; } if(ironed) ironed=false; buildSprites(cell); render(); saveDraft(); return {message:'✨ 随机撒上 '+placed+' 颗豆'}; },
+    revealReference: function(){ if(!ghostGrid) return {message:'当前为自由模式，无参考图可显示'}; ghostOn=true; document.getElementById('ghostBtn').classList.add('on'); render(); return {message:'👁 参考图已显现'}; },
+    toast: function(msg){ toast(msg); }
+  };
+
+  /* ---------- AllinONE 作品凭证桥（尾部代码段 D 通过此桥交互） ---------- */
+  window.AllinONE_BeadArt = {
+    /* 单个收藏项的稳定幂等 id（内容 hash） */
+    hashOf: function(fav){ const d=buildItemData(fav); return d?artItemId(d):null; },
+    /* 平台「游戏道具」面板反向提取：返回全部可提取作品 */
+    listItems: function(){
+      const items=[];
+      getFavs().forEach(f=>{
+        const d=buildItemData(f); if(!d) return;
+        items.push({ itemId:artItemId(d), schemaName:'perler-artwork', itemData:d });
+      });
+      return items;
+    },
+    /* 铸凭证结果回执：成功（含幂等命中）→ 标记已铸（保留展示） */
+    onResult: function(res){
+      /* duplicate = 平台幂等命中（此前已铸过：换设备/清缓存后重复点击）→ 同样视为已铸 */
+      const dup=!!(res&&res.reason==='duplicate');
+      const ok=!!(res&&res.success)||dup;
+      let hid=(res&&(res.harvestId||res.itemId))||null;
+      if(!hid&&res&&res.itemData) hid=artItemId(res.itemData);
+      if(ok&&hid){
+        const favs=getFavs(); let n=0;
+        favs.forEach(f=>{ const d=buildItemData(f); if(d&&artItemId(d)===hid){ f.mintedHash=hid; n++; } });
+        if(n){ setFavs(favs); renderFavs(); }
+        toast(dup?'ℹ 该作品此前已铸过凭证（已同步标记）':'✅ 作品已铸为凭证，可在市场交易！');
+      } else {
+        /* 平台回执的失败原因字段是 message（无 error 字段） */
+        toast('❌ 铸凭证失败：'+((res&&res.message)||'未知原因'));
+      }
+    },
+    /* 平台通知某作品已被消费/他处铸凭证 → 同步标记（防双花） */
+    onConsumed: function(hid){
+      if(!hid) return;
+      const favs=getFavs(); let n=0;
+      favs.forEach(f=>{ const d=buildItemData(f); if(d&&artItemId(d)===hid){ f.mintedHash=hid; n++; } });
+      if(n){ setFavs(favs); renderFavs(); toast('🏷 该作品对应的凭证已转移/消费，已同步标记'); }
+    },
+    /* 兑换收到的作品 → 加入收藏馆（自带凭证 → 标记已铸，不可再次铸） */
+    addArtwork: function(itemData, sourceName){
+      if(!itemData||itemData.effect!=='display') return false;
+      const p=itemData.params||{};
+      const g=artDecode(p.w,p.h,p.palette,p.cells);
+      if(!g) return false;
+      const favs=getFavs();
+      favs.unshift({ id:Date.now(), name:((itemData.name||sourceName||'收到的作品')+'').slice(0,20),
+        cols:p.w, rows:p.h, grid:g, thumb:gridThumb(g), ironed:true, effect:'glossy',
+        mintedHash:artItemId(itemData),
+        date:new Date().toLocaleString('zh-CN') });
+      if(favs.length>40) favs.length=40;
+      setFavs(favs); renderFavs();
+      return true;
+    }
+  };
+})();
+</script>
+
+<!-- =====================================================================
+     AllinONE 集成代码段 A：扩展内容加载器（slot = levels，即「拼豆图纸」）
+     铁律：无 ?ext= → 纯净原版；有 ?ext=<submissionId> → 原版 + 该扩展
+     ===================================================================== -->
+<script>
+var A1G_EXT = {
+  gameId: '', apiBase: '',
+  customLevels: [],   // 过滤后的社区图纸
+  assetPaths: [],     // 已合并扩展的资源路径
+  sel: 0,             // 0 = 原版，1..N = 第 N 张扩展图纸
+  active: -1,
+  started: false
+};
+
+/* API 基址：线上必须走云函数绝对地址（静态托管域名下 /api 会被 rewrite 吞掉） */
+function a1gApiBase(){
+  if (/tcloudbaseapp\.com$/.test(location.hostname))
+    return 'https://allinonegaming-d4gmsmrzz573264f6.service.tcloudbase.com/api/v1/games';
+  return '/api/v1/games';
+}
+/* gameId 三个来源：① URL path ② ?gameId= ③ 平台 PROTOCOL:INIT */
+function a1gDetectGameId(){
+  var m = location.pathname.match(/\/api\/v1\/games\/([^\/]+?)(\/|$)/);
+  if (m){ try { return decodeURIComponent(m[1]); } catch(e){} }
+  try { var q = new URLSearchParams(location.search); if (q.get('gameId')) return q.get('gameId'); } catch(e){}
+  return '';
+}
+function a1gExtParam(){
+  try { return new URLSearchParams(location.search).get('ext') || ''; } catch(e){ return ''; }
+}
+function a1gEncodePath(p){
+  return String(p).split('/').map(function(seg){ return encodeURIComponent(seg); }).join('/');
+}
+/* 三级回退：完全相等 → 以 '/' + 目标 结尾 → basename 相同 */
+function a1gResolveAsset(rel){
+  var s = rel ? String(rel) : '';
+  if (!s) return s;
+  if (s.indexOf('extensions/') === 0) return s;
+  for (var i = 0; i < A1G_EXT.assetPaths.length; i++){
+    var p = A1G_EXT.assetPaths[i];
+    if (p === s || p.indexOf('/' + s) >= 0) return p;
+    if (p.split('/').pop() === s.split('/').pop()) return p;
+  }
+  return s;
+}
+/* 脚本用 Blob URL + <script> 执行（非裸 eval） */
+function a1gRunScript(src){
+  return fetch(a1gApiBase() + '/' + encodeURIComponent(A1G_EXT.gameId) + '/files/' + a1gEncodePath(src), { cache: 'no-cache' })
+    .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+    .then(function(code){
+      return new Promise(function(resolve, reject){
+        try {
+          var url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+          var s = document.createElement('script');
+          s.src = url;
+          s.onload = function(){ URL.revokeObjectURL(url); resolve(); };
+          s.onerror = function(){ URL.revokeObjectURL(url); reject(new Error('脚本加载失败')); };
+          document.head.appendChild(s);
+        } catch(e){ reject(e); }
+      });
+    });
+}
+
+/* ---- 颜色校验：仅接受 #rgb / #rrggbb，其余一律置空 ---- */
+function a1gColor(v){
+  if (typeof v !== 'string') return null;
+  var s = v.trim().toLowerCase();
+  if (s.charAt(0) !== '#') return null;
+  var body = s.slice(1);
+  if (/^[0-9a-f]{3}$/.test(body)) body = body[0]+body[0]+body[1]+body[1]+body[2]+body[2];
+  if (!/^[0-9a-f]{6}$/.test(body)) return null;
+  return '#' + body;
+}
+
+/* ★ 内容应用函数：把玩家图纸数据规范化（防御式兜底） */
+function a1gNormalizePattern(p){
+  if (!p || typeof p !== 'object') return null;
+  var src = null, sc = 0, sr = 0;
+  if (Array.isArray(p.grid) && p.grid.length){
+    sr = p.grid.length;
+    sc = p.grid.reduce(function(a,row){ return Math.max(a, Array.isArray(row) ? row.length : 0); }, 0);
+    src = p.grid;
+  } else if (Array.isArray(p.layout) && p.layout.length){
+    var legend = p.legend || {};
+    sr = p.layout.length;
+    sc = p.layout.reduce(function(a,line){ return Math.max(a, String(line).length); }, 0);
+    src = p.layout.map(function(line){
+      return String(line).split('').map(function(ch){
+        var v = legend[ch];
+        if (v === undefined || v === null || v === '') return null;
+        return a1gColor(v);
+      });
+    });
+  }
+  if (!src || !sr || !sc) return null;
+
+  /* 尺寸钳制 2~59：声明优先，超出截断，不足补空 */
+  var maxC = Math.max(2, Math.min(59, parseInt(p.cols, 10) || sc));
+  var maxR = Math.max(2, Math.min(59, parseInt(p.rows, 10) || sr));
+
+  var out = [], filled = 0;
+  for (var y = 0; y < maxR; y++){
+    var row = Array.isArray(src[y]) ? src[y] : [];
+    var nr = [];
+    for (var x = 0; x < maxC; x++){
+      var v = row[x];
+      var hex = (typeof v === 'string') ? a1gColor(v) : (v && v.hex ? a1gColor(v.hex) : null);
+      if (hex) filled++;
+      nr.push(hex);
+    }
+    out.push(nr);
+  }
+  if (!filled) return null;   // 全空图纸视为无效
+  var sid = p._submissionId || '';
+  return {
+    id: p.id || p.title || ('p' + Math.random().toString(36).slice(2, 8)),
+    name: p.title || p.name || '社区图纸',
+    cols: maxC, rows: maxR, grid: out,
+    _submissionId: sid,
+    key: (sid ? 'ext_' + sid + '_' : 'ext_') + (p.id || p.title || ''),
+    script: p.script || null,
+    difficulty: p.difficulty || ''
+  };
+}
+
+/* ★ 应用一张图纸到游戏（mode: trace | fill | challenge） */
+function a1gApplyPattern(data, mode, sessionOnly){
+  var p = a1gNormalizePattern(data);
+  if (!p) return false;
+  try {
+    if (window.myGame && window.myGame.loadPattern){
+      window.myGame.loadPattern(p, mode || 'trace', !!sessionOnly);
+      return true;
+    }
+  } catch(e){ console.warn('[EXT] 应用图纸失败', e); }
+  return false;
+}
+
+/* ★ 构建 API：供脚本型图纸 window.BeadLevel.build(api) 使用 */
+function a1gBuildViaApi(cols, rows){
+  if (typeof window.BeadLevel !== 'object' || typeof window.BeadLevel.build !== 'function') return null;
+  var g = [];
+  for (var y = 0; y < rows; y++){
+    var r = []; for (var x = 0; x < cols; x++) r.push(null);
+    g.push(r);
+  }
+  var api = {
+    COLS: cols, ROWS: rows, cols: cols, rows: rows, grid: g,
+    setSize: function(){ /* 尺寸在构建前已确定，此处为兼容保留 */ },
+    setBead: function(c, r, hex){ if (r >= 0 && r < rows && c >= 0 && c < cols) g[r][c] = hex || null; },
+    rect: function(x0, y0, x1, y1, hex){
+      for (var yy = Math.min(y0, y1); yy <= Math.max(y0, y1); yy++)
+        for (var xx = Math.min(x0, x1); xx <= Math.max(x0, x1); xx++)
+          if (yy >= 0 && yy < rows && xx >= 0 && xx < cols) g[yy][xx] = hex || null;
+    },
+    fill: function(hex){ for (var yy = 0; yy < rows; yy++) for (var xx = 0; xx < cols; xx++) g[yy][xx] = hex || null; }
+  };
+  try { window.BeadLevel.build(api); } catch(e){ console.warn('[EXT] 构建脚本执行失败', e); return null; }
+  return g;
+}
+
+/* 把过滤后的图纸交给游戏渲染成卡片（入口 UI） */
+function a1gPublishPatterns(){
+  var list = [];
+  for (var i = 0; i < A1G_EXT.customLevels.length; i++){
+    var p = a1gNormalizePattern(A1G_EXT.customLevels[i]);
+    if (p) list.push(p);
+  }
+  if (window.myGame && window.myGame.setExtPatterns) window.myGame.setExtPatterns(list);
+  /* 脚本型图纸：加载脚本 → 调 BeadLevel.build → 回写网格 */
+  list.forEach(function(p){
+    if (!p.script) return;
+    a1gRunScript(a1gResolveAsset(p.script)).then(function(){
+      var built = a1gBuildViaApi(p.cols, p.rows);
+      if (built){
+        p.grid = built;
+        if (window.myGame && window.myGame.setExtPatterns) window.myGame.setExtPatterns(list);
+      }
+    }).catch(function(){ /* 静默降级，保留数据型结果 */ });
+  });
+  return list;
+}
+
+/* 入口选择器：卡片列表由游戏侧渲染，这里负责滚动定位与状态同步 */
+function a1gBuildSelector(){
+  var card = document.getElementById('extCard');
+  if (card && card.style.display !== 'none' && card.scrollIntoView) {
+    try { card.scrollIntoView({ block: 'nearest' }); } catch(e){}
+  }
+}
+function a1gSyncSel(s){ A1G_EXT.sel = s; }
+/* 有 ?ext= 时自动选中对应扩展 */
+function a1gAutoSelectFromUrl(){
+  var ext = a1gExtParam();
+  if (!ext) return;
+  for (var i = 0; i < A1G_EXT.customLevels.length; i++){
+    if (A1G_EXT.customLevels[i]._submissionId === ext){
+      a1gSyncSel(i + 1);
+      var sel = document.getElementById('extPatternSelect');
+      if (sel){ sel.value = String(i); }
+      a1gBuildSelector();
+      return;
+    }
+  }
+}
+
+/* 拉取并按 ?ext= 过滤（铁律：无 ext = 纯净原版） */
+function a1gLoadCustomLevels(){
+  var id = A1G_EXT.gameId || a1gDetectGameId();
+  if (!id || A1G_EXT.started) return;
+  A1G_EXT.gameId = id; A1G_EXT.started = true;
+  fetch(a1gApiBase() + '/' + encodeURIComponent(id), { cache: 'no-cache' })
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(json){
+      if (!json) return;
+      var doc = json && json.data ? json.data : json;
+      var levels = Array.isArray(doc.levels) ? doc.levels : [];
+      /* 兼容历史嵌套：[[{...}]] 扁平化一层 */
+      var flat = [];
+      for (var i = 0; i < levels.length; i++){
+        if (Array.isArray(levels[i])){ for (var j = 0; j < levels[i].length; j++) flat.push(levels[i][j]); }
+        else flat.push(levels[i]);
+      }
+      var assetPaths = [];
+      var exts = Array.isArray(doc.questExtensions) ? doc.questExtensions : [];
+      for (var k = 0; k < exts.length; k++){
+        var e = exts[k];
+        if (e && Array.isArray(e.assets)) for (var m = 0; m < e.assets.length; m++)
+          if (e.assets[m] && e.assets[m].path) assetPaths.push(e.assets[m].path);
+      }
+      A1G_EXT.assetPaths = assetPaths;
+      var ext = a1gExtParam();
+      A1G_EXT.customLevels = flat.filter(function(l){
+        if (!l || typeof l !== 'object') return false;
+        if (!ext) return !l._submissionId;
+        return !l._submissionId || l._submissionId === ext;
+      });
+      console.log('[EXT] 社区图纸:', A1G_EXT.customLevels.length, '张');
+      if (A1G_EXT.customLevels.length > 0){ a1gPublishPatterns(); a1gBuildSelector(); }
+      a1gAutoSelectFromUrl();
+    })
+    .catch(function(){ console.warn('[EXT] 扩展图纸加载失败，降级为原版'); });
+}
+
+/* 平台协议 INIT 消息带 gameId（inline / srcDoc 模式下是唯一来源） */
+window.addEventListener('message', function(e){
+  var d = e.data;
+  if (d && d.type === 'PROTOCOL:INIT' && d.gameId){ A1G_EXT.gameId = d.gameId; a1gLoadCustomLevels(); }
+});
+/* 启动时尝试一次（无 gameId 时静默跳过） */
+try { a1gLoadCustomLevels(); } catch(e){}
+</script>
+
+<!-- =====================================================================
+     AllinONE 集成代码段 B：内容工坊接收器（内容凭证 · 按次生效，不落盘）
+     ===================================================================== -->
+<script>
+(function(){
+  /* 同时用三种方式注册，兼容平台 loader 注入时序 */
+  function register(slot, fn){
+    try {
+      if (window.AllinONE_ContentLoader && typeof window.AllinONE_ContentLoader.on === 'function')
+        window.AllinONE_ContentLoader.on(slot, fn);
+    } catch(e){}
+    window.AllinONE_ContentHandlers = window.AllinONE_ContentHandlers || {};
+    window.AllinONE_ContentHandlers[slot] = fn;
+  }
+  var G = function(){ return window.myGame || {}; };
+
+  /* slot: levels —— 拼豆图纸（本次会话生效） */
+  register('levels', function(pack){
+    var d = (pack && pack.data) ? pack.data : pack;
+    if (a1gApplyPattern(d, 'trace', true)){
+      var nm = (pack && pack.name) || '社区图纸';
+      if (G().toast) G().toast('🎨 已载入内容凭证图纸：' + nm);
+    }
+  });
+
+  /* slot: items —— 配色包（[{name, hex}] 或 {colors:[...]}） */
+  register('items', function(pack){
+    var d = (pack && pack.data) ? pack.data : pack;
+    if (!d) return;
+    var arr = Array.isArray(d) ? d : (Array.isArray(d.colors) ? d.colors : null);
+    if (!arr || !G().unlockColor) return;
+    var n = 0;
+    arr.forEach(function(c){
+      var hex = (typeof c === 'string') ? c : (c && (c.hex || c.color));
+      if (hex && String(hex).charAt(0) === '#'){ G().unlockColor(hex, (c && c.name) || '内容配色'); n++; }
+    });
+    if (G().toast) G().toast('🎨 配色包已载入：' + n + ' 色（本次会话）');
+  });
+
+  /* 兜底：监听 loader 派发的全局事件 */
+  window.addEventListener('allinone:content-pack-applied', function(ev){
+    var d = (ev && ev.detail) || {};
+    if (d.slot === 'levels' && d.data) a1gApplyPattern(d.data, 'trace', true);
+  });
+})();
+</script>
+
+<!-- ===== AllinONE 平台集成（道具工坊 / 兑换码 双通道） ===== -->
+<style id="a1-style">
+  .ugc-bar { position: fixed; bottom: 12px; left: 12px; display: flex; gap: 8px; align-items: center; padding: 8px 16px;
+    background: rgba(0,0,0,0.85); border-radius: 12px; z-index: 9999; font-family: system-ui; min-height: 40px;
+    max-width: calc(100vw - 24px); flex-wrap: wrap; }
+  .ugc-label { color: #4caf50; font-weight: bold; font-size: 12px; margin-right: 4px; }
+  .ugc-item { padding: 4px 10px; background: #333; border-radius: 8px; cursor: pointer; color: #fff; font-size: 13px;
+    border: 1px solid #555; transition: all 0.2s; }
+  .ugc-item:hover { background: #4caf50; border-color: #4caf50; }
+  .ugc-empty { color: #666; font-size: 12px; }
+  .a1-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%) translateY(-100px);
+    padding: 10px 20px; background: rgba(0,0,0,0.9); color: #fff; border-radius: 8px; font-size: 14px;
+    z-index: 10000; border-left: 4px solid #4caf50; transition: transform 0.3s ease; pointer-events: none; }
+  .a1-toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+
+<div id="ugc-bar" class="ugc-bar">
+  <span class="ugc-label">PROPS</span>
+  <span class="ugc-empty">No items yet</span>
+</div>
+<div id="a1-toast-container"></div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============ Toast 通知（改名避免与游戏自带 .toast 冲突）============
+  function a1Toast(msg, type) {
+    var toast = document.createElement('div');
+    toast.className = 'a1-toast';
+    toast.textContent = msg;
+    if (type === 'error') toast.style.borderColor = '#f44336';
+    else if (type === 'info') toast.style.borderColor = '#2196f3';
+    document.getElementById('a1-toast-container').appendChild(toast);
+    requestAnimationFrame(function() { requestAnimationFrame(function() { toast.classList.add('show'); }); });
+    setTimeout(function() { toast.classList.remove('show'); setTimeout(function() { toast.remove(); }, 400); }, 3000);
+  }
+
+  // ============ 拼豆模拟器专属效果表（调用 window.myGame）============
+  var EFFECT_HANDLERS = {
+    instant_fill:    function(p){ return G().grantFill ? G().grantFill((p&&p.charges)||1) : na(); },
+    rainbow_fill:    function(p){ return G().rainbowFill ? G().rainbowFill() : na(); },
+    clear_board:     function(p){ return G().clear ? G().clear() : na(); },
+    instant_iron:    function(p){ return G().instantIron ? G().instantIron(p&&p.effect) : na(); },
+    unlock_symmetry: function(p){ return G().setSymmetry ? G().setSymmetry((p&&p.mode)||'center') : na(); },
+    unlock_color:    function(p){ return G().unlockColor ? G().unlockColor(p&&p.hex, p&&p.name) : na(); },
+    scatter_beads:   function(p){ return G().scatter ? G().scatter(p&&p.count, p&&p.hex) : na(); },
+    reveal_reference:function(p){ return G().revealReference ? G().revealReference() : na(); },
+    add_score:       function(p){ return { message: '✨ 创意 +' + ((p&&p.bonus)||10) }; }
+  };
+  function G(){ return window.myGame || {}; }
+  function na(){ return { message: '效果不可用（游戏未就绪）' }; }
+
+  // ============ effectCode 沙箱引擎 ============
+  var _dynamicHandlerCache = {};
+  function registerDynamicEffect(effectName, effectCodeStr) {
+    if (EFFECT_HANDLERS[effectName]) return true;
+    if (_dynamicHandlerCache[effectName]) { EFFECT_HANDLERS[effectName] = _dynamicHandlerCache[effectName]; return true; }
+    if (!effectCodeStr || typeof effectCodeStr !== 'string') return false;
+    if (effectCodeStr.length > 4000) return false;
+    var blocked = ['eval(','new function','import(','require(','__proto__','prototype','constructor','window.','document.','parent.','top.','globalthis','self.','fetch(','xmlhttprequest','websocket','worker(','localstorage','sessionstorage','cookie','alert(','confirm(','prompt('];
+    var lowerCode = effectCodeStr.toLowerCase();
+    for (var i=0;i<blocked.length;i++){ if (lowerCode.indexOf(blocked[i])!==-1) return false; }
+    try {
+      var sandboxFn = new Function('game','Math','JSON','console','return (' + effectCodeStr + ');');
+      var rawHandler = sandboxFn(window.myGame || {}, Math, JSON, console);
+      if (typeof rawHandler !== 'function') return false;
+      var wrappedHandler = function(params){ try { return rawHandler(params) || { message: '效果已执行' }; } catch(e){ return { error:true, message:'效果出错: '+(e.message||e) }; } };
+      _dynamicHandlerCache[effectName] = wrappedHandler;
+      EFFECT_HANDLERS[effectName] = wrappedHandler;
+      return true;
+    } catch(e){ return false; }
+  }
+
+  // ============ UGC 道具库存 ============
+  var customPowerUps = [];
+  function renderCustomPowerUps() {
+    var bar = document.getElementById('ugc-bar');
+    bar.innerHTML = '';
+    var label = document.createElement('span'); label.className='ugc-label'; label.textContent='PROPS'; bar.appendChild(label);
+    if (customPowerUps.length === 0){ var empty=document.createElement('span'); empty.className='ugc-empty'; empty.textContent='No items yet'; bar.appendChild(empty); return; }
+    customPowerUps.forEach(function(item, index){
+      var el=document.createElement('span'); el.className='ugc-item'; el.textContent=(item.icon||'⚡')+' '+item.name; el.title=item.description||item.effect;
+      el.onclick=function(){ useCustomPowerUp(index); }; bar.appendChild(el);
+    });
+  }
+  function useCustomPowerUp(index){
+    var item=customPowerUps[index]; if(!item) return;
+    if(item.effectCode && !EFFECT_HANDLERS[item.effect]){ if(!registerDynamicEffect(item.effect, item.effectCode)){ a1Toast('❌ 效果注册失败','error'); return; } }
+    var handler=EFFECT_HANDLERS[item.effect];
+    if(handler){ var result=handler(item.params); if(result&&result.message) a1Toast(result.message, result.error?'error':'success'); }
+    else { a1Toast('❌ 未找到效果: '+item.effect,'error'); }
+    customPowerUps.splice(index,1); renderCustomPowerUps();
+  }
+
+  // ============ 接收平台道具（双通道）============
+  window.addEventListener('message', function(e){
+    if(e.data && e.data.type==='EXTENSION_VOUCHER'){
+      var v=e.data.voucher; if(!v||!v.data) return; var data=v.data;
+      if(data.effect==='display'||data.schemaName==='perler-artwork'){ return; } /* 作品凭证：由代码段 D 处理 */
+      if(data.effect){
+        customPowerUps.push({ id:v.id||('ugc_'+Date.now()), name:data.name||(data.effect+'道具'), effect:data.effect, params:data.params||{}, description:data.description||'', effectCode:data.effectCode||null, icon:data.icon||'⚡' });
+        renderCustomPowerUps(); a1Toast('🎁 获得道具: '+(data.name||data.effect),'success');
+      }
+    }
+    if(e.data && e.data.type==='REDEEM_RESULT' && e.data.data && e.data.data.success){ a1Toast('✅ 兑换成功','success'); }
+  });
+  var _redeemedIds={};
+  function handleRedeemedItem(detail){
+    var key=detail.code||detail.itemId; if(_redeemedIds[key]) return; _redeemedIds[key]=true;
+    var voucherData=detail.voucherData||{};
+    var realEffect=(voucherData.effect && voucherData.effect!=='custom')?voucherData.effect:null;
+    if(!realEffect && detail.itemId && detail.itemId!=='custom') realEffect=detail.itemId;
+    if(!realEffect) return;
+    if(realEffect==='display'||voucherData.schemaName==='perler-artwork'){ return; } /* 作品凭证：由代码段 D 处理 */
+    customPowerUps.push({ id:key||('ugc_'+Date.now()), name:voucherData.name||detail.itemName||'道具', effect:realEffect, params:voucherData.params||detail.effects||{}, description:voucherData.description||'', effectCode:voucherData.effectCode||null, icon:voucherData.icon||'⚡' });
+    renderCustomPowerUps(); a1Toast('🎁 获得道具: '+(detail.itemName||realEffect),'success');
+  }
+  window.addEventListener('allinone-item-redeemed', function(e){ handleRedeemedItem(e.detail); });
+  window.addEventListener('allinone:item-redeemed', function(e){ handleRedeemedItem(e.detail); });
+
+  renderCustomPowerUps();
+})();
+</script>
+
+<!-- =====================================================================
+     AllinONE 集成代码段 D：拼豆作品凭证（ITEM_HARVEST 提取 + 作品兑换接收）
+     作品 = palette + base36 cells 紧凑编码（≤8KB）；harvestId = 内容 hash（稳定幂等：
+     同一作品无论从收藏按钮还是平台「游戏道具」面板提取，都只会铸一张凭证）
+     ===================================================================== -->
+<script>
+(function(){
+  'use strict';
+
+  function bridge(){ return window.AllinONE_BeadArt || null; }
+
+  /* ---------- 平台消息：结果回执 / 反向提取 / 消费通知 ---------- */
+  window.addEventListener('message', function(e){
+    var d=e.data; if(!d||typeof d!=='object'||d.type!=='PLATFORM_EVENT') return;
+    var B=bridge();
+    if(d.event==='ITEM_HARVEST_RESULT'){
+      if(B&&B.onResult) B.onResult(d.data||{});
+      return;
+    }
+    if(d.event==='REQUEST_GAME_ITEMS'){
+      var items=(B&&B.listItems)?B.listItems():[];
+      try{ (window.parent||window).postMessage({ type:'GAME_EVENT', event:'GAME_ITEMS',
+        data:{ items:items }, timestamp:Date.now() }, '*'); }catch(err){}
+      return;
+    }
+    if(d.event==='ITEM_CONSUMED'){
+      var cd=d.data||{}; var hid=cd.harvestId||cd.itemId||cd.id;
+      if(hid&&B&&B.onConsumed) B.onConsumed(hid);
+      return;
+    }
+  });
+
+  /* ---------- 作品凭证接收（effect='display' 或 schemaName='perler-artwork'） ---------- */
+  function applyArtwork(itemData, sourceName){
+    if(!itemData||typeof itemData!=='object') return false;
+    if(itemData.effect!=='display'&&itemData.schemaName!=='perler-artwork') return false;
+    var B=bridge(); if(!B||!B.addArtwork) return false;
+    var ok=B.addArtwork(itemData, sourceName);
+    if(ok){
+      try{ var G=window.myGame||{}; if(G.toast) G.toast('🎨 收到作品「'+(itemData.name||sourceName||'未知')+'」，已加入我的收藏'); }catch(e){}
+    }
+    return ok;
+  }
+
+  /* 通道 1：兑换码（GamePlay 兑换后派发 CustomEvent，双事件名兼容） */
+  function onRedeemed(detail){
+    if(!detail) return;
+    var vd=detail.voucherData||{};
+    if(vd.effect==='display'||vd.schemaName==='perler-artwork'||detail.itemId==='perler-artwork'){
+      applyArtwork(vd, detail.itemName);
+    }
+  }
+  window.addEventListener('allinone:item-redeemed', function(e){ onRedeemed(e&&e.detail); });
+  window.addEventListener('allinone-item-redeemed', function(e){ onRedeemed(e&&e.detail); });
+
+  /* 通道 2：自动下发（购买后 / URL 带 itemVoucher 时 GamePlay postMessage） */
+  window.addEventListener('message', function(e){
+    var d=e.data; if(!d||d.type!=='EXTENSION_VOUCHER') return;
+    var v=d.voucher; if(!v||!v.data) return;
+    applyArtwork(v.data, v.data&&v.data.name);
+  });
+})();
+</script>
+</body>
+</html>

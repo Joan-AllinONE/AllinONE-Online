@@ -8,6 +8,7 @@
 import { BaseSkill } from '../BaseSkill';
 import type { SkillContext } from '../types';
 import { saveToBackend } from '../../services/backendSync';
+import { getRuleValue, ensureRulesReady } from '@/services/platformRulesService';
 
 // ==================== 类型 ====================
 
@@ -181,7 +182,9 @@ export class ProposalSkill extends BaseSkill {
       else abstainWeight += v.weight;
     }
     const totalWeight = approveWeight + rejectWeight + abstainWeight;
-    const passed = approveWeight > rejectWeight && totalWeight > 0 && approveWeight > totalWeight * 0.5;
+    // 通过阈值读取规则注册中心（治理门控修改；未加载时用兜底值）
+    const passThreshold = getRuleValue('governance.pass_threshold');
+    const passed = approveWeight > rejectWeight && totalWeight > 0 && approveWeight > totalWeight * passThreshold;
     proposal.result = {
       approveCount: proposal.votes.filter(v => v.decision === 'approve').length,
       rejectCount: proposal.votes.filter(v => v.decision === 'reject').length,
@@ -198,8 +201,10 @@ export class ProposalSkill extends BaseSkill {
   }
 
   private async calculateVoteWeight(userId: string): Promise<number> {
-    // 权重 = A币(凭证) * 0.3 + gameCoins * 0.1（上限 1000）
+    // 权重 = A币(凭证) * weight_acoin + gameCoins * weight_gamecoin（上限 weight_cap）
+    // 三系数均读取规则注册中心（治理门控修改）
     try {
+      await ensureRulesReady();
       const result = await this.gateway.execute('wallet', 'getBalance', {}, { userId } as any);
       if (result.success) {
         const bal = result.data;
@@ -209,7 +214,10 @@ export class ProposalSkill extends BaseSkill {
           const { voucherPaymentService } = await import('@/services/voucherPaymentService');
           aCoinBalance = voucherPaymentService.getUserVoucherBalance(userId);
         } catch { /* fallback */ }
-        return Math.min(aCoinBalance * 0.3 + (bal.gameCoins || 0) * 0.1, 1000) || 1;
+        const wAcoin = getRuleValue('governance.weight_acoin');
+        const wGameCoin = getRuleValue('governance.weight_gamecoin');
+        const wCap = getRuleValue('governance.weight_cap');
+        return Math.min(aCoinBalance * wAcoin + (bal.gameCoins || 0) * wGameCoin, wCap) || 1;
       }
     } catch { /* fallback */ }
     return 1;

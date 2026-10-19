@@ -17,6 +17,8 @@ import { track } from '@/services/analytics';
 import { Coins, X, AlertCircle, Gift, ShieldCheck, Layers, Boxes, Package } from 'lucide-react';
 import { ProtocolEngine, schemaRegistry, getDefaultEngine } from '@/publishing-center/protocol';
 import { itemHarvestService } from '@/services/itemHarvestService';
+import { gameDeveloperService } from '@/services/gameDeveloperService';
+import { invokeContract } from '@/contracts/client/contractTunnel';
 
 interface GameSkill {
   id: string;
@@ -118,8 +120,10 @@ if(window.AllinONE_ContentLoader&&d.content){window.AllinONE_ContentLoader.apply
 function applyContentLoaderToHtml(html: string, enabled: boolean): string {
   if (!enabled || !html || html.indexOf(CONTENT_LOADER_MARKER) >= 0) return html;
   const block = '\n' + CONTENT_LOADER_MARKER + '\n' + CONTENT_LOADER_SNIPPET + '\n';
-  const bodyIdx = html.lastIndexOf('</body>');
-  return bodyIdx >= 0 ? html.slice(0, bodyIdx) + block + html.slice(bodyIdx) : html + block;
+  // 注入到 </head> 前：loader 必须先于游戏内 AllinONE_ContentLoader.on() 注册代码执行（时序安全）；
+  // loader 无 DOM 依赖，head 阶段执行安全。与 games.ts / 云函数 / SW 四份拷贝保持一致。
+  const headIdx = html.lastIndexOf('</head>');
+  return headIdx >= 0 ? html.slice(0, headIdx) + block + html.slice(headIdx) : html + block;
 }
 
 function buildGameFileUrl(gameId: string, entryPoint: string): string {
@@ -664,28 +668,58 @@ export default function GamePlay() {
     // （单例模式：handler 必须具名，cleanup 时 engine.off 注销，防止反复进出
     // 游戏页在共享单例上累积重复监听器 → 同一事件被处理多次）
     const gameEventHandler = ({ event, data }: { event: string; data: any }) => {
-      // 🆕 游戏内道具收获 → 校验+风控+铸造道具凭证（可交易），结果回发游戏
+      // 🆕 游戏内道具收获 → 服务端权威铸造（B3 异步化），结果回发游戏
+      // 异步 IIFE：mint 成功才回发 ITEM_HARVEST_RESULT 让游戏删道具（防双花保护玩家——
+      // 失败/超时不删，重复提取由服务端幂等挡住）
       if (event === 'ITEM_HARVEST') {
         const harvestData = data || {};
         const allowedSchemas = engine.getChannelState(gameId)?.supportedSchemas || [];
-        const result = itemHarvestService.processItemHarvest({
-          gameId,
-          userId: currentUser?.id || '',
-          userName: currentUser?.username,
-          schemaName: String(harvestData.schemaName || ''),
-          itemData: harvestData.itemData,
-          quantity: 1,
-          harvestId: harvestData.harvestId ? String(harvestData.harvestId) : undefined,
-          allowedSchemas,
-        });
-        // 回发结果：游戏收到 success 后删除游戏内道具（防双花）
-        engine.sendToGame(gameId, {
-          type: 'PLATFORM_EVENT',
-          event: 'ITEM_HARVEST_RESULT',
-          data: { ...result, harvestId: harvestData.harvestId },
-          timestamp: Date.now(),
-        });
-        showRewardToast(result.success, result.message);
+        void (async () => {
+          const result = await itemHarvestService.processItemHarvestAsync({
+            gameId,
+            userId: currentUser?.id || '',
+            userName: currentUser?.username,
+            schemaName: String(harvestData.schemaName || ''),
+            itemData: harvestData.itemData,
+            quantity: 1,
+            harvestId: harvestData.harvestId ? String(harvestData.harvestId) : undefined,
+            allowedSchemas,
+          });
+          engine.sendToGame(gameId, {
+            type: 'PLATFORM_EVENT',
+            event: 'ITEM_HARVEST_RESULT',
+            data: { ...result, harvestId: harvestData.harvestId },
+            timestamp: Date.now(),
+          });
+          showRewardToast(result.success, result.message);
+        })();
+        return;
+      }
+
+      // 🆕 平台侧事件桥（2026-10-15）：游戏内合约贡献上报 → __protocol 自报通道。
+      // 游戏在状态切换点 postMessage { type:'GAME_EVENT', event:'PROTOCOL_CONTRIBUTE',
+      //   data:{ contractId, amount, note?, questId? } } → 平台附 JWT 身份转发 __contract invoke。
+      // 身份语义：targetUserId=当前登录玩家（自报通道，冒名由服务端 403 挡）。
+      // 幂等：triggerId 分钟窗（同分同分值重放挡；游戏侧铁律仍是只在状态切换点上报）。
+      if (event === 'PROTOCOL_CONTRIBUTE') {
+        const cd = (data || {}) as Record<string, any>;
+        const contractId = String(cd.contractId || '');
+        const points = Math.floor(Number(cd.amount ?? cd.points));
+        if (!contractId || !Number.isFinite(points) || points <= 0 || !currentUser?.id) return;
+        void (async () => {
+          const minute = Math.floor(Date.now() / 60000);
+          const triggerId = `auto_${contractId}_${currentUser!.id}_${points}_${minute}`;
+          const r = await invokeContract(contractId, '__protocol', {
+            targetUserId: currentUser!.id,
+            points,
+            reason: String(cd.note || '游戏内自动上报'),
+            questId: cd.questId ? String(cd.questId) : undefined,
+          }, triggerId);
+          if (!r.ok) {
+            console.warn(`[GamePlay] 合约贡献上报失败(${r.status}): ${r.error}`);
+            showRewardToast(false, `贡献上报失败: ${r.error || r.status}`);
+          }
+        })();
         return;
       }
 
@@ -730,7 +764,12 @@ export default function GamePlay() {
     if (!gameId || !gameHtmlContent && !game?.cdnUrl && !hasExternalHosting) return;
 
     // 等待 DOM 渲染完成找到 iframe
-    const timer = setTimeout(() => {
+    // 🆕 B1 安全加固：协议引擎已收紧为「未注册来源的上行消息一律丢弃（含 READY）」，
+    // 通道建立必须先于游戏首条 READY —— 固定 1s 延迟存在竞态（快游戏可能已发 READY）。
+    // 改为 100ms 快速轮询直至找到 iframe，10s 上限兜底。
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const tryEstablish = () => {
       const iframe = document.getElementById('game-iframe') as HTMLIFrameElement;
       if (iframe && protocolRef.current && gameId) {
         // 使用游戏发布时保存的协议模式，默认 inject
@@ -740,8 +779,11 @@ export default function GamePlay() {
           skills: skills.filter(s => s.enabled).map(s => s.id),
         });
         console.log('[GamePlay] 协议通道已建立:', gameId, 'mode:', channelMode);
+        return;
       }
-    }, 1000);
+      if (++attempts <= 100) timer = setTimeout(tryEstablish, 100);
+    };
+    timer = setTimeout(tryEstablish, 100);
 
     return () => clearTimeout(timer);
   }, [gameId, gameHtmlContent, game?.cdnUrl, game?.hostingType, skills]);
@@ -780,7 +822,7 @@ export default function GamePlay() {
       }
 
       // 通道就绪，执行兑换
-      import('@/services/voucherItemService').then(({ voucherItemService: vis }) => {
+      import('@/services/voucherItemService').then(async ({ voucherItemService: vis }) => {
         if (cancelled) return;
 
         // 🆕 内容凭证（内容工坊）走专用通道：核销后直接 postMessage CONTENT_PACK_APPLY，
@@ -822,6 +864,14 @@ export default function GamePlay() {
           } else {
             showRewardToast(false, r.message || '内容凭证使用失败');
           }
+          return;
+        }
+
+        // 🆕 B5：兑换前服务端流通校验（云端为准；校验服务不可达时放行）
+        const circ = await itemHarvestService.verifyVoucherForRedeem(pendingVoucherId, currentUser.id!);
+        if (cancelled) return;
+        if (!circ.ok) {
+          showRewardToast(false, circ.reason || '凭证校验失败');
           return;
         }
 
@@ -1000,7 +1050,7 @@ export default function GamePlay() {
 
   // 🆕 P1 平台侧反向提取：把游戏内道具提取为平台凭证（走与游戏内掉落提取完全相同的
   // 校验/白名单/每日限额/幂等链路；harvestId = 游戏 itemId 天然幂等去重）
-  const handleExtractGameItem = (item: { itemId: string; schemaName: string; itemData: Record<string, any> }) => {
+  const handleExtractGameItem = async (item: { itemId: string; schemaName: string; itemData: Record<string, any> }) => {
     if (!gameId || extractingItemId) return;
     if (!currentUser?.id) {
       showRewardToast(false, '请先登录后再提取道具');
@@ -1009,7 +1059,9 @@ export default function GamePlay() {
     setExtractingItemId(item.itemId);
     try {
       const allowedSchemas = protocolRef.current?.getChannelState(gameId)?.supportedSchemas || [];
-      const result = itemHarvestService.processItemHarvest({
+      // 🆕 B3：服务端权威铸造（异步）。成功（或幂等命中 duplicate：之前已提取成功但
+      // 游戏侧残留）→ 通知游戏删除该道具（防双花）；失败不删，保护玩家
+      const result = await itemHarvestService.processItemHarvestAsync({
         gameId,
         userId: currentUser.id,
         userName: currentUser.username,
@@ -1029,7 +1081,7 @@ export default function GamePlay() {
         });
         setGameItems(prev => prev.filter(it => it.itemId !== item.itemId));
         setHarvestRemaining(
-          currentUser.id ? itemHarvestService.getRemainingToday(currentUser.id, gameId) : null,
+          currentUser.id ? await itemHarvestService.getRemainingTodayAsync(currentUser.id, gameId) : null,
         );
       }
       showRewardToast(result.success, result.message);
@@ -1083,6 +1135,18 @@ export default function GamePlay() {
       }
       // 刷新列表（已消耗 1 张）
       setContentVouchers(vis.getUserContentVouchers(currentUser.id!, gameId));
+      // 🆕 GSO content_consume 记账点（2026-10-15）：按次消费 → 服务端 revenue_ledger
+      // 幂等键 cc_<voucherId>：一张凭证只消费一次，天然幂等；失败静默不影响核销主流程。
+      const consumedVoucher = contentVouchers.find(v => v.id === voucherId);
+      void gameDeveloperService.reportGsoRevenue({
+        gameId,
+        source: 'content_consume',
+        amount: Math.floor(Number(consumedVoucher?.denomination) || 0),
+        buyerId: currentUser.id,
+        buyerName: currentUser.username || '玩家',
+        itemName: content.name,
+        idempotencyKey: `cc_${voucherId}`,
+      });
     } catch (e) {
       showRewardToast(false, e instanceof Error ? e.message : '使用失败');
     } finally {
@@ -1383,7 +1447,10 @@ export default function GamePlay() {
                     if (next) {
                       fetchGameItems();
                       if (currentUser?.id && gameId) {
-                        setHarvestRemaining(itemHarvestService.getRemainingToday(currentUser.id, gameId));
+                        // 🆕 B3：额度以服务端计数为准（失败回落本地值）
+                        void itemHarvestService
+                          .getRemainingTodayAsync(currentUser.id, gameId)
+                          .then(v => setHarvestRemaining(v));
                       }
                     }
                   }}

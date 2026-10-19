@@ -402,7 +402,13 @@ export function createQuestsRouter(
             }
           }
         } else {
-          slotArr.push(rawData);
+          // 单对象 data（如单矿区/单关卡扩展）：同样记 submissionId，与数组行为一致（?ext= 隔离语义）
+          const subKey = (subId as string) || (submission as any)?.id || 'sub';
+          slotArr.push(
+            rawData && typeof rawData === 'object'
+              ? { ...(rawData as object), _submissionId: subKey }
+              : rawData,
+          );
         }
         await memoryDB.savePublishedGame({ ...(gdoc || {}), id: quest.gameId, [contentSlot]: slotArr });
       }
@@ -457,7 +463,9 @@ export function createQuestsRouter(
     const entryPoint = rawEntryPoint
       ? (assetManifest.some((a) => a.path === nsEntry + rawEntryPoint) ? nsEntry + rawEntryPoint : rawEntryPoint)
       : '';
-    if (assetManifest.length || entryPoint || contentPack.inject === true) {
+    // 纯数据提交（无 assets/entryPoint/注入）也要写 questExtensions：数据型扩展靠这条记录
+    // 在 GamePlay 扩展菜单出入口（?ext=<submissionId>），否则合并后玩家永远无法进入该扩展。
+    if (assetManifest.length || entryPoint || contentPack.inject === true || !dataIsEmpty) {
       const gdocE = await memoryDB.getPublishedGame(quest.gameId);
       const exts = Array.isArray((gdocE as any)?.questExtensions) ? (gdocE as any).questExtensions : [];
       exts.push({

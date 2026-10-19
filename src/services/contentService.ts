@@ -9,7 +9,8 @@
  * 与任务广场 merge 的区别：内容凭证是个人级按次消费（会话级），不写平台 injections。
  */
 
-import type { GameContentPack } from '@/types/quest';
+import type { GameContentPack, GameContentSop } from '@/types/quest';
+import { applyGamePatchToCache, patchGameOnBackend } from './publishedGameService';
 
 const CONTENT_API_BASE =
   typeof window !== 'undefined' && /tcloudbaseapp\.com$/.test(window.location.hostname)
@@ -113,6 +114,34 @@ export async function listContentAssets(gameId: string): Promise<ContentAssetRec
     return json?.success && Array.isArray(json?.data?.contents) ? json.data.contents : [];
   } catch {
     return [];
+  }
+}
+
+// ==================== 内容创作 SOP（跨浏览器同步，参考道具工坊 SOP proven pattern） ====================
+// 铁律：浏览器端 CloudBase DB 写入通道已损坏（auth.call is not a function → writeQueue 永不落库），
+// 唯一跨浏览器可靠写入通道 = gamesApi 云函数。因此：
+// - 保存：patchGameOnBackend（PATCH /api/v1/games/:id，admin SDK 字段级合并 upsert），
+//   只 patch contentSop 字段 —— 不触碰封面/简介/entryHtmlContent/审核字段，无全量覆盖风险；
+// - 加载：游戏列表/详情接口（GET /api/v1/games）原样返回 contentSop 字段，云端即权威源，
+//   前端缓存缺 SOP 时用 refreshGameDetail 补拉一次即可。
+
+/**
+ * 保存内容创作 SOP（跨浏览器同步）。
+ * 成功后同步合并进前端缓存（内存 + 持久缓存），本会话即时生效；
+ * 返回是否成功落库（失败时调用方应提示「仅本次会话生效」）。
+ */
+export async function saveContentSop(gameId: string, sop: GameContentSop): Promise<boolean> {
+  try {
+    const payload: GameContentSop = { ...sop, updatedAt: Date.now() };
+    const ok = await patchGameOnBackend(gameId, { contentSop: payload });
+    if (ok) {
+      // 缓存同步：getPublishedGame / getPublishedGames 立即可读新 SOP
+      applyGamePatchToCache(gameId, { contentSop: payload });
+    }
+    return ok;
+  } catch (e) {
+    console.warn('[ContentService] saveContentSop 失败:', e);
+    return false;
   }
 }
 

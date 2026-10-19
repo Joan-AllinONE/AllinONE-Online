@@ -1,0 +1,31 @@
+{
+  "enabled": true,
+  "contentTypes": [
+    {
+      "type": "map",
+      "slot": "levels",
+      "label": "拼豆图纸",
+      "description": "创作一张拼豆图纸（像素图案）。被社区采用后会出现在游戏「社区图纸」区，支持 临摹 / 填充 / 挑战 三种玩法。",
+      "modes": ["data", "inject"],
+      "apiGuide": "【数据型】data = { id, title, cols, rows, legend:{字符: '#rrggbb'}, layout:['..RR..', ...] }，或直接给 grid: [[ '#rrggbb' | null, ... ], ...]。字符 '.' 与未登记字符 = 空格。尺寸 2~59，超出自动截断、不足自动补空。【脚本型】在 data 里给 script: 'js/pattern.js'，该脚本定义 window.BeadLevel = { build: function(api){} }；api 暴露 setBead(c,r,hex) / rect(x0,y0,x1,y1,hex) / fill(hex) / grid（二维数组引用）/ COLS / ROWS。"
+    },
+    {
+      "type": "item",
+      "slot": "items",
+      "label": "配色包",
+      "description": "一组自定义拼豆颜色，载入后加入调色板，本次会话可用。适合做马卡龙色系、霓虹色系、复古色系等主题配色。",
+      "modes": ["data"],
+      "apiGuide": "data = { colors: [ { name:'奶油杏', hex:'#ffd8b1' }, ... ] }，也可直接给数组 [ '#ffd8b1', '#ff9aa2' ]。颜色必须是 #rgb 或 #rrggbb，非法值会被忽略。建议 4~12 色。"
+    },
+    {
+      "type": "custom",
+      "slot": "skins",
+      "label": "熨烫纹理",
+      "description": "自定义熨烫定型后的表面纹理与光泽（如闪光、金属、渐变）。以注入脚本方式生效，仅本次会话有效。",
+      "modes": ["inject"],
+      "apiGuide": "注入模式由平台直接注入脚本，游戏侧不提供专门的纹理 API。请勿依赖任何游戏内部变量名——游戏源码不属于公开接口，内部实现变更不会另行通知。建议只做视觉叠加，不要改动核心玩法数据。"
+    }
+  ],
+  "allowedModes": ["data", "inject"],
+  "sopDocument": "# 豆趣工坊·像素熨斗 内容创作指南\n\n玩家可以为本游戏创作三类内容：拼豆图纸（slot: levels）、配色包（slot: items）、熨烫纹理（slot: skins，注入模式）。\n\n## 拼豆图纸（最推荐）\n\n数据型格式：\n\n```json\n{\n  \"id\": \"cat\",\n  \"title\": \"小猫\",\n  \"cols\": 13,\n  \"rows\": 13,\n  \"legend\": { \".\": null, \"K\": \"#3a3a4a\", \"W\": \"#ffffff\", \"P\": \"#ffb3c6\" },\n  \"layout\": [\n    \".............\",\n    \"..K.......K..\",\n    \"..KK.....KK..\",\n    \"..KKKKKKKKK..\",\n    \"..KWKKKKKWK..\",\n    \"..KKKKPPPKK..\",\n    \"..KKKKKKKKK..\",\n    \"...KKKKKKK...\",\n    \"....KKKKK....\",\n    \".............\"\n  ]\n}\n```\n\n规则：\n- `.` 或 legend 里未登记的字符 = 空格（不放豆）\n- 颜色必须是 `#rgb` 或 `#rrggbb`，其他值一律当空格处理\n- cols / rows 取值范围 2~59；不填则按 layout 自动推算；超出截断、不足补空\n- 至少要有 1 颗豆，全空图纸会被拒绝\n- 建议：新手 13×13、进阶 21×21 / 29×29、硬核 43×43\n\n## 配色包\n\n```json\n{ \"colors\": [ { \"name\": \"奶油杏\", \"hex\": \"#ffd8b1\" }, { \"name\": \"雾霾蓝\", \"hex\": \"#8fb8de\" } ] }\n```\n\n## 安全约束\n\n- 颜色字段只接受 `#` 开头的十六进制色值，任何脚本写法都会被丢弃\n- 脚本型图纸由审核流程 + 沙箱管控，请勿提交任何访问网络、读写本地存储的代码\n- 不要提交受版权保护的商业 IP 形象作为图纸内容\n"
+}

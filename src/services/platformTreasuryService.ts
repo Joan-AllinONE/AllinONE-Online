@@ -20,7 +20,7 @@ import type { Voucher } from '@/voucher-system/types';
 import { loadTreasury as loadTreasuryFromMarket } from '@/types/marketplace';
 import type { PlatformTreasury } from '@/types/marketplace';
 import { PLATFORM_POOL_ID } from '@/services/voucherPaymentService';
-import { saveToBackend } from '@/services/backendSync';
+import { saveToBackend, loadFromBackend } from '@/services/backendSync';
 
 // ==================== 常量 ====================
 
@@ -36,6 +36,7 @@ export type TreasurySource =
   | 'voucher_recycle'     // 凭证规则回收
   | 'voucher_expire'      // 凭证过期回收
   | 'platform_collect'    // 平台手续费
+  | 'three_way_split';    // 🆕 游戏币三方分成（服务端 gamecoins-split 即时 credit 至 platform_treasury）
 
 export interface TreasuryTransaction {
   id: string;
@@ -52,6 +53,8 @@ export interface RevenueBreakdown {
   proposalForfeit: number;
   voucherRecycle: number;
   platformCollect: number;
+  /** 🆕 游戏币三方分成平台份额（服务端 gamecoins-split，users['platform_treasury'] 账本） */
+  threeWaySplit: number;
 }
 
 export interface TreasuryReport {
@@ -93,6 +96,16 @@ export interface VoucherAccountSnapshot {
   activeCount: number;
   frozenCount: number;
 }
+
+/** 金库收入来源标签（PlatformAdmin / PlatformDataCenter 共用，保证两处明细一致） */
+export const TREASURY_SOURCE_LABEL: Record<string, string> = {
+  three_way_split: '三方分成',
+  p2p_commission: 'P2P佣金',
+  proposal_forfeit: '提案罚没',
+  voucher_recycle: '凭证回收',
+  voucher_expire: '过期回收',
+  platform_collect: '平台手续费',
+};
 
 // ==================== Service ====================
 
@@ -186,12 +199,42 @@ class PlatformTreasuryService {
       .filter(t => t.currency === 'aCoins' && t.timestamp > now - MONTH)
       .reduce((s, t) => s + t.amount, 0);
 
+    // 🆕 服务端三方分成收益聚合（2026-10-09）：
+    // gamecoins-split 的平台份额即时 credit 至服务端 users['platform_treasury']（服务端账本），
+    // 与本地 system-platform 账本（市场佣金/回收等）是两个不同账户——必须聚合才是平台真实 gameCoins 资产。
+    // 明细来源：GET /api/v1/games/transactions（txId 前缀 gcsplit_ 的 income 记录）。
+    let serverSplitGC = 0;
+    let serverSplitToday = 0;
+    let serverSplitMonth = 0;
+    let serverTreasuryBalance = 0;
+    try {
+      const [serverUsers, serverTxs] = await Promise.all([
+        loadFromBackend<any>('users'),
+        loadFromBackend<any>('transactions'),
+      ]);
+      const treUser = serverUsers.find(
+        u => u && (u._openid === 'platform_treasury' || u.id === 'platform_treasury')
+      );
+      serverTreasuryBalance = Number(treUser?.gameCoins) || 0;
+      for (const t of serverTxs) {
+        if (!t || t.userId !== 'platform_treasury' || t.type !== 'income') continue;
+        if (!String(t.txId || t.id || '').startsWith('gcsplit_')) continue;
+        const amt = Number(t.amount) || 0;
+        serverSplitGC += amt;
+        if (t.timestamp > now - DAY) serverSplitToday += amt;
+        if (t.timestamp > now - MONTH) serverSplitMonth += amt;
+      }
+    } catch {
+      // 后端不可达 → 保持 0（余额降级为本地账本口径，不阻塞报表）
+    }
+
     // 按来源分类（所有历史）
     const breakdown: RevenueBreakdown = {
       p2pCommission: 0,
       proposalForfeit: 0,
       voucherRecycle: 0,
       platformCollect: 0,
+      threeWaySplit: serverSplitGC,
     };
     for (const t of txs) {
       switch (t.source) {
@@ -206,12 +249,13 @@ class PlatformTreasuryService {
 
     return {
       balance: {
-        gameCoins: walletGC,
+        // 本地账本（system-platform）+ 服务端金库账本（platform_treasury，含三方分成）合计
+        gameCoins: walletGC + serverTreasuryBalance,
         aCoins: voucherAC,
       },
       cumulative: breakdown,
-      todayIncome: { gameCoins: todayGC, aCoins: todayAC },
-      monthlyIncome: { gameCoins: monthGC, aCoins: monthAC },
+      todayIncome: { gameCoins: todayGC + serverSplitToday, aCoins: todayAC },
+      monthlyIncome: { gameCoins: monthGC + serverSplitMonth, aCoins: monthAC },
       totalTransactions: txs.length,
       vouchers: voucherHoldings,
       lastUpdated: now,
@@ -299,6 +343,36 @@ class PlatformTreasuryService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * 🆕 金库收入明细（每笔）：本地金库流水 + 服务端 platform_treasury 分账流水合并，倒序。
+   * 服务端流水来自 GET /api/v1/games/transactions（txId 前缀 gcsplit_ = 游戏币三方分成平台份额）。
+   */
+  async getDetailTransactions(limit = 50): Promise<TreasuryTransaction[]> {
+    const local = this.getTransactions();
+    let server: TreasuryTransaction[] = [];
+    try {
+      const rows = await loadFromBackend<any>('transactions');
+      server = rows
+        .filter(t => t && t.userId === 'platform_treasury' && t.type !== 'expense')
+        .map(t => ({
+          id: String(t.txId || t.id || `srv_${t.timestamp}`),
+          currency: 'gameCoins' as const,
+          amount: Number(t.amount) || 0,
+          source: (
+            String(t.txId || '').startsWith('gcsplit_') ? 'three_way_split' : 'platform_collect'
+          ) as TreasurySource,
+          description: t.description || '',
+          metadata: { server: true },
+          timestamp: Number(t.timestamp) || 0,
+        }));
+    } catch {
+      // 后端不可达 → 仅本地流水
+    }
+    return [...server, ...local]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
   }
 
   /**

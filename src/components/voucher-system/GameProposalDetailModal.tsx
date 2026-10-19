@@ -21,6 +21,7 @@ import {
 } from '@/types/gameProposal';
 import { gameProposalService } from '@/services/gameProposalService';
 import { voucherItemService } from '@/services/voucherItemService';
+import { gameDeveloperService } from '@/services/gameDeveloperService';
 import { voteVoucherService } from '@/voucher-system/services/VoteVoucherService';
 import { VoteSettlementStatus } from '@/voucher-system/types/vote';
 import { generateSimulatedPlayers } from '@/data/simulatedPlayers';
@@ -177,8 +178,27 @@ const GameProposalDetailModal: React.FC<GameProposalDetailModalProps> = ({
 
   const voteRecords = getVoteRecords();
 
-  const handleExecute = () => {
+  const handleExecute = async () => {
     if (!confirm('确认执行该提案？')) return;
+    // 🆕 三方分成配置提案：先写入游戏分成配置（校验失败则中止执行）
+    if (proposal.revenueSharing) {
+      const rsResult = await gameDeveloperService.applyRevenueSharingConfig({
+        gameId: proposal.gameId,
+        gameName: proposal.gameName,
+        config: {
+          gameShare: proposal.revenueSharing.gameShare,
+          platformShare: proposal.revenueSharing.platformShare,
+          creatorShare: proposal.revenueSharing.creatorShare || 0,
+          creatorId: proposal.revenueSharing.creatorId,
+          creatorName: proposal.revenueSharing.creatorName,
+        },
+        proposalId: proposal.id,
+      });
+      if (!rsResult.success) {
+        alert(`分成配置校验失败：${rsResult.message}`);
+        return;
+      }
+    }
     const result = voucherItemService.executeProposalByType(proposal);
     if (result.success) {
       const updated = gameProposalService.getProposal(proposal.id);
@@ -448,6 +468,21 @@ const GameProposalDetailModal: React.FC<GameProposalDetailModalProps> = ({
                     )}
                   </div>
                 </div>
+                {/* 🆕 创作者身份说明：通过后写入该游戏三方分成配置，此后每笔道具销售按此分账 */}
+                {proposal.revenueSharing.creatorShare && proposal.revenueSharing.creatorShare > 0 && (
+                  <p className="text-xs text-amber-300/90 mt-2">
+                    创作者：{proposal.revenueSharing.creatorName || '未指定'}
+                    {proposal.revenueSharing.creatorId && (
+                      <span className="text-slate-500"> (ID: {proposal.revenueSharing.creatorId})</span>
+                    )}
+                    {!proposal.revenueSharing.creatorId && (
+                      <span className="text-red-400"> — 未指定创作者 ID，提案执行将被拒绝</span>
+                    )}
+                  </p>
+                )}
+                <p className="text-xs text-slate-500 mt-1">
+                  提案通过后写入该游戏的分成配置，此后每笔道具销售按此比例三方分账
+                </p>
               </div>
             )}
 

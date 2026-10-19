@@ -294,7 +294,7 @@ function MyItemsPanel() {
               const customData = voucher.metadata?.customData || {};
               const rarity = customData.rarity || 'common';
               const purchase = myPurchases.find((p: any) => p.voucherId === voucher.id);
-              const code = purchase?.redeemCode;
+              const code = purchase?.redeemCode || (voucher as any).redeemCode; // 兜底：合约交割凭证码直接挂凭证上
 
               return (
                 <motion.div

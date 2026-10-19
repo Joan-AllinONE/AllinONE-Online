@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "contentTypes": [
+    {
+      "type": "map",
+      "slot": "levels",
+      "label": "矿区",
+      "description": "创作自定义翡翠矿区（矿脉）。data 为矿区参数：id/name/price/green/cap/w（品质权重表）等，合并后出现在矿区页，标注「🧩 玩家矿区」。",
+      "modes": ["data"],
+      "apiGuide": "数据型矿区：data={ id, name, icon, price, green, cap, lv, skin, skinName, desc, w }。price 为起价玉币(50~1000万)，green 为出绿概率(0.02~0.6，支持百分制)，cap 为极品价值封顶，w 为 [[种水id,权重]] 数组（种水id: dou/nuo/bing/boli/diwang），lv 为解锁爵位等级(1~60)，skin 为皮壳底版(dark/brown/white/wax 或 1~4)。全部字段都有兜底，缺了自动补默认值。"
+    }
+  ],
+  "allowedModes": ["data"],
+  "sopDocument": "# 缅川公盘矿区创作指南\n\n## 玩法背景\n玩家在矿区挑选原石、解玉赌涨。一个矿区 = 一种风险档位：起价、出绿率、品质权重、极品封顶共同决定它的性格。\n\n## 矿区数据结构\n```json\n{\n  \"id\": \"mayang_keng\",\n  \"name\": \"莫西沙场口\",\n  \"icon\": \"🏔️\",\n  \"lv\": 8,\n  \"price\": 3000,\n  \"green\": 0.2,\n  \"cap\": 80000,\n  \"skin\": \"white\",\n  \"skinName\": \"脱砂皮\",\n  \"desc\": \"脱砂见底的好场口，种水到冰是常态。\",\n  \"w\": [[\"dou\",30],[\"nuo\",30],[\"bing\",25],[\"boli\",12],[\"diwang\",3]]\n}\n```\n\n## 字段说明\n| 字段 | 必填 | 约束 | 说明 |\n|---|---|---|---|\n| id | 建议 | 字母数字下划线，≤20 字符 | 冲突时自动改生成 id |\n| name | ✅ | ≤10 字 | 矿区显示名 |\n| icon | 可选 | 1 个 emoji | 卡片图标，默认 ⛰️ |\n| lv | 可选 | 1~60 | 解锁爵位等级，默认 1 |\n| price | ✅ | 50~10,000,000 | 原石起价（玉币），实际按大小形状浮动 |\n| green | ✅ | 0.02~0.6 | 出绿概率，0.2=20%，也接受百分制 20 |\n| cap | 可选 | ≥price×1.5 | 极品价值封顶，默认 price×10 |\n| skin | 可选 | dark/brown/white/wax | 皮壳底版：黑乌沙/黄砂水石/白盐沙/腊壳 |\n| skinName | 可选 | ≤8 字 | 皮壳显示名 |\n| desc | 可选 | ≤40 字 | 矿区介绍 |\n| w | 建议 | 见上 | 出绿后的种水分布权重，非法项自动剔除，全空给默认表 |\n\n## 设计守则\n1. **期望回值约 95%~105%**：参考内置四矿区——高 green 配低 cap（黑乌沙 25%/5000），低 green 配高 cap（帝王场 5%/500万）\n2. price 与 cap 差距越大越'赌'：cap/price 比即最大单刀倍数\n3. w 里 diwang 权重建议 ≤8，否则产出失衡\n4. 不要把 green 设到 0.6 以上（平台会夹取），不要做'稳赚矿区'\n\n## 安全约束\n- 只允许数据型提交（modes: data），不接受脚本\n- 玩家矿区在游戏内明确标注「🧩 玩家矿区」，不与官方矿区混淆\n- 全部数值经服务端校验与游戏侧兜底夹取\n\n## 提交格式\nContentPack → slot: levels, type: map, data: 上表结构。不需要 assets。"
+}

@@ -1,0 +1,85 @@
+{
+  "schemaName": "supermario-item",
+  "description": "超级玛丽道具 — 玩家可创作的增益道具，增强平台跳跃体验",
+  "aiPrompt": "你正在为经典平台跳跃游戏《超级玛丽》设计道具。游戏核心是控制角色移动、跳跃、踩敌、收集金币并抵达旗杆过关。道具应能帮助玩家更轻松地完成关卡，例如增加分数、增加生命、变大、无敌、补充时间或清场敌人。请创作符合超级玛丽世界观的、平衡且有趣的道具。",
+  "availableEffects": [
+    "add_score",
+    "add_life",
+    "become_big",
+    "invincible",
+    "add_time",
+    "clear_enemies"
+  ],
+  "effectRules": [
+    "add_score: 立即增加分数，bonus 为 5-50 的整数",
+    "add_life: 增加一条额外生命，无参数",
+    "become_big: 使玩家变大（如果当前为小玛丽），无参数",
+    "invincible: 使玩家进入无敌状态持续 duration 帧（约 60 帧/秒），duration 建议 60-300",
+    "add_time: 增加关卡剩余时间（秒），seconds 建议 10-60",
+    "clear_enemies: 立即清除屏幕上所有敌人，无参数"
+  ],
+  "constraints": {
+    "maxScoreBonus": 50,
+    "maxTimeAdd": 60,
+    "maxInvincibleDuration": 300,
+    "minTimeAdd": 10
+  },
+  "forbidden": [
+    "不得直接通关或跳过旗杆",
+    "不得无限增加生命或分数（建议单次道具加命≤1，加分≤50）",
+    "不得删除游戏核心障碍（如管道、砖块）",
+    "不得修改玩家操作方式或物理引擎"
+  ],
+  "effectCodeEnabled": true,
+  "effectCodeSignature": "function(params)",
+  "effectCodeReturns": "{ message: string }",
+  "effectCodeSandbox": {
+    "api": "游戏 API 对象，包含 getScore, addScore, addLife, becomeBig, setInvincible, addTime, clearEnemies 等方法",
+    "Math": "JS Math",
+    "JSON": "JS JSON"
+  },
+  "presetItems": [
+    {
+      "name": "金币袋",
+      "effect": "add_score",
+      "params": { "bonus": 20 },
+      "description": "立即获得 20 分",
+      "icon": "💰"
+    },
+    {
+      "name": "1UP 蘑菇",
+      "effect": "add_life",
+      "params": {},
+      "description": "增加一条命",
+      "icon": "🍄"
+    },
+    {
+      "name": "超级蘑菇",
+      "effect": "become_big",
+      "params": {},
+      "description": "变成大玛丽",
+      "icon": "🌟"
+    },
+    {
+      "name": "无敌星",
+      "effect": "invincible",
+      "params": { "duration": 180 },
+      "description": "无敌 3 秒",
+      "icon": "⭐"
+    },
+    {
+      "name": "时间沙漏",
+      "effect": "add_time",
+      "params": { "seconds": 30 },
+      "description": "增加 30 秒时间",
+      "icon": "⏳"
+    },
+    {
+      "name": "大锤",
+      "effect": "clear_enemies",
+      "params": {},
+      "description": "清除所有敌人",
+      "icon": "🔨"
+    }
+  ]
+}

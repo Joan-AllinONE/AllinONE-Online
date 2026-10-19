@@ -112,6 +112,7 @@ export default function QuestDetailModal({ quest, onClose, onChanged }: Props) {
 
   // 关闭/删除任务（仅创建者可用）
   const [adminBusy, setAdminBusy] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
   const [adminMsg, setAdminMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isOwner = !!quest.createdBy && quest.createdBy === getCurrentUserId();
@@ -325,6 +326,15 @@ export default function QuestDetailModal({ quest, onClose, onChanged }: Props) {
           <div className="flex items-start justify-between p-6 border-b border-slate-200 dark:border-slate-700">
             <div>
               <h2 className="text-xl font-bold text-slate-900 dark:text-white">{quest.title}</h2>
+              <button
+                type="button"
+                title="点击复制任务编号，可在发起组团合约（team-quest）时关联此任务"
+                onClick={() => { navigator.clipboard.writeText(quest.id).catch(() => {}); setCopiedId(true); setTimeout(() => setCopiedId(false), 1500); }}
+                className="mt-1 inline-flex items-center gap-1 text-xs font-mono text-slate-400 hover:text-emerald-500 transition-colors"
+              >
+                <span>#{quest.id}</span>
+                {copiedId && <span className="text-emerald-500">已复制</span>}
+              </button>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{quest.description}</p>
               <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
                 <span className="flex items-center gap-1">

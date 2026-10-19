@@ -18,6 +18,7 @@ import {
   CircleDollarSign,
   Zap,
   Calculator,
+  ReceiptText,
 } from 'lucide-react';
 import { Voucher, VoucherStatus, Transaction, VoucherSourceType } from '../types';
 
@@ -114,12 +115,15 @@ export const VoucherCard = forwardRef<HTMLDivElement, VoucherCardProps>(function
    * 对于小于1的小数值，保留足够多的小数位
    */
   const formatDenomination = (value: number): string => {
-    if (value === 0) return '0';
-    if (value >= 1) {
-      return value.toLocaleString('zh-CN');
+    // gbr 履约收据等非面额凭证没有 denomination 字段，防御性兜底避免整页崩溃
+    if (value === undefined || value === null || Number.isNaN(Number(value))) return '—';
+    const n = Number(value);
+    if (n === 0) return '0';
+    if (n >= 1) {
+      return n.toLocaleString('zh-CN');
     }
     // 对于小于1的值，保留足够的小数位数
-    return value.toFixed(value < 0.001 ? 6 : 4);
+    return n.toFixed(n < 0.001 ? 6 : 4);
   };
 
   const formatDuration = (ms: number) => {
@@ -252,6 +256,58 @@ export const VoucherCard = forwardRef<HTMLDivElement, VoucherCardProps>(function
             </p>
           </div>
         </div>
+
+        {/* 拼团收据信息（gbr）：metadata 由服务端合约铸造时写入 */}
+        {voucher.metadata?.kind === 'group-buy-receipt' && (
+          <div className="space-y-2 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
+            <div className="flex items-center gap-2 text-sm">
+              <ReceiptText className="w-4 h-4 text-indigo-500" />
+              <span className="text-indigo-700 dark:text-indigo-300 font-medium">拼团收据</span>
+              {voucher.metadata?.fulfilled ? (
+                <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">已发货</span>
+              ) : (
+                <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">待发货</span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">道具</span>
+                <p className="text-slate-800 dark:text-slate-100 font-medium truncate">{String(voucher.metadata?.itemTitle || '未指定')}</p>
+              </div>
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">成团价</span>
+                <p className="text-slate-800 dark:text-slate-100 font-medium">
+                  {formatDenomination(Number(voucher.metadata?.groupPrice))} {String(voucher.metadata?.currency || 'gameCoins') === 'gameCoins' ? '游戏币' : 'A币'}
+                </p>
+              </div>
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">合约</span>
+                <p className="text-slate-600 dark:text-slate-300 font-mono truncate">{String(voucher.metadata?.contractId || '-')}</p>
+              </div>
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">发货凭证</span>
+                <p className="text-slate-600 dark:text-slate-300 font-mono truncate">{voucher.metadata?.itemVoucherId ? String(voucher.metadata.itemVoucherId).slice(0, 8) + '…' : '—'}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 兑换码（道具凭证）：合约交割/购买后由平台发放，游戏内输入核销 */}
+        {(voucher as any).redeemCode && (
+          <div className="flex items-center justify-between gap-2 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800">
+            <div className="min-w-0">
+              <p className="text-xs text-slate-500 dark:text-slate-400">🎫 兑换码（游戏内输入领取）</p>
+              <p className="font-mono font-bold text-emerald-700 dark:text-emerald-300 text-sm truncate">{String((voucher as any).redeemCode)}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { navigator.clipboard.writeText(String((voucher as any).redeemCode)).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+              className="shrink-0 text-xs px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium transition-colors"
+            >
+              {copied ? '已复制' : '复制'}
+            </button>
+          </div>
+        )}
 
         {/* Transfer Count */}
         {voucher.transferCount > 0 && (

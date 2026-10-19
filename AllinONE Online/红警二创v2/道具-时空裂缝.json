@@ -1,0 +1,8 @@
+{
+  "name": "时空裂缝",
+  "effect": "spacetime_rift_ec",
+  "params": {},
+  "description": "使用后地图随机位置生成持续15秒的传送门，任何单位踏入都会被传送到敌方基地内部，直接打穿防线。基于 effectCode 调用引擎 spawnPortal 命令实现。",
+  "icon": "🌀",
+  "effectCode": "function(params){var game=arguments[0];if(!game||!game.world)return{error:true,message:'游戏未启动'};var w=game.world;var rx=Math.floor(Math.random()*w.terrain.width);var ry=Math.floor(Math.random()*w.terrain.height);var me=game.localPlayerId,enemyId=-1;w.players.forEach(function(p){if(p.id!==me)enemyId=p.id;});var tx=5,ty=5;w.entities.forEach(function(e){if(e.owner===enemyId){var d=w.rules.units.get(e.typeId);if(d&&d.isConYard){tx=e.cellX;ty=e.cellY;}}});var C=256;game.emit({kind:'spawnPortal',owner:me,x:rx*C+C/2,y:ry*C+C/2,radius:170,durationSec:15,targetX:tx*C+C/2,targetY:ty*C+C/2});return{message:'🌀 时空裂缝开启！15秒内踏入单位直插敌方基地'};}"
+}

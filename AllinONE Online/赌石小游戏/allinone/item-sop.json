@@ -1,0 +1,37 @@
+{
+  "schemaName": "gushi-powerup",
+  "aiPrompt": "《缅川公盘》是一款翡翠赌石模拟游戏（纯虚拟玉币）。玩家扮演玉石商人在四大矿区购买原石，通过相玉（观察皮壳/蟒带/松花/开窗）与解玉（擦皮/一刀切）揭晓内部种水（垮料→豆种→糯种→冰种→玻璃种→帝王绿），再按浮动行情出售或加工成手镯/玉牌等成品。道具均为商人随身宝物：补足玉币、补充强光手电次数、提升下一块原石出绿率、或拉升市场行情帮助出货。数值必须克制，不得破坏'一刀穷一刀富'的核心随机乐趣。",
+  "availableEffects": ["add_coins", "flash_plus", "lucky_cut", "market_up", "mine_pass"],
+  "effectRules": {
+    "add_coins": "直接增加玉币。params.bonus 为增加数量，范围 500~50000，默认 1000。经济兜底类道具。",
+    "flash_plus": "补充强光手电次数（每日免费 3 次，用完需等次日）。params.times 为补充次数，范围 1~9，默认 3。",
+    "lucky_cut": "幸运加持：接下来购买的石头出绿率 ×1.6。params.cuts 为持续石头数，范围 1~9，默认 1。购买时才消耗，刷新石阵不消耗。",
+    "market_up": "行情拉升：立即把市场行情系数拉到 params.mult（范围 1.1~1.5，默认 1.4）并冻结 params.seconds 秒（范围 15~600，默认 60），期间出售最划算。",
+    "mine_pass": "场口入场券：发放 params.times 张入场券（范围 1~9，默认 1）。玩家可持券进入等级不足的矿区并购买原石 1 次，购买后券失效；未购买就换场会自动退券。不改变玩家等级与基础爆率。"
+  },
+  "constraints": {
+    "add_coins.bonus": { "min": 500, "max": 50000 },
+    "flash_plus.times": { "min": 1, "max": 9 },
+    "lucky_cut.cuts": { "min": 1, "max": 9 },
+    "market_up.mult": { "min": 1.1, "max": 1.5 },
+    "market_up.seconds": { "min": 15, "max": 600 },
+    "mine_pass.times": { "min": 1, "max": 9 }
+  },
+  "forbidden": [
+    "禁止直接修改玩家等级、爵位（学徒→玉皇必须靠解玉攒经验晋升；mine_pass 只提供一次性进入资格，不晋级）",
+    "禁止直接给仓库添加任何种水的玉石（破坏赌石随机体验）",
+    "禁止把行情系数拉到 1.5 以上或 1.0 以下",
+    "禁止一次性发放超过 50000 玉币"
+  ],
+  "effectCodeEnabled": true,
+  "effectCodeSignature": "function(params)",
+  "effectCodeReturns": "{ message: string }",
+  "effectCodeSandbox": "gameAPI: { addCoins(n), addFlash(times), setLuck(cuts), boostMarket(mult, seconds), addMinePass(times) }，另有 Math / JSON / console",
+  "presetItems": [
+    { "name": "玉商盘缠", "effect": "add_coins", "params": { "bonus": 2000 }, "description": "老主顾借你的周转玉币 +2,000", "icon": "💰" },
+    { "name": "夜市手电", "effect": "flash_plus", "params": { "times": 3 }, "description": "高亮强光手电 3 次相玉机会", "icon": "🔦" },
+    { "name": "松花信物", "effect": "lucky_cut", "params": { "cuts": 1 }, "description": "带蟒上松花的好兆头，下一块石头出绿率大增", "icon": "🍀" },
+    { "name": "粤帮抬价", "effect": "market_up", "params": { "mult": 1.4, "seconds": 60 }, "description": "粤帮买家进场扫货，行情拉升 60 秒", "icon": "📈" },
+    { "name": "场口入场券", "effect": "mine_pass", "params": { "times": 1 }, "description": "公盘贵宾券：无视爵位进入任意未解锁场口，购石 1 次后失效", "icon": "🎫" }
+  ]
+}

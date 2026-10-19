@@ -19,6 +19,7 @@
 import { voucherService } from '@/voucher-system';
 import { skillGateway } from '@/skills';
 import { voucherItemService } from './voucherItemService';
+import { getRuleValue } from './platformRulesService';
 import {
   VoucherSourceType,
   VoucherStatus,
@@ -40,19 +41,16 @@ import {
 
 // ==================== 常量 ====================
 
-const MAX_DAILY_CONVERSIONS = 20;
 const DAILY_LOG_KEY = 'cross_game_conversions';
 /** 折损超过该比例时 UI 需显式提示 */
 const VALUE_LOSS_WARN_THRESHOLD = 0.2;
-/** 跨游戏兑换手续费率：按目标道具价值收取（2026-09-13 新增） */
-export const EXCHANGE_FEE_RATE = 0.1;
 
 /**
- * 跨游戏兑换手续费 = 目标道具价值 × 10%
+ * 跨游戏兑换手续费 = 目标道具价值 × cross_exchange.fee_rate（规则注册中心，治理门控修改）
  * 支付方式由玩家选择：钱包游戏币（精确扣款）或 A 币凭证（整张支付不找零）
  */
 export function calcExchangeFee(targetValue: number): number {
-  return round2(Math.max(0, targetValue) * EXCHANGE_FEE_RATE);
+  return round2(Math.max(0, targetValue) * getRuleValue('cross_exchange.fee_rate'));
 }
 /** 双花兜底：核销源凭证失败时，把源凭证转入平台池使其脱离用户（与 voucherItemService 保持一致） */
 const PLATFORM_POOL_ID = 'platform_pool';
@@ -638,9 +636,10 @@ export async function executeConversion(input: ConversionExecuteRequest): Promis
   }
   const { option } = cached;
 
-  // 每日限额
-  if (todayConversionCount(userId) >= MAX_DAILY_CONVERSIONS) {
-    return { success: false, message: `今日跨游戏兑换已达上限（${MAX_DAILY_CONVERSIONS} 次）` };
+  // 每日限额（规则注册中心：cross_exchange.daily_limit）
+  const dailyLimit = getRuleValue('cross_exchange.daily_limit');
+  if (todayConversionCount(userId) >= dailyLimit) {
+    return { success: false, message: `今日跨游戏兑换已达上限（${dailyLimit} 次）` };
   }
 
   const voucher = voucherService.getVoucherById(voucherId);
@@ -848,6 +847,13 @@ export async function executeConversion(input: ConversionExecuteRequest): Promis
     };
   }
 
+  // 🆕 B5：兑换前服务端流通校验（云端为准；校验服务不可达时放行）
+  const { itemHarvestService } = await import('./itemHarvestService');
+  const circ = await itemHarvestService.verifyVoucherForRedeem(voucherId, userId);
+  if (!circ.ok) {
+    return { success: false, message: circ.reason || '凭证校验失败' };
+  }
+
   const result = voucherItemService.redeemItemVoucher({
     userId,
     userName,
@@ -886,5 +892,4 @@ export const crossGameExchange = {
   listConversionOptions,
   executeConversion,
   clearConversionCache,
-  MAX_DAILY_CONVERSIONS,
 };

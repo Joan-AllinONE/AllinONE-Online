@@ -1,0 +1,332 @@
+{
+  "schemaName": "godot-rpg-item",
+  "description": "Godot RPG 网页版道具 — 支持增益 / 恢复 / 经济类创作，不破坏平衡",
+  "aiPrompt": "这是一个 2D 俯视角动作 RPG 网页游戏（含小镇 / 雪地郊外 / 洞穴多张地图）。玩家用 WASD 移动、空格攻击、1-4 释放技能、E 交互（钓鱼 / 对话 / 进门）。玩家拥有生命(HP)、法力(MP)、经验(EXP)、等级、金币、背包（道具 / 装备）与任务系统。道具应当用于帮助玩家更轻松地探索与战斗：治疗、恢复法力、增加经验、增加金币、发放物品。请只创作增益 / 恢复 / 经济类道具，不要创作导致直接通关、秒杀 Boss 或使玩家死亡的道具。",
+  "availableEffects": [
+    "add_coins",
+    "heal",
+    "restore_mp",
+    "full_heal",
+    "add_exp",
+    "add_item",
+    "apply_enchant"
+  ],
+  "effectRules": [
+    "add_coins: 增加玩家金币，amount 为 1-9999 的整数",
+    "heal: 恢复玩家生命，amount 为 1-200 的整数（超过上限自动截断）",
+    "restore_mp: 恢复玩家法力，amount 为 1-200 的整数（超过上限自动截断）",
+    "full_heal: 将生命与法力恢复至上限（无需参数）",
+    "add_exp: 增加玩家经验，amount 为 1-1000 的整数（满足阈值会自动升级并提升属性）",
+    "add_item: 向背包发放物品，item 为物品 path（如 res://data/potions/item_hp_small_5.tres），amount 为 1-64",
+    "apply_enchant: 武器附魔（游戏内置逻辑，无需 effectCode）。对玩家武器附魔一段时间，之后每次挥砍命中敌人都会追加元素特效、附加元素伤害并施加状态。参数 element∈{lightning,fire,freeze,poison}、level(≥1，等级越高每次命中的附加伤害越大，bonus=base×level)、duration(秒，默认30)、base(每级基础附加伤害，默认6)、dps(状态每秒伤害，fire/poison 用)、statusDur(状态持续秒数)"
+  ],
+  "constraints": {
+    "maxCoins": 9999,
+    "maxHeal": 200,
+    "maxMp": 200,
+    "maxExp": 1000,
+    "maxItemAmount": 64
+  },
+  "forbidden": [
+    "不要创作能直接让玩家通关或秒杀 Boss 的道具",
+    "不要创作能直接让玩家死亡的负面道具",
+    "add_coins 单次不要超过 9999",
+    "heal / restore_mp 单次不要超过 200",
+    "add_item 的 item 必须是游戏内已存在的物品 path（参考 presetItems）"
+  ],
+  "effectCodeEnabled": true,
+  "effectCodeSignature": "function(params)",
+  "effectCodeReturns": "{ message: string }",
+  "effectCodeSandbox": {
+    "game": "RPG 游戏实例（game.player 含 heal(n)/addMana(n)/addExp(n) 等方法，game.loadMap(key,spawn) 切换地图）",
+    "GameData": "全局数据对象（GameData.coins 为金币数量）",
+    "Inventory": "背包对象（Inventory.addItem(path, amount) 发放物品）",
+    "EventBus": "事件总线（EventBus.emit('coins_changed'|'inventory_changed'|'player_stats_updated') 刷新界面）",
+    "Math": "JS Math",
+    "JSON": "JS JSON",
+    "console": "JS console"
+  },
+  "presetItems": [
+    {
+      "name": "新手金币袋",
+      "effect": "add_coins",
+      "params": {
+        "amount": 100
+      },
+      "description": "立即获得 100 金币",
+      "icon": "💰"
+    },
+    {
+      "name": "气血药剂",
+      "effect": "heal",
+      "params": {
+        "amount": 50
+      },
+      "description": "恢复 50 点生命",
+      "icon": "❤️"
+    },
+    {
+      "name": "法力药剂",
+      "effect": "restore_mp",
+      "params": {
+        "amount": 50
+      },
+      "description": "恢复 50 点法力",
+      "icon": "🔵"
+    },
+    {
+      "name": "经验卷轴",
+      "effect": "add_exp",
+      "params": {
+        "amount": 200
+      },
+      "description": "获得 200 点经验",
+      "icon": "⭐"
+    },
+    {
+      "name": "急救包",
+      "effect": "full_heal",
+      "params": {},
+      "description": "生命与法力全满",
+      "icon": "✨"
+    },
+    {
+      "name": "鱼篓",
+      "effect": "add_item",
+      "params": {
+        "item": "res://data/food/item_food_fish.tres",
+        "amount": 5
+      },
+      "description": "获得 5 条鱼（可用于收集任务）",
+      "icon": "🐟"
+    },
+    {
+      "name": "雷霆附魔",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "lightning",
+        "level": 1,
+        "duration": 30,
+        "base": 6
+      },
+      "description": "武器附魔雷电 30 秒：每次命中迸发闪电并追加元素伤害。等级越高，每次命中的附加伤害越大（base×level）。",
+      "icon": "⚡"
+    },
+    {
+      "name": "雷霆附魔 Lv2",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "lightning",
+        "level": 2,
+        "duration": 30,
+        "base": 6
+      },
+      "description": "雷霆附魔·强化（Lv2）：每次命中追加 12 点雷电伤害。",
+      "icon": "⚡"
+    },
+    {
+      "name": "雷霆附魔 Lv3",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "lightning",
+        "level": 3,
+        "duration": 30,
+        "base": 6
+      },
+      "description": "雷霆附魔·巅峰（Lv3）：每次命中追加 18 点雷电伤害。",
+      "icon": "⚡"
+    },
+    {
+      "name": "烈焰附魔",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "fire",
+        "level": 1,
+        "duration": 30,
+        "base": 6,
+        "dps": 6,
+        "statusDur": 3
+      },
+      "description": "武器附魔烈焰 30 秒：每次命中喷涌火焰、追加火焰伤害并施加灼烧（3 秒/秒 6）。等级越高，附加火焰与灼烧伤害越大。",
+      "icon": "🔥"
+    },
+    {
+      "name": "烈焰附魔 Lv2",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "fire",
+        "level": 2,
+        "duration": 30,
+        "base": 6,
+        "dps": 6,
+        "statusDur": 3
+      },
+      "description": "烈焰附魔·强化（Lv2）：每次命中追加 12 点火焰伤害、灼烧每秒 12。",
+      "icon": "🔥"
+    },
+    {
+      "name": "烈焰附魔 Lv3",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "fire",
+        "level": 3,
+        "duration": 30,
+        "base": 6,
+        "dps": 6,
+        "statusDur": 3
+      },
+      "description": "烈焰附魔·巅峰（Lv3）：每次命中追加 18 点火焰伤害、灼烧每秒 18。",
+      "icon": "🔥"
+    },
+    {
+      "name": "冰霜附魔",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "freeze",
+        "level": 1,
+        "duration": 30,
+        "base": 6,
+        "statusDur": 3
+      },
+      "description": "武器附魔冰霜 30 秒：每次命中凝结寒冰、追加冰霜伤害并施加冰冻定身（3 秒）。等级越高，附加冰霜伤害越大。",
+      "icon": "❄️"
+    },
+    {
+      "name": "冰霜附魔 Lv2",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "freeze",
+        "level": 2,
+        "duration": 30,
+        "base": 6,
+        "statusDur": 3
+      },
+      "description": "冰霜附魔·强化（Lv2）：每次命中追加 12 点冰霜伤害。",
+      "icon": "❄️"
+    },
+    {
+      "name": "冰霜附魔 Lv3",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "freeze",
+        "level": 3,
+        "duration": 30,
+        "base": 6,
+        "statusDur": 3
+      },
+      "description": "冰霜附魔·巅峰（Lv3）：每次命中追加 18 点冰霜伤害。",
+      "icon": "❄️"
+    },
+    {
+      "name": "剧毒附魔",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "poison",
+        "level": 1,
+        "duration": 30,
+        "base": 6,
+        "dps": 6,
+        "statusDur": 5
+      },
+      "description": "武器附魔剧毒 30 秒：每次命中升腾毒云、追加毒素伤害并施加中毒（5 秒/秒 6）。等级越高，附加毒素与中毒伤害越大。",
+      "icon": "🧪"
+    },
+    {
+      "name": "剧毒附魔 Lv2",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "poison",
+        "level": 2,
+        "duration": 30,
+        "base": 6,
+        "dps": 6,
+        "statusDur": 5
+      },
+      "description": "剧毒附魔·强化（Lv2）：每次命中追加 12 点毒素伤害、中毒每秒 12。",
+      "icon": "🧪"
+    },
+    {
+      "name": "剧毒附魔 Lv3",
+      "effect": "apply_enchant",
+      "params": {
+        "element": "poison",
+        "level": 3,
+        "duration": 30,
+        "base": 6,
+        "dps": 6,
+        "statusDur": 5
+      },
+      "description": "剧毒附魔·巅峰（Lv3）：每次命中追加 18 点毒素伤害、中毒每秒 18。",
+      "icon": "🧪"
+    },
+    {
+      "name": "散弹枪",
+      "effect": "shotgun_equip",
+      "params": {
+        "pellets": 6,
+        "spread": 0.5,
+        "damage": 5,
+        "ammo": 8,
+        "fireInterval": 0.55
+      },
+      "description": "装备一把散弹枪：按 G 取枪，按住左键 / J / F 一次喷出 6 枚扇形弹丸，近距离爆发伤害；弹药 8 发，R 换弹。完全由道具 JSON + effectCode 实现，不改游戏代码。",
+      "icon": "🔫"
+    },
+    {
+      "name": "召唤橘猫",
+      "effect": "summon_cat",
+      "params": {},
+      "description": "召唤一只程序化生成的橘猫伙伴：它会在你身后同步跟随、自动攻击靠近的敌人。按 T 与它对话，按 E 喂食提升亲密度与经验。完全由道具 JSON + effectCode 调 RPG.RPGPet.install 实现，不改游戏代码。",
+      "icon": "🐱"
+    },
+    {
+      "name": "地雷装置",
+      "effect": "mine_system",
+      "params": {},
+      "description": "激活地雷系统：使用后在游戏中按 M 键即可在玩家当前位置自由布置地雷（数量不限），敌人碰撞或进入触发范围时引爆，对范围内及直接接触的敌人造成 42 点预设伤害。完全由道具 JSON + effectCode 调 RPG.RPGMine.install 实现，不改游戏代码。",
+      "icon": "💣"
+    },
+    {
+      "name": "十字雷",
+      "effect": "mine_cross",
+      "params": {},
+      "description": "切换为十字雷：按 M 布设十字（加号）形状爆炸地雷，四方向覆盖，对落入十字范围敌人造成 30 点伤害。",
+      "icon": "✚"
+    },
+    {
+      "name": "高爆雷",
+      "effect": "mine_big",
+      "params": {},
+      "description": "切换为高爆雷：按 M 布设大范围圆形地雷（半径 104），基础伤害 90 × 威力系数 1.8 = 162 点爆发伤害。",
+      "icon": "💥"
+    },
+    {
+      "name": "冰冻雷",
+      "effect": "mine_freeze",
+      "params": {},
+      "description": "切换为冰冻雷：按 M 布设低直伤地雷，命中后对范围内敌人施加 freeze 定身 3 秒。",
+      "icon": "❄"
+    },
+    {
+      "name": "剧毒雷",
+      "effect": "mine_poison",
+      "params": {},
+      "description": "切换为剧毒雷：按 M 布设低直伤地雷，命中后施加 poison 中毒（6 秒/秒 8），可多层叠加。",
+      "icon": "☠"
+    },
+    {
+      "name": "霜毒雷",
+      "effect": "mine_frostbite",
+      "params": {},
+      "description": "切换为霜毒雷：按 M 布设十字地雷，命中同时施加冰冻减速（减速 60%/2 秒）与中毒（5 秒/秒 6）。",
+      "icon": "🌀"
+    },
+    {
+      "name": "新星雷",
+      "effect": "mine_nova",
+      "params": {},
+      "description": "演示可扩展性：运行时 registerType 注册全新环形(ring)地雷类型并切换，零改游戏代码。",
+      "icon": "🌟"
+    }
+  ]
+}

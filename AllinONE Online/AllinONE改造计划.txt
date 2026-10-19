@@ -1,0 +1,1393 @@
+🏰 AllinONE Gaming Platform — MVP 1.0 上线改造方案
+版本：Final v1.0
+日期：2026-05-30
+核心理念：极简中台 + Skill 引擎 + CloudBase + 游戏化首页
+策略：渐进式外科手术重构（保留现有项目，不做新建）
+________________________________________
+目录
+1.	总体架构设计
+2.	目标目录结构
+3.	阶段一：底层基础设施
+4.	阶段二：Service → Skill 归并
+5.	阶段三：文件清理与路由精简
+6.	阶段四：合规化处理
+7.	阶段五：首页游戏化改造
+8.	阶段六：个人中心拆分
+9.	执行优先级与时间线
+10.	风险点与预案
+________________________________________
+一、总体架构设计
+1.1 架构全景图
+code
+┌──────────────────────────────────────────────────────────────────┐
+│                    前端 React SPA                                 │
+│                                                                   │
+│  Pages (8个路由)           Components (功能区块独立组件)            │
+│  Hooks (useXxx - 数据获取+状态管理)                                │
+│  Context (2个: Auth + Language)                                   │
+└───────────────────────────────┬───────────────────────────────────┘
+                                │
+                                ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    Skill 引擎层 (统一中台)                         │
+│                                                                   │
+│  SkillGateway ── 路由 / 认证 / 限流 / 中间件 / 日志 / 事件总线     │
+│                                                                   │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐            │
+│  │  auth    │ │  wallet  │ │ voucher  │ │ proposal │            │
+│  │  Skill   │ │  Skill   │ │  Skill   │ │  Skill   │            │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘            │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐                         │
+│  │inventory │ │  store   │ │  game-   │                         │
+│  │  Skill   │ │  Skill   │ │connector │                         │
+│  └──────────┘ └──────────┘ └──────────┘                         │
+└───────────────────────────────┬───────────────────────────────────┘
+                                │
+                                ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    CloudBase 后端服务                              │
+│                                                                   │
+│  Auth ──── CloudBase Auth (邮箱登录 + 微信登录 + 匿名登录)         │
+│  DB ────── 文档数据库 (8个集合)                                    │
+│  FN ────── 云函数 (支付回调 / 核销 / 定时结算)                     │
+│  STORAGE ─ 云存储 (游戏图标 / 道具图片)                            │
+└──────────────────────────────────────────────────────────────────┘
+1.2 数据流原则
+code
+页面 / 组件
+    │
+    ▼
+Hooks (useWallet, useVoucherAssets, useInventory...)
+    │  ┌─ 本地 state 缓存
+    │  └─ 数据请求去重 & 错误处理
+    ▼
+SkillGateway.execute('skillName', 'action', params)
+    │  ┌─ 认证检查
+    │  ├─ 权限校验
+    │  ├─ 限流
+    │  └─ 中间件链
+    ▼
+Skill 实例
+    │
+    ▼
+CloudBase SDK (app.database().collection('xxx').get/add/update)
+    │
+    ▼
+CloudBase 后端
+关键约束：Page/Component 层绝不直接调用 CloudBase SDK，必须通过 Skill 层。这样保证了：
+•	数据访问逻辑集中管理
+•	权限统一校验
+•	未来更换后端只需改 Skill 层
+________________________________________
+二、目标目录结构
+2.1 改造后的 src/ 目录
+code
+src/
+├── skills/                          ← Skill 引擎（核心中台层）
+│   ├── SkillGateway.ts              ← 保留，不动
+│   ├── BaseSkill.ts                 ← 保留，不动
+│   ├── EventBus.ts                  ← 保留，不动
+│   ├── errors.ts                    ← 保留，不动
+│   ├── types.ts                     ← 保留，不动
+│   ├── index.ts                     ← 修改：只导出 7 个 Skill
+│   │
+│   ├── auth/                        ← 从现有 auth Skill + authContext 合并
+│   │   ├── AuthSkill.ts
+│   │   └── index.ts
+│   │
+│   ├── wallet/                      ← 从现有 WalletSkill 精简（删除 cash/oCoins）
+│   │   ├── WalletSkill.ts
+│   │   └── index.ts
+│   │
+│   ├── inventory/                   ← 保留并改造（接入 CloudBase）
+│   │   ├── InventorySkill.ts
+│   │   └── index.ts
+│   │
+│   ├── store/                       ← 从 gameStoreService + officialStoreService 合并
+│   │   ├── StoreSkill.ts
+│   │   └── index.ts
+│   │
+│   ├── voucher/                     ← 从 voucher-system 整个迁移
+│   │   ├── VoucherSkill.ts          ← 凭证核心（从 VoucherService 迁移）
+│   │   ├── ItemVoucherSkill.ts      ← 道具凭证（从 voucherItemService 迁移）
+│   │   ├── VoteVoucherSkill.ts      ← 投票凭证（从 VoteVoucherService 迁移）
+│   │   ├── types.ts                 ← 从 voucher-system/types 整合
+│   │   ├── engine/                  ← RuleEngine + EventBus（从 voucher-system 迁移）
+│   │   │   ├── RuleEngine.ts
+│   │   │   └── EventBus.ts
+│   │   ├── settlement/              ← 结算调度器（从 voucher-system 迁移）
+│   │   │   ├── SettlementScheduler.ts
+│   │   │   └── PlatformDataCollector.ts
+│   │   └── index.ts
+│   │
+│   ├── proposal/                    ← 从 gameProposalService + VoteFraudDetector 合并
+│   │   ├── ProposalSkill.ts         ← 提案核心
+│   │   ├── VoteEngine.ts            ← 投票引擎（权重/反欺诈/结算）
+│   │   ├── types.ts                 ← 从 types/gameProposal.ts 迁移
+│   │   └── index.ts
+│   │
+│   └── game-connector/              ← 🆕 新增：游戏连接器
+│       ├── GameConnectorSkill.ts
+│       └── index.ts
+│
+├── hooks/                           ← 面向 UI 的消费 Hook
+│   ├── useAuth.ts                   ← 从 authContext 提取
+│   ├── useWallet.ts                 ← 精简（只保留纯前端逻辑）
+│   ├── useVoucherAssets.ts          ← 🆕：凭证资产查询
+│   ├── useInventory.ts             ← 🆕：道具库存查询
+│   ├── usePurchaseHistory.ts        ← 🆕：购买记录查询
+│   └── useVoteStatus.ts             ← 🆕：投票状态查询
+│
+├── components/                      ← UI 组件
+│   ├── personal-center/             ← 🆕：个人中心拆分
+│   │   ├── WalletOverview.tsx        ← 钱包概览卡片
+│   │   ├── VoucherAssetPanel.tsx     ← 凭证资产面板
+│   │   ├── InventoryPanel.tsx        ← 道具库存面板
+│   │   ├── PurchaseHistoryPanel.tsx  ← 购买记录面板
+│   │   └── index.ts                  ← 组合导出
+│   ├── game-base/                   ← 🆕：游戏化首页组件
+│   │   ├── GameBaseScene.tsx         ← 基地场景（主组件）
+│   │   ├── HUD.tsx                   ← 顶部状态栏
+│   │   ├── BuildingCard.tsx          ← 建筑卡片
+│   │   ├── EventBanner.tsx           ← 动态事件横幅
+│   │   └── index.ts
+│   ├── voucher-system/              ← 保留全部现有组件（不动）
+│   ├── LanguageSwitcher.tsx          ← 保留
+│   └── ...其他通用组件
+│
+├── pages/                           ← 精简为 8 个页面
+│   ├── GameBase.tsx                  ← 🆕：游戏化首页（个人基地）
+│   ├── Home.tsx                      ← 修改：重定向到 GameBase
+│   ├── Login.tsx                     ← 修改：接入 CloudBase Auth
+│   ├── Register.tsx                  ← 修改：接入 CloudBase Auth
+│   ├── GameCenter.tsx                ← 保留
+│   ├── GamePlay.tsx                  ← 保留（游戏详情）
+│   ├── VoucherSystemPage.tsx         ← 保留（凭证系统详情）
+│   ├── PublishingCenter.tsx          ← 保留（发布中心）
+│   └── PersonalCenter.tsx           ← 🆕 精简版：路由入口，委托组件
+│
+├── contexts/                        ← 精简为 2 个
+│   ├── authContext.tsx               ← 修改：使用 CloudBase Auth
+│   └── LanguageContext.tsx           ← 保留，不动
+│
+├── types/                           ← 精简类型定义
+│   ├── common.ts                     ← 修改：移除 'cash'、'oCoins'
+│   ├── wallet.ts                     ← 修改：移除 cash/oCoins 字段
+│   ├── gameProposal.ts               ← 保留全类型，迁移到 proposal Skill
+│   ├── marketplace.ts                ← 删除
+│   ├── oCoin.ts                      ← 删除
+│   ├── fundPool.ts                   ← 删除
+│   ├── computing.ts                  ← 删除
+│   └── ...
+│
+├── utils/                           ← 工具函数
+│   ├── i18n.ts                       ← 保留
+│   └── ...
+│
+├── App.tsx                          ← 修改：精简路由 + Context 链
+├── main.tsx                         ← 保留
+└── index.css                        ← 保留
+2.2 清理后的根目录
+code
+AllinONE Gaming Platform/
+├── src/                          ← 上述结构
+├── docs/                         ← 归档文档
+├── scripts/                      ← 所有 .bat/.ps1/.sql 脚本移入
+├── dist/                         ← 构建产物（保持不变）
+├── cloudbase.json                ← CloudBase 配置（填入真实 envId）
+├── package.json                  ← 移除无用依赖
+├── tsconfig.json                 ← 保留
+├── vite.config.ts                ← 保留
+├── tailwind.config.js            ← 保留
+├── Dockerfile                    ← 保留
+├── server.js                     ← 保留（CloudBase 托管时可能不再需要）
+├── README.md                     ← 更新
+└── .gitignore
+要删除的根目录文件（约 60+ 个）：
+•	所有 fix-*.bat、diagnose-*.bat、test-*.bat → 移入 scripts/archive/
+•	所有 *_FIX_*.md、*_ISSUE_*.md、*_REPORT_*.md → 移入 docs/archive/
+•	所有 test-*.html、*-demo.html → 移入 docs/test/
+•	所有 .sql 文件 → 移入 scripts/db/
+________________________________________
+三、阶段一：底层基础设施（CloudBase）
+3.1 CloudBase 环境准备
+前置步骤：
+1.	登录腾讯云 CloudBase 控制台
+2.	创建环境（选择"按量计费"，开发阶段几乎免费）
+3.	记录 envId（格式如 allinone-xxxxx）
+4.	在控制台开启：
+•	文档数据库
+•	云函数
+•	云存储
+•	登录授权（邮箱登录 + 匿名登录）
+3.2 修改 cloudbase.json
+json
+{
+  "envId": "allinone-xxxxx",          // ← 填入真实 envId
+  "functionRoot": "./cloudfunctions",
+  "functions": [],
+  "hosting": {
+    "public": "dist/static",
+    "ignore": ["*.md", "*.log", "node_modules", ".git"],
+    "rewrites": [{
+      "source": "**",
+      "destination": "/index.html"
+    }]
+  }
+}
+3.3 数据库集合设计（8 个 Collection）
+code
+集合名: users
+├── _openid: string          (CloudBase 自动生成)
+├── email: string
+├── nickname: string
+├── avatar: string
+├── role: 'player' | 'developer' | 'admin'
+├── gameCoins: number        (平台游戏币，默认 0)
+├── aCoins: number           (平台积分 A币，默认 0)
+├── createdAt: number        (Unix timestamp)
+└── updatedAt: number
+
+集合名: transactions
+├── userId: string           (关联 users._openid)
+├── type: 'income' | 'expense'
+├── category: string         (game_reward | purchase | exchange | mint | ...)
+├── amount: number
+├── currency: 'gameCoins' | 'aCoins'
+├── description: string
+├── relatedId: string        (关联的业务 ID)
+├── timestamp: number
+└── createdAt: number
+
+集合名: vouchers
+├── templateId: string       (关联 voucher_templates._id)
+├── holderId: string         (持有者 userId)
+├── denomination: number     (凭证面值)
+├── status: 'active' | 'frozen' | 'destroyed' | 'transferred'
+├── sourceType: 'instant' | 'algorithm' | 'item' | 'vote'
+├── metadata: object         (扩展元数据)
+├── createdAt: number
+└── updatedAt: number
+
+集合名: voucher_templates
+├── gameId: string
+├── gameName: string
+├── name: string
+├── description: string
+├── supplyPolicy: 'limited' | 'open'
+├── totalSupply: number
+├── mintedCount: number
+├── pricing: { price: number, currency: string, acceptVoucher: boolean }
+├── gameEffect: { itemId: string, quantity: number }
+├── rarity: string
+├── isActive: boolean
+├── createdBy: string
+├── createdAt: number
+└── updatedAt: number
+
+集合名: purchases
+├── userId: string
+├── templateId: string
+├── voucherId: string
+├── gameId: string
+├── price: number
+├── currency: string
+├── status: 'pending' | 'redeemed' | 'expired'
+├── redeemCode: string
+├── paidAt: number
+└── redeemedAt: number
+
+集合名: proposals
+├── gameId: string
+├── title: string
+├── description: string
+├── proposalType: string      (new_item | mint_item | edit_item | ...)
+├── status: 'draft' | 'active' | 'passed' | 'rejected' | 'executed'
+├── payload: object
+├── proposerId: string
+├── votes: [{
+│   userId: string,
+│   decision: 'approve' | 'reject' | 'abstain',
+│   weight: number,
+│   timestamp: number
+│ }]
+├── result: object
+├── votingEndAt: number
+├── createdAt: number
+└── updatedAt: number
+
+集合名: inventories
+├── userId: string
+├── gameId: string
+├── itemId: string
+├── name: string
+├── description: string
+├── category: string
+├── rarity: string
+├── quantity: number
+├── obtainedAt: number
+└── syncStatus: 'not_synced' | 'synced' | 'failed'
+
+集合名: game_connectors        ← 🆕 游戏连接器配置
+├── gameId: string
+├── gameName: string
+├── verifyEndpoint: string    (兑换码核销接口)
+├── authType: 'none' | 'apiKey' | 'bearer'
+├── authValue: string
+├── isActive: boolean
+├── createdAt: number
+└── updatedAt: number
+3.4 改造 Skill 基类的数据访问层
+在每个 Skill 的 onInitialize 中初始化 CloudBase 连接：
+typescript
+// 以 WalletSkill 为例，改造后的数据读取
+import cloudbase from '@cloudbase/js-sdk';
+
+const app = cloudbase.init({ env: 'allinone-xxxxx' });
+const db = app.database();
+
+class WalletSkill extends BaseSkill {
+  // 改造前：localStorage.getItem(this.STORAGE_KEY)
+  // 改造后：
+  private async getWalletData(context: SkillContext): Promise<WalletData> {
+    const _ = db.command;
+    const res = await db.collection('users')
+      .where({ _openid: context.userId })
+      .get();
+    
+    if (res.data.length === 0) {
+      // 新用户初始化
+      return this.createDefaultWallet(context.userId);
+    }
+    return res.data[0];
+  }
+
+  private async saveWalletData(userId: string, data: Partial<WalletData>): Promise<void> {
+    const _ = db.command;
+    await db.collection('users')
+      .where({ _openid: userId })
+      .update({
+        ...data,
+        updatedAt: Date.now(),
+      });
+  }
+}
+________________________________________
+四、阶段二：Service → Skill 归并
+4.1 归并对照表
+目标 Skill	合并来源	行数估算	关键 Actions
+auth	skills/auth/AuthSkill.ts + contexts/authContext.tsx + services/crossPlatformAuthService.ts（部分）	~300行	login, register, logout, getProfile
+wallet	skills/wallet/WalletSkill.ts（精简）	~400行	getBalance, recharge（游戏币）, spend, getTransactions, getStats
+inventory	skills/inventory/InventorySkill.ts + services/inventoryApiService.ts	~250行	getItems, addItem, syncInventory
+store	skills/store/StoreSkill.ts + services/gameStoreService.ts + services/officialStoreService.ts	~300行	getStoreItems, purchase
+voucher	voucher-system/ 整体迁移 + services/voucherItemService.ts + services/voucherPaymentService.ts + services/redeemCodeService.ts	~1200行	createTemplate, mint, purchase, transfer, redeem, getUserVouchers
+proposal	services/gameProposalService.ts + voucher-system/services/VoteVoucherService.ts + voucher-system/services/VoteFraudDetector.ts + voucher-system/settlement/	~800行	createProposal, vote, execute, getVotes, settleCycle
+game-connector	🆕 全新编写	~200行	registerGame, verifyCode, syncInventory（可选）
+4.2 各 Skill 详细设计
+auth Skill
+typescript
+// src/skills/auth/AuthSkill.ts
+// 使用 CloudBase Auth SDK
+
+import cloudbase from '@cloudbase/js-sdk';
+import { BaseSkill } from '../BaseSkill';
+
+class AuthSkill extends BaseSkill {
+  private auth: any;
+  
+  async onInitialize(): Promise<void> {
+    const app = cloudbase.init({ env: 'allinone-xxxxx' });
+    this.auth = app.auth({ persistence: 'local' });
+    
+    this.registerAction('login', this.login.bind(this), { ... });
+    this.registerAction('register', this.register.bind(this), { ... });
+    this.registerAction('logout', this.logout.bind(this), { ... });
+    this.registerAction('getProfile', this.getProfile.bind(this), { ... });
+    this.registerAction('onAuthStateChanged', this.onAuthStateChanged.bind(this), { ... });
+  }
+  
+  async login(params: { email: string; password: string }) {
+    const result = await this.auth.signInWithEmailAndPassword(params.email, params.password);
+    return { success: true, data: result.user };
+  }
+  
+  async register(params: { email: string; password: string; nickname: string }) {
+    const result = await this.auth.signUpWithEmailAndPassword(params.email, params.password);
+    // 初始化用户数据
+    await db.collection('users').add({
+      _openid: result.user.uid,
+      email: params.email,
+      nickname: params.nickname,
+      role: 'player',
+      gameCoins: 0,
+      aCoins: 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return { success: true, data: result.user };
+  }
+}
+wallet Skill（精简版）
+typescript
+// 改造重点：
+// 1. 移除 cash、oCoins 字段
+// 2. 移除 computingPower 字段
+// 3. 移除 exchange 中的 cash 兑换
+// 4. 数据源从 localStorage → CloudBase
+
+// 保留的币种：
+type CurrencyType = 'gameCoins' | 'aCoins';
+
+// WalletBalance（精简后）
+interface WalletBalance {
+  gameCoins: number;
+  aCoins: number;
+  instantVouchers: number;
+  algorithmVouchers: number;
+  totalValue: number;
+  lastUpdated: Date;
+}
+game-connector Skill（新增，极简）
+typescript
+// src/skills/game-connector/GameConnectorSkill.ts
+// 极简游戏连接器 —— 每个游戏只需提供兑换码核销接口
+
+interface GameConnectorConfig {
+  gameId: string;
+  gameName: string;
+  verifyEndpoint: string;    // 必需：POST { code: string } → { valid: boolean, itemId?: string }
+  authType: 'none' | 'apiKey' | 'bearer';
+  authValue?: string;
+}
+
+class GameConnectorSkill extends BaseSkill {
+  private games: Map<string, GameConnectorConfig> = new Map();
+
+  async onInitialize(): Promise<void> {
+    // 从 CloudBase 加载已注册的游戏连接器
+    const res = await db.collection('game_connectors')
+      .where({ isActive: true })
+      .get();
+    for (const config of res.data) {
+      this.games.set(config.gameId, config);
+    }
+
+    this.registerAction('registerGame', this.registerGame.bind(this));
+    this.registerAction('verifyCode', this.verifyCode.bind(this));
+    this.registerAction('getRegisteredGames', this.getRegisteredGames.bind(this));
+  }
+
+  // === 注册游戏连接器 ===
+  async registerGame(config: GameConnectorConfig) {
+    await db.collection('game_connectors').add({ ...config, isActive: true, createdAt: Date.now() });
+    this.games.set(config.gameId, config);
+    return { success: true, message: `游戏「${config.gameName}」已注册` };
+  }
+
+  // === 核销兑换码（唯一必要接口） ===
+  async verifyCode(gameId: string, code: string) {
+    const game = this.games.get(gameId);
+    if (!game) return { success: false, message: '游戏未注册' };
+
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (game.authType === 'bearer' && game.authValue) {
+        headers['Authorization'] = `Bearer ${game.authValue}`;
+      }
+
+      const response = await fetch(game.verifyEndpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ code }),
+      });
+
+      if (!response.ok) {
+        return { success: false, message: `核销失败: ${response.status}` };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        data: {
+          valid: data.valid,
+          itemId: data.itemId,
+          itemName: data.itemName,
+          quantity: data.quantity || 1,
+        },
+      };
+    } catch (error) {
+      return { success: false, message: `核销异常: ${error.message}` };
+    }
+  }
+}
+4.3 Skill 注册入口（简化）
+typescript
+// src/skills/index.ts
+import { SkillGateway } from './SkillGateway';
+import { authSkill } from './auth';
+import { walletSkill } from './wallet';
+import { inventorySkill } from './inventory';
+import { storeSkill } from './store';
+import { voucherSkill } from './voucher';
+import { proposalSkill } from './proposal';
+import { gameConnectorSkill } from './game-connector';
+
+export const skillGateway = new SkillGateway({ debug: true });
+
+export async function initializeSkills(): Promise<void> {
+  await skillGateway.registerSkill(authSkill);
+  await skillGateway.registerSkill(walletSkill);      // 依赖 auth
+  await skillGateway.registerSkill(inventorySkill);   // 依赖 auth
+  await skillGateway.registerSkill(storeSkill);       // 依赖 wallet, inventory
+  await skillGateway.registerSkill(voucherSkill);     // 依赖 wallet
+  await skillGateway.registerSkill(proposalSkill);    // 依赖 voucher
+  await skillGateway.registerSkill(gameConnectorSkill); // 无依赖
+  console.log('[Skills] ✅ 7 个 Skill 已初始化');
+}
+________________________________________
+五、阶段三：文件清理与路由精简
+5.1 要删除的 Service 文件（25+ 个）
+bash
+# === 经济/资金池（暂不可实现） ===
+src/services/fundPoolService.ts
+src/services/economicService.ts
+src/services/economicIntegrationService.ts
+src/services/computingEconomicService.ts
+src/services/dividendWeightService.ts
+
+# === O币（合规风险） ===
+src/services/oCoinService.ts
+src/services/oCoinPerformanceService.ts
+src/services/optionsManagementService.ts
+
+# === New Day 集成（全部移除） ===
+src/services/newDayApiService.ts
+src/services/newDayApiService.debug.ts
+src/services/newDayService.ts
+src/services/newDayWalletIntegration.ts
+src/services/newDayInventorySync.ts
+src/services/allinoneSyncService.ts
+
+# === 跨平台（不再需要） ===
+src/services/crossPlatformAuthService.ts
+src/services/crossPlatformWalletService.ts
+src/services/crossPlatformMarketService.ts
+src/services/currencyExchangeService.ts
+src/services/marketSyncService.ts
+
+# === 市场（P2 暂不开放） ===
+src/services/marketplaceService.ts
+src/services/allinone_marketplaceService.ts
+
+# === 测试/演示 ===
+src/services/testDataService.ts
+src/services/realDataGenerator.ts
+
+# === 钱包兼容层（功能已合并到 wallet Skill） ===
+src/services/walletService.ts      ← 已是兼容层，废弃
+src/services/realWalletService.ts
+5.2 要删除的 Context 文件（4 个）
+bash
+src/contexts/ComputingPowerContext.tsx   ← 算力系统
+src/contexts/UserDataContext.tsx         ← 功能合并到 Hooks
+src/contexts/BlogContext.tsx             ← 博客系统
+src/contexts/PlatformManagementContext.tsx ← 平台管理
+5.3 要删除的页面文件（20+ 个）
+bash
+# === 算力 ===
+src/pages/ComputingDashboard.tsx
+src/pages/ComputingTest.tsx
+src/pages/ComputingPowerPageSimple.tsx
+
+# === 资金池 ===
+src/pages/FundPool.tsx
+src/pages/FundPoolDemo.tsx
+
+# === O币/经济 ===
+src/pages/OpenEconomy.tsx
+src/pages/TradingSystem.tsx
+src/pages/CommunityRewards.tsx
+
+# === 博客 ===
+src/pages/BlogCenter.tsx
+src/pages/BlogDetail.tsx
+src/pages/BlogEditor.tsx
+
+# === 测试/演示 ===
+src/pages/TestPage.tsx
+src/pages/TestAccounts.tsx
+src/pages/NewDayIntegrationTest.tsx
+src/pages/PlatformManagementTest.tsx
+
+# === 其他 ===
+src/pages/OfficialStore.tsx
+src/pages/GameStoreCenter.tsx
+src/pages/GameStoreDetail.tsx
+src/pages/Marketplace.tsx
+src/pages/PlatformManagement.tsx
+src/pages/About.tsx
+src/pages/SkillWizardPage.tsx
+5.4 精简后的 App.tsx
+typescript
+// src/App.tsx（改造后）
+import { Routes, Route } from 'react-router-dom';
+import { AuthProvider } from '@/contexts/authContext';
+import { LanguageProvider } from '@/contexts/LanguageContext';
+import LanguageSwitcher from '@/components/LanguageSwitcher';
+
+import GameBase from '@/pages/GameBase';
+import Login from '@/pages/Login';
+import Register from '@/pages/Register';
+import GameCenter from '@/pages/GameCenter';
+import GamePlay from '@/pages/GamePlay';
+import VoucherSystemPage from '@/pages/VoucherSystemPage';
+import PublishingCenter from '@/pages/PublishingCenter';
+import PersonalCenter from '@/pages/PersonalCenter';
+
+export default function App() {
+  return (
+    <LanguageProvider>
+      <AuthProvider>
+        <LanguageSwitcher />
+        <Routes>
+          <Route path="/" element={<GameBase />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/game-center" element={<GameCenter />} />
+          <Route path="/game/:gameId" element={<GamePlay />} />
+          <Route path="/voucher-system" element={<VoucherSystemPage />} />
+          <Route path="/publishing-center" element={<PublishingCenter />} />
+          <Route path="/personal-center" element={<PersonalCenter />} />
+        </Routes>
+      </AuthProvider>
+    </LanguageProvider>
+  );
+}
+关键变化：
+•	Context 链从 6 层 降至 2 层
+•	Route 从 26 个 降至 8 个
+•	移除了 NewDayIntegrationInit、VoteNotifications 全局组件
+________________________________________
+六、阶段四：合规化处理
+6.1 类型层修改
+typescript
+// src/types/common.ts（改造后）
+// 移除 'cash'、'oCoins'、'computingPower'、'newDayGameCoins'
+export type Currency = 'gameCoins' | 'aCoins';
+typescript
+// src/types/wallet.ts（改造后）
+export interface WalletBalance {
+  gameCoins: number;          // 平台游戏币
+  aCoins: number;             // 平台积分（A币）
+  instantVouchers: number;    // 即时发放型凭证价值
+  algorithmVouchers: number;  // 计算分配型凭证价值
+  totalValue: number;         // 总价值（游戏币 + A币 + 凭证）
+  lastUpdated: Date;
+}
+6.2 删除的类型文件
+bash
+src/types/oCoin.ts          ← O币类型
+src/types/fundPool.ts       ← 资金池类型
+src/types/computing.ts      ← 算力类型
+src/types/performance.ts    ← 绩效类型
+src/types/marketplace.ts    ← 市场类型（暂不开放）
+src/types/officialStore.ts  ← 官方商店类型
+6.3 合规声明
+在 GameBase 页面底部添加：
+typescript
+<div className="text-xs text-slate-500 text-center mt-8 pb-4">
+  <p>AllinONE 平台所有虚拟货币（游戏币、A币等）均为平台内积分，不具有真实货币价值，不可兑换为法定货币。</p>
+  <p>本平台不提供任何形式的金融、证券、期货交易服务。</p>
+</div>
+________________________________________
+七、阶段五：首页游戏化改造
+7.1 设计概念
+code
+┌──────────────────────────────────────────────────────────┐
+│  💰 12,580金币  🎫 8凭证  ⚖ 3.5投票权重  👤 用户名  🔔  │  ← HUD
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│          🏰 我 的 基 地                                   │
+│                                                          │
+│    ┌──────────┐  ┌──────────┐  ┌──────────┐            │
+│    │  🔨     │  │  🏛️     │  │  🛒     │            │
+│    │ 凭证工坊 │  │ 议事厅  │  │ 道具商店 │            │
+│    │          │  │          │  │          │            │
+│    │ 管理凭证 │  │ 社区投票 │  │ 购买道具 │            │
+│    └──────────┘  └──────────┘  └──────────┘            │
+│                                                          │
+│    ┌──────────┐  ┌──────────┐  ┌──────────┐            │
+│    │  🎒     │  │  📊     │  │  🎮     │            │
+│    │ 背包    │  │ 数据中心 │  │ 游戏世界 │            │
+│    │          │  │          │  │          │            │
+│    │ 我的凭证 │  │ 统计详情 │  │ 探索游戏 │            │
+│    └──────────┘  └──────────┘  └──────────┘            │
+│                                                          │
+├──────────────────────────────────────────────────────────┤
+│  🔔 动态事件                                              │
+│  🆕 社区通过了新道具「暗影之剑」的提案！3分钟前             │
+│  ⏰ 你的投票「地图扩展案」还有2小时截止 — 去投票 →          │
+│  🎉 你的工坊刚铸造了100张「治疗药水」凭证！                 │
+├──────────────────────────────────────────────────────────┤
+│  🏰基地 │ 🎒背包 │ 🗳议事厅 │ ⚙设置                      │  ← 底部导航
+└──────────────────────────────────────────────────────────┘
+7.2 组件树
+code
+GameBase.tsx (页面入口，约 60 行)
+├── HUD.tsx (顶部状态栏，约 100 行)
+│   ├── 金币显示（调用 useWallet）
+│   ├── 凭证数量（调用 useVoucherAssets）
+│   ├── 投票权重（调用 useVoteStatus）
+│   └── 用户头像/昵称（调用 useAuth）
+│
+├── GameBaseScene.tsx (基地场景，约 200 行)
+│   ├── BuildingCard × 6（每个建筑一个卡片）
+│   │   ├── icon + label
+│   │   ├── 点击跳转到对应功能
+│   │   ├── 小红点/徽章（如果有待处理事项）
+│   │   └── Framer Motion 动画
+│   │
+│   └── 数据来源：
+│       ├── 工坊未读 = 有待铸造的提案通过数
+│       ├── 议事厅未读 = 待投票数（从 VoteNotificationPanel 逻辑迁移）
+│       └── 商店 = 新上架道具数
+│
+├── EventBanner.tsx (事件横幅，约 120 行)
+│   ├── 从 proposal Skill 拉取最近事件
+│   ├── 从 voucher Skill 拉取最近操作
+│   └── 自动轮播（3 条事件循环）
+│
+└── BottomNav.tsx (底部导航，约 60 行)
+    ├── 🏰 基地 (当前)
+    ├── 🎒 背包 → /personal-center
+    ├── 🗳 议事厅 → /voucher-system?tab=proposals
+    └── ⚙ 设置
+7.3 核心组件：HUD
+typescript
+// src/components/game-base/HUD.tsx
+import { useAuth } from '@/hooks/useAuth';
+import { useWallet } from '@/hooks/useWallet';
+import { useVoucherAssets } from '@/hooks/useVoucherAssets';
+import { useVoteStatus } from '@/hooks/useVoteStatus';
+
+export function HUD() {
+  const { user } = useAuth();
+  const { balance } = useWallet();
+  const { totalVouchers } = useVoucherAssets();
+  const { totalWeight } = useVoteStatus();
+
+  return (
+    <div className="hud-bar">
+      <div className="hud-item">
+        <span className="text-yellow-400">💰</span>
+        <span className="font-bold">{balance.gameCoins.toLocaleString()}</span>
+        <span className="text-xs text-slate-400">金币</span>
+      </div>
+      <div className="hud-item">
+        <span className="text-purple-400">🎫</span>
+        <span className="font-bold">{totalVouchers}</span>
+        <span className="text-xs text-slate-400">凭证</span>
+      </div>
+      <div className="hud-item">
+        <span className="text-cyan-400">⚖️</span>
+        <span className="font-bold">{totalWeight.toFixed(1)}</span>
+        <span className="text-xs text-slate-400">权重</span>
+      </div>
+      <div className="hud-item ml-auto">
+        <span className="text-slate-300">{user?.nickname}</span>
+        <div className="w-8 h-8 rounded-full bg-slate-600" />
+      </div>
+    </div>
+  );
+}
+7.4 核心组件：BuildingCard
+typescript
+// src/components/game-base/BuildingCard.tsx
+import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
+
+interface BuildingCardProps {
+  icon: string;
+  label: string;
+  description: string;
+  badge?: number;
+  route: string;
+}
+
+export function BuildingCard({ icon, label, description, badge, route }: BuildingCardProps) {
+  const navigate = useNavigate();
+
+  return (
+    <motion.button
+      whileHover={{ scale: 1.05, y: -4 }}
+      whileTap={{ scale: 0.95 }}
+      onClick={() => navigate(route)}
+      className="building-card"
+    >
+      <div className="text-4xl mb-2">{icon}</div>
+      <div className="font-bold text-white">{label}</div>
+      <div className="text-xs text-slate-400 mt-1">{description}</div>
+      {badge && badge > 0 && (
+        <span className="absolute top-2 right-2 w-6 h-6 bg-red-500 rounded-full text-xs flex items-center justify-center">
+          {badge}
+        </span>
+      )}
+    </motion.button>
+  );
+}
+7.5 核心组件：EventBanner
+typescript
+// src/components/game-base/EventBanner.tsx
+import { useState, useEffect } from 'react';
+import { skillGateway } from '@/skills';
+
+interface GameEvent {
+  id: string;
+  type: 'proposal_passed' | 'vote_urgent' | 'mint_complete' | 'purchase';
+  message: string;
+  action?: { label: string; route: string };
+  timestamp: number;
+}
+
+export function EventBanner() {
+  const [events, setEvents] = useState<GameEvent[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    // 聚合来自 proposal Skill 和 voucher Skill 的事件
+    async function loadEvents() {
+      const allEvents: GameEvent[] = [];
+
+      // 最近通过的道具提案
+      const passedRes = await skillGateway.execute('proposal', 'getRecentPassed', { limit: 2 });
+      if (passedRes.success) {
+        for (const p of passedRes.data) {
+          allEvents.push({
+            id: p.id,
+            type: 'proposal_passed',
+            message: `🆕 社区通过了「${p.title}」！`,
+            action: { label: '查看详情', route: `/voucher-system?tab=proposals&id=${p.id}` },
+            timestamp: p.updatedAt,
+          });
+        }
+      }
+
+      // 即将截止的投票
+      const urgentRes = await skillGateway.execute('proposal', 'getUrgentVotes', { userId: 'current' });
+      if (urgentRes.success && urgentRes.data.length > 0) {
+        const v = urgentRes.data[0];
+        allEvents.push({
+          id: v.id,
+          type: 'vote_urgent',
+          message: `⏰ 你的投票「${v.title}」还有 ${v.timeLeft} 截止`,
+          action: { label: '去投票', route: `/voucher-system?tab=proposals&id=${v.id}` },
+          timestamp: Date.now(),
+        });
+      }
+
+      setEvents(allEvents);
+    }
+    loadEvents();
+  }, []);
+
+  // 自动轮播
+  useEffect(() => {
+    if (events.length <= 1) return;
+    const timer = setInterval(() => {
+      setCurrentIndex(i => (i + 1) % events.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [events.length]);
+
+  if (events.length === 0) return null;
+
+  const event = events[currentIndex];
+  return (
+    <motion.div
+      key={event.id}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="event-banner"
+    >
+      <span>{event.message}</span>
+      {event.action && (
+        <Link to={event.action.route} className="event-action">
+          {event.action.label} →
+        </Link>
+      )}
+    </motion.div>
+  );
+}
+________________________________________
+八、阶段六：个人中心拆分
+8.1 拆分策略
+code
+GamePersonalCenter.tsx (2500+ 行)
+    │
+    ├── PersonalCenter.tsx          🆕 路由入口 (~50行)
+    │   ├── WalletOverview          🆕 (~80行)
+    │   ├── VoucherAssetPanel       🆕 (~100行)
+    │   ├── InventoryPanel          🆕 (~120行)
+    │   ├── PurchaseHistoryPanel    🆕 (~100行)
+    │   └── [复用] VoteNotificationPanel (保留,已有)
+    │
+    └── hooks/ (数据获取层)
+        ├── useWallet.ts            (保留，精简)
+        ├── useVoucherAssets.ts     🆕
+        ├── useInventory.ts         🆕
+        ├── usePurchaseHistory.ts   🆕
+        └── useVoteStatus.ts        🆕
+8.2 新 PersonalCenter.tsx
+typescript
+// src/pages/PersonalCenter.tsx (~50行)
+import { useState } from 'react';
+import { useAuth } from '@/hooks/useAuth';
+import { WalletOverview } from '@/components/personal-center/WalletOverview';
+import { VoucherAssetPanel } from '@/components/personal-center/VoucherAssetPanel';
+import { InventoryPanel } from '@/components/personal-center/InventoryPanel';
+import { PurchaseHistoryPanel } from '@/components/personal-center/PurchaseHistoryPanel';
+import { VoteNotificationPanel } from '@/components/voucher-system/VoteNotificationPanel';
+
+type Tab = 'vouchers' | 'inventory' | 'purchases' | 'votes';
+
+export default function PersonalCenter() {
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<Tab>('vouchers');
+
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'vouchers', label: '🎫 凭证资产' },
+    { key: 'inventory', label: '🎒 道具库存' },
+    { key: 'purchases', label: '📋 购买记录' },
+    { key: 'votes', label: '🗳️ 投票记录' },
+  ];
+
+  return (
+    <div className="personal-center">
+      <WalletOverview userId={user.id} />
+
+      <div className="tab-bar">
+        {tabs.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={activeTab === tab.key ? 'active' : ''}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'vouchers' && <VoucherAssetPanel userId={user.id} />}
+      {activeTab === 'inventory' && <InventoryPanel userId={user.id} />}
+      {activeTab === 'purchases' && <PurchaseHistoryPanel userId={user.id} />}
+      {activeTab === 'votes' && <VoteNotificationPanel />}
+    </div>
+  );
+}
+________________________________________
+九、执行优先级与时间线
+总工期：约 15 个工作日
+________________________________________
+十、风险点与预案
+风险	等级	影响	预案
+voucher-system 迁移时逻辑丢失	🔴高	凭证系统不可用	迁移前做功能清单对照 + 保留原文件到 _archive/
+CloudBase 数据库性能问题	🟡中	页面加载慢	加缓存层（Hooks 层本地 state）+ 分页查询
+游戏化首页用户不买账	🟡中	用户流失	保留传统版首页作为 /dashboard 备选路由
+删除文件后出现编译错误	🟡中	阻塞开发	每删一批文件运行一次 pnpm build
+CloudBase Auth 集成问题	🟡中	无法登录	保留匿名登录作为 fallback
+第三方依赖安全漏洞	🟢低	安全隐患	pnpm audit + 升级到最新版
+________________________________________
+附录：改造完成后的验收标准
+•	  pnpm dev 正常启动，无编译错误
+•	  pnpm build 正常构建，无警告
+•	  首页显示游戏化基地，6 个建筑卡片可点击跳转
+•	  登录/注册流程可用（CloudBase Auth）
+•	  凭证系统：创建模板 → 铸造 → 购买 → 转移 → 兑换 全流程通
+•	  投票治理：创建提案 → 投票 → 结算 全流程通
+•	  个人中心：4 个 Tab 正常切换，数据正确
+•	  所有 localStorage 引用已替换为 CloudBase
+•	  O币、算力、资金池、博客、市场等已删除且无残留引用
+•	  合规声明文本已添加
+•	  根目录清理完成
+________________________________________
+这就是完整的最终方案。所有轮次讨论的共识都已内化到这份方案中。你可以审阅确认后，随时让我切换到 CRAFT MODE 开始执行。建议按甘特图的顺序，从阶段一开始
+应急
+🛡️ AllinONE MVP 改造 —— 应急方案与风险预案
+事前准备，有备无患
+________________________________________
+一、前置准备工作（必须执行）
+1.1 Git 保护层
+这是最重要的安全网。在开始任何改造之前：
+bash
+# === 第一步：创建改造分支 ===
+git checkout -b refactor/mvp-v1
+
+# === 第二步：确保工作区干净 ===
+git status                    # 应该只有 untracked 文件
+git stash                     # 如果有任何改动，先 stash
+
+# === 第三步：创建 TAG 标记基线 ===
+git tag baseline-v0          # 给当前状态打一个永久标签
+
+# === 第四步：验证可以回滚 ===
+git checkout main             # 切回 main
+git checkout refactor/mvp-v1  # 再切回来
+# 确认两个分支都能正常切换
+关键原则：main 分支在改造期间绝对不动，所有改动只在 refactor/mvp-v1 上进行。
+1.2 物理备份（双保险）
+bash
+# 在项目同级目录创建备份
+cd "d:\AllinONE Gaming Platform\.."
+mkdir "AllinONE_Backup_20260530"
+xcopy "AllinONE Gaming Platform" "AllinONE_Backup_20260530" /E /I /H
+1.3 本地验证环境
+bash
+# 在改造分支上先跑一次完整构建
+pnpm install
+pnpm build
+
+# 记录当前构建状态
+# 如果构建成功 → 记录成功信息
+# 如果已有错误 → 记录当前错误（这些不是我们引入的）
+________________________________________
+二、依赖爆炸半径分析
+在执行删除之前，必须知道每个模块的"爆炸半径"：
+模块	引用文件数	风险等级	典型引用路径
+🔴 算力系统 (Computing)	86 个文件	极高	几乎所有页面、WalletSkill、userDataContext、voucher-system
+🔴 New Day 集成	46 个文件	极高	App.tsx、Login.tsx、个人中心、市场、钱包、库存
+🟡 资金池 (FundPool)	20 个文件	高	App.tsx、Home.tsx、个人中心、marketplaceService
+🟡 O币 (OCoin)	12 个文件	中	个人中心、资金池组件、walletCompat
+🟢 博客 (Blog)	~10 个文件	低	BlogCenter、BlogContext、个人中心内的BlogManager
+🟢 市场 (Marketplace)	~8 个文件	低	App.tsx、个人中心、CrossPlatformMarket
+🟢 测试页面	~6 个文件	低	App.tsx（路由注册）
+关键发现：算力系统存在于 86 个文件中，是最危险的单点。Types/wallet.ts 中的 WalletBalance 接口引用 computingPower 字段，会被几乎所有组件间接引用。
+高风险引用链路
+code
+WalletBalance.computingPower
+  → hooks/useWallet.ts (获取余额时读取)
+    → 几乎所有页面的顶部状态栏
+    → GamePersonalCenter.tsx (钱包展示)
+    → ConsolidatedWallet.tsx (钱包组件)
+    → CrossPlatformMarket.tsx (市场交易)
+    → EconomicSystemMonitor.tsx (经济监控)
+    → ComputingDashboard.tsx (算力面板)
+    → 等等......
+这意味着删除 computingPower 字段时，必须同时修改所有引用它的组件，否则编译会失败。
+________________________________________
+三、分场景应急方案
+场景 1：Git 误操作（分支混乱、代码丢失）
+症状	原因	解决
+git status 显示大量 modified 但我不记得改了哪些	未及时 commit	git diff 查看改动；git stash 暂存；询问我确认
+不小心在 main 分支上改了代码	忘记切分支	git stash → git checkout refactor/mvp-v1 → git stash pop
+合并时冲突，不知道以哪个为准	两个分支改了同一处	git checkout --ours 保留当前分支版本；git mergetool 手动解决
+改坏了想全部放弃	错误累积无法修复	git reset --hard HEAD 放弃所有未提交改动；或 git checkout baseline-v0 -- . 恢复到基线
+最坏情况恢复：
+bash
+# 如果 refactor/mvp-v1 分支完全坏了
+git checkout main                                    # 回到安全分支
+git branch -D refactor/mvp-v1                        # 删除坏的分支
+git checkout -b refactor/mvp-v1                      # 从 main 重建
+# 或者直接回到基线标签
+git checkout baseline-v0 -b refactor/mvp-v1-restore
+场景 2：误删文件
+2.1 删错了文件
+bash
+# 恢复单个文件（从 HEAD 或 main）
+git checkout HEAD -- src/services/xxxxx.ts    # 从最近 commit 恢复
+git checkout main -- src/pages/xxxxx.tsx      # 从 main 分支恢复
+
+# 恢复整个目录
+git checkout HEAD -- src/services/
+2.2 删除 checklist（每次删除前必须确认）
+删除任何文件前，执行以下检查：
+bash
+# 1. 搜索所有引用
+grep -r "被删文件名" src/ --include="*.ts" --include="*.tsx"
+
+# 2. 检查是否有 barrel export
+grep -r "from.*被删模块" src/ --include="*.ts" --include="*.tsx"
+
+# 3. 确认不在保留路由中
+grep -r "被删页面路径" src/App.tsx
+2.3 安全删除步骤（标准操作）
+code
+第1步：先注释掉引用，不要直接删文件
+第2步：运行 pnpm build 确认无编译错误
+第3步：运行 pnpm dev 确认功能正常
+第4步：git commit 提交"注释引用"
+第5步：删除目标文件
+第6步：再次 pnpm build 确认
+第7步：git commit 提交"删除文件"
+场景 3：TypeScript 编译错误
+3.1 最常见的错误类型
+错误模式	示例	原因	解决
+Cannot find module '@/**/xxx'	删除文件后未同时删除 import	残留 import 语句	全局搜索并删除
+Property 'xxx' does not exist on type 'YYY'	删除了类型的某个字段	该字段还在被引用	找到所有引用点，逐一移除
+Type 'string' is not assignable to type 'Currency'	修改了类型联合	Currency 类型还有旧值	更新所有使用该类型的地方
+Module has no exported member 'xxx'	删除了 barrel export	但从 barrel 引用	更新 barrel export 文件
+'xxx' is declared but never read	noUnusedLocals: true	删除了使用方但保留了 import	删除无用的 import
+你的 tsconfig.json 有严格模式：
+AllinONEL6-L26
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    // ...
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+这意味着任何残留 import、未使用变量都会导致编译失败。需要更谨慎。
+3.2 编译错误快速定位
+bash
+# 只检查类型，不构建产物
+npx tsc --noEmit
+
+# 只看错误（过滤警告）
+npx tsc --noEmit 2>&1 | grep "error TS"
+
+# 统计错误数量
+npx tsc --noEmit 2>&1 | grep -c "error TS"
+3.3 渐进式修复策略
+不要一次性删除所有文件然后期望一次修完。应该：
+code
+批次 1：删除测试页面（6 个文件）       → 修复编译 → commit
+批次 2：删除博客模块（10 个文件）       → 修复编译 → commit
+批次 3：删除 O币模块（12 个文件）       → 修复编译 → commit
+批次 4：删除市场模块（8 个文件）        → 修复编译 → commit
+批次 5：删除资金池模块（20 个文件）     → 修复编译 → commit
+批次 6：删除 New Day 集成（46 个文件）  → 修复编译 → commit
+批次 7：删除算力系统（86 个文件）       → 修复编译 → commit  ← 最危险
+每批之间必须能编译通过，否则不进入下一批。
+场景 4：运行时错误
+4.1 常见运行时错误
+错误	可能原因	排查方法
+Cannot read properties of undefined	数据源从 localStorage 改为 CloudBase 后初始化时序问题	检查 Hook 中对 null/undefined 的处理
+页面白屏	React 渲染崩溃	打开浏览器 DevTools → Console 看错误堆栈
+路由跳转后 404	删除了页面但 App.tsx 中还有路由	检查 App.tsx 的 <Route> 列表
+点击按钮无反应	onClick 中调用了已删除的 Service	Console 中看是否有 import 错误
+CloudBase SDK 报错 env not found	envId 未正确配置	检查 cloudbase.json 和 Skill 初始化代码
+数据不显示但无报错	CloudBase 查询返回空数组	检查安全规则是否阻止了读取
+4.2 运行时错误预案
+typescript
+// 在每个新 Hook 中添加错误边界
+export function useVoucherAssets(userId: string) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetch() {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await skillGateway.execute('voucher', 'getUserVouchers', { userId });
+        if (!res.success) throw new Error(res.error?.message);
+        setData(res.data);
+      } catch (e) {
+        console.error('[useVoucherAssets]', e);
+        setError(e as Error);
+        // 降级到空数据，不阻塞页面渲染
+        setData([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetch();
+  }, [userId]);
+
+  return { data, error, loading, refresh: () => fetch() };
+}
+场景 5：localStorage → CloudBase 数据迁移异常
+5.1 现有数据的价值
+当前项目的 localStorage 中存储了大量用户数据（钱包余额、交易记录、凭证数据等）。这些是研发阶段的测试数据，不需要迁移到生产环境。但为确保改造期间开发体验不中断：
+方案：不迁移数据，而是编写数据初始化脚本
+typescript
+// src/skills/seed.ts（数据初始化脚本）
+// 在首次启动时为当前用户创建默认数据
+
+export async function seedUserData(userId: string) {
+  const db = app.database();
+  
+  // 检查是否已有数据
+  const existing = await db.collection('users')
+    .where({ _openid: userId }).get();
+  
+  if (existing.data.length > 0) return; // 已有数据，跳过
+
+  // 初始化用户
+  await db.collection('users').add({
+    _openid: userId,
+    gameCoins: 1000,          // 初始赠送 1000 游戏币
+    aCoins: 50,               // 初始赠送 50 A币
+    role: 'player',
+    createdAt: Date.now(),
+  });
+
+  // 初始化一些示例凭证模板
+  // ...
+  
+  console.log(`[Seed] ✅ 用户 ${userId} 数据已初始化`);
+}
+场景 6：CloudBase SDK 集成问题
+问题	症状	解决
+SDK 版本不兼容	@cloudbase/js-sdk 导入后报错	你已有 ^2.25.7，检查是否需要升级
+envId 配置错误	所有 API 调用返回 403	核对 CloudBase 控制台的环境 ID
+安全规则阻止	能登录但不能读写数据	临时设置为 {"read": true, "write": true} 用于开发
+匿名登录未开启	auth.signInAnonymously() 报错	CloudBase 控制台 → 登录授权 → 开启匿名登录
+数据库集合不存在	collection not found	SDK 首次写入时会自动创建，或手动在控制台创建
+场景 7：计算力依赖链断裂（最高风险）
+因为 86 个文件引用 computing，删除时必须分步：
+第 1 步：修改类型定义，标记 deprecated
+typescript
+// src/types/wallet.ts（过渡版本）
+export interface WalletBalance {
+  /** @deprecated MVP v1.0 移除 */
+  computingPower?: number;
+  gameCoins: number;
+  aCoins: number;
+  // ...
+}
+第 2 步：修改所有引用处，加默认值
+typescript
+// 在所有读取 computingPower 的地方
+const cp = balance.computingPower ?? 0;  // 不报错，值为 0
+第 3 步：逐一删除 computingPower 相关 UI
+typescript
+// 删除前确认该 UI 组件是否还被其他地方使用
+// 如果在 ConsolidatedWallet.tsx 中展示了算力，且该组件还被其他页面使用
+// 则只删除算力那一段 JSX，不删整个组件
+第 4 步：最后从类型定义中删除 computingPower
+场景 8：依赖包问题
+8.1 可以移除的依赖
+删除算力、资金池、O币、博客等模块后，以下依赖可能不再需要：
+json
+// 需要检查是否还被使用
+{
+  "recharts": "^2.15.1",     // 算力/资金池的图表 → 检查保留页面是否用
+  "jszip": "^3.10.1",        // 博客导出? → 检查
+  "pg": "^8.12.0",           // PostgreSQL → server.js 用，检查
+  "express": "^4.19.2",      // → server.js 用，CloudBase 部署后可能不需要
+  "cors": "^2.8.5",          // → server.js 用
+  "dotenv": "^4.5",          // → server.js 用
+}
+8.2 依赖检查命令
+bash
+# 检查未使用的依赖
+npx depcheck
+
+# 或者逐个检查
+grep -r "from 'recharts'" src/ --include="*.ts" --include="*.tsx"
+8.3 已确认需要的依赖
+json
+{
+  "@cloudbase/js-sdk": "^2.25.7",    // ✅ CloudBase SDK
+  "react": "^18.3.1",                // ✅ 核心框架
+  "react-dom": "^18.3.1",            // ✅ 核心框架
+  "react-router-dom": "^7.3.0",      // ✅ 路由
+  "framer-motion": "^12.9.2",        // ✅ 游戏化首页动画
+  "sonner": "^2.0.2",                // ✅ Toast 通知
+  "tailwind-merge": "^3.0.2",        // ✅ Tailwind 工具
+  "zod": "^3.24.2",                  // ✅ 表单验证
+  "react-hook-form": "^7.53.0",      // ✅ 表单
+  "lucide-react": "^0.575.0",        // ✅ 图标
+  "@fortawesome/fontawesome-free": "^7.0.1", // ✅ 图标
+}
+________________________________________
+四、分批执行清单（带安全阀）
+执行原则
+每一批次之间必须通过 pnpm build，否则不进入下一批。
+每批次完成后都做一次 git commit，形成可回滚的检查点。
+批次表
+批次	操作	文件数	预计时间	回滚成本
+B0	创建 refactor/mvp-v1 分支 + TAG	0	5min	无
+B1	删除测试页面（TestPage, TestAccounts, NewDayIntegrationTest, PlatformManagementTest, SkillWizardPage, EconomicSystemDemo, DailySettlementTest）	~7	15min	低
+B2	删除博客模块（BlogCenter, BlogDetail, BlogEditor, BlogContext, BlogManager, blogService, blog types）	~10	20min	低
+B3	删除 O币 模块（oCoinService, oCoinPerformanceService, optionsManagementService, types/oCoin, types/performance, 相关组件）	~12	30min	中
+B4	修改类型层（移除 cash, computingPower, oCoins, newDayGameCoins 字段）	~5	20min	中
+B5	删除市场模块（Marketplace, OfficialStore, GameStoreCenter, GameStoreDetail, 相关 service）	~10	20min	中
+B6	删除资金池模块（FundPool, FundPoolDemo, fundPoolService, types/fundPool）	~10	20min	中
+B7	删除 New Day 集成（10个service + 5个组件 + 初始化代码）	~20	45min	高
+B8	删除算力系统（4个页面 + 2个Context + 相关组件 + 修改86个引用）	~20	60min	🔴极高
+B9	删除废弃 Context (4个)，精简路由 (App.tsx)	~5	15min	中
+B10	新增 game-connector Skill	+1	30min	低
+B11	修改 auth Skill（接入 CloudBase Auth）	1	45min	高
+B12	改造 wallet Skill（接入 CloudBase DB）	1	45min	高
+B13	voucher-system 迁移到 voucher Skill	~15	90min	🔴极高
+B14	proposal 归并到 proposal Skill	5	45min	高
+B15	个人中心拆分	+5 组件	60min	中
+B16	游戏化首页开发	+5 组件	120min	低
+B17	根目录清理 + 依赖清理	~60	30min	低
+B18	全量联调 + Bug 修复	-	120min	-
+________________________________________
+五、全局恢复预案
+5.1 如果可以 git 操作
+bash
+# 方案 A：回退到任意批次
+git log --oneline                    # 找到目标 commit
+git reset --hard <commit-hash>       # 回到那个 commit
+
+# 方案 B：放弃所有改动，重新开始
+git checkout main
+git branch -D refactor/mvp-v1
+git checkout -b refactor/mvp-v1
+
+# 方案 C：回到基线
+git checkout baseline-v0 -b refactor/mvp-v1-restart
+5.2 如果 git 操作也出问题了
+bash
+# 从物理备份恢复
+cd "d:\AllinONE Gaming Platform\.."
+rmdir /S /Q "AllinONE Gaming Platform"
+xcopy "AllinONE_Backup_20260530" "AllinONE Gaming Platform" /E /I /H
+cd "AllinONE Gaming Platform"
+pnpm install
+git checkout -b refactor/mvp-v1
+5.3 如果构建成功但运行异常
+bash
+# 1. 清缓存重装
+rm -rf node_modules
+rm -rf dist
+pnpm install
+
+# 2. 清理 Vite 缓存
+rm -rf node_modules/.vite
+
+# 3. 重新构建
+pnpm build
+
+# 4. 检查是否是 CloudBase 环境问题
+# → 确认 cloudbase.json 中 envId 正确
+# → 确认 CloudBase 控制台中数据库集合已创建
+# → 确认安全规则已开放
+________________________________________
+六、每日执行公约
+每人天结束前必须：
+bash
+# 1. 确保代码干净
+git status
+
+# 2. 提交当天改动
+git add -A
+git commit -m "refactor(Bx): 完成第X批次 - 具体操作描述"
+
+# 3. 推送到远程（备份）
+git push origin refactor/mvp-v1
+
+# 4. 确认构建通过
+pnpm build
+________________________________________
+七、如果一切失败：回退基线方案
+bash
+# 终极回退（保留凭证系统经验，但回到改造前状态）
+git checkout main
+git merge --abort          # 如果有未完成的合并
+git reset --hard baseline-v0
+
+# 然后重新评估是否需要更保守的策略
+________________________________________
+以上就是完整的应急方案。总结一下三个最重要的安全措施：
+1.	baseline-v0 TAG — 任何时候都可以回到起点
+2.	分批 commit — 每批完成就 commit，出问题只回退一批
+3.	每批 build 验证 — 不过编译绝不进入下一批
+准备好后，随时让我切换到 CRAFT MODE 开始执行。建议从 B0—B1 开始，先做最安全的两批建立信心。

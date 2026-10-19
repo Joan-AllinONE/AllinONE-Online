@@ -10,9 +10,11 @@
  *   DELETE /api/v1/games/:gameId/files   — 删除游戏所有文件（管理用）
  */
 import express, { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import { logger } from '../logger.js';
 import { signToken, verifyToken } from '../auth/jwt.js';
 import { isPubliclyVisible } from './gameReview.js';
+import { memoryDB } from '../memoryDatabase.js';
 
 // ==================== 审核可见性工具（公开列表/详情过滤） ====================
 // 审核机制：未通过审核（pending/rejected/changes_required/removed）的游戏不可公开上架。
@@ -110,6 +112,511 @@ function isTextMimeType(mimeType: string): boolean {
     mimeType.includes('javascript') || mimeType.includes('json') ||
     mimeType.includes('xml') || mimeType.includes('svg') ||
     mimeType.includes('markdown');
+}
+
+// ==================== 方案 E：注入型扩展（文件分发层加载时注入） ====================
+// 与 public/gameFileServiceWorker-v13.js / cloudfunctions/gamesApi/index.js 保持幂等一致：
+// 内容已含注入标记（<!-- AllinONE 注入扩展）时不重复注入。
+
+// ==================== 道具凭证安全隧道（B2/B4 本地双实现） ====================
+// 与云函数 gamesApi 的 __item / __market 对齐（本地 dev 环境可测同一协议）。
+// dev 用模块级内存存储（重启清零，与内存库行为一致）；线上唯一权威实现为云函数。
+
+/** 本地集合存储：collection → (docId → doc) */
+const localItemStore = new Map<string, Map<string, any>>();
+function localCollection(name: string): Map<string, any> {
+  // 🆕 2026-10-16：vouchers 统一到 memoryDB.vouchers——生产云函数里 __item/__market/__contract
+  // 本就是同一 'vouchers' 集合，此前本地双 Map 导致拼团履约发货在 __contract 侧看不到 __item 池凭证。
+  // 注意：直接 Map.set 不会触发 memoryDB 落盘调度（dev 可接受，重启丢临时池凭证）。
+  if (name === 'vouchers') return memoryDB.getVouchersStore();
+  let m = localItemStore.get(name);
+  if (!m) {
+    m = new Map();
+    localItemStore.set(name, m);
+  }
+  return m;
+}
+
+/** 本地规则注册中心（contract_rules）读取——与云函数 getPlatformRule 对齐 */
+/** 兜底副本（与 src/contracts/types.ts PLATFORM_RULE_DEFAULTS 数值一致，防回潮守卫脚本校验） */
+const LOCAL_RULE_FALLBACKS: Record<string, number> = {
+  'market.commission_rate': 0.05,
+  'item_harvest.daily_limit': 10,
+  'cross_exchange.daily_limit': 20,
+  'settlement.revenue_share_percent': 10,
+  'settlement.cycle_ms': 86400000,
+  'governance.pass_threshold': 0.5,
+  'governance.weight_acoin': 0.3,
+  'governance.weight_gamecoin': 0.1,
+  'governance.weight_cap': 1000,
+  'governance.rule_cooldown_ms': 259200000,
+  'voucher.recycle_daily_pct': 0.5,
+  'voucher.exchange_fee_pct': 2,
+  'voucher.transfer_fee_pct': 0.5,
+  'cross_exchange.fee_rate': 0.1,
+};
+async function getLocalRule(ruleKey: string): Promise<number> {
+  // 读 memoryDB.contract_rules（与本地合约隧道 __contract/rules 治理同源；
+  // 直读不缓存——治理 activate 后立即生效）
+  try {
+    const doc = await memoryDB.getPlatformRuleDoc(ruleKey);
+    if (doc && Number.isFinite(Number(doc.value))) return Number(doc.value);
+  } catch { /* 集合不存在 → 兜底 */ }
+  return LOCAL_RULE_FALLBACKS[ruleKey] ?? 0;
+}
+
+const MAX_ITEM_DATA = 8 * 1024;
+const MAX_EFFECT_CODE = 4000;
+const MAX_VOUCHER_DOC = 16 * 1024;
+const MAX_TX_DOC = 8 * 1024;
+
+/** 实例级频控：userId → { start, n } */
+const localRateMap = new Map<string, { start: number; n: number }>();
+function localRateCheck(userId: string, max = 20, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const rec = localRateMap.get(userId);
+  if (!rec || now - rec.start > windowMs) {
+    localRateMap.set(userId, { start: now, n: 1 });
+    return true;
+  }
+  rec.n += 1;
+  return rec.n <= max;
+}
+
+/** schema 效果规则表（与前端 SchemaRegistry 内置 schema 对齐；未知 schema 仅结构+大小校验） */
+const ITEM_EFFECT_RULES: Record<string, {
+  effects: string[];
+  paramRanges: Record<string, [number, number]>;
+  colorEnums?: string[];
+}> = {
+  'match3-powerup': {
+    effects: ['remove_area', 'remove_row', 'remove_col', 'remove_color', 'add_time', 'add_moves', 'replace_color', 'shuffle', 'bomb', 'lightning', 'rainbow', 'randomize_cell'],
+    paramRanges: { radius: [1, 3], seconds: [5, 30], count: [1, 5] },
+    colorEnums: ['red', 'blue', 'green', 'yellow', 'purple', 'orange'],
+  },
+  'gushi-powerup': {
+    effects: ['add_coins', 'flash_plus', 'lucky_cut', 'market_up', 'mine_pass'],
+    paramRanges: { bonus: [500, 50000], times: [1, 9], cuts: [1, 9], mult: [1.1, 1.5], seconds: [15, 600] },
+  },
+};
+
+const HIGH_VALUE_RARITIES = ['epic', 'legendary', 'mythic', '史诗', '传说', '神话'];
+
+function localSha1(s: string): string {
+  return crypto.createHash('sha1').update(String(s)).digest('hex');
+}
+
+function validateItemData(schemaName: string, itemData: any): string[] {
+  const issues: string[] = [];
+  if (!itemData || typeof itemData !== 'object' || Array.isArray(itemData)) return ['itemData 必须是对象'];
+  if (typeof itemData.name !== 'string' || !itemData.name.trim()) issues.push('道具缺少名称');
+  if (typeof itemData.effect !== 'string' || !itemData.effect.trim()) issues.push('道具缺少效果定义');
+  if (JSON.stringify(itemData).length > MAX_ITEM_DATA) issues.push('itemData 超过 8KB');
+  if (itemData.effectCode && String(itemData.effectCode).length > MAX_EFFECT_CODE) issues.push('effectCode 超过 4KB');
+  const rules = ITEM_EFFECT_RULES[schemaName];
+  if (rules) {
+    if (!rules.effects.includes(itemData.effect)) {
+      issues.push(`效果 "${itemData.effect}" 不在 ${schemaName} 允许的效果列表内`);
+    }
+    const params = itemData.params;
+    if (params && typeof params === 'object' && !Array.isArray(params)) {
+      for (const [key, [lo, hi]] of Object.entries(rules.paramRanges)) {
+        const v = (params as any)[key];
+        if (typeof v === 'number' && (v < lo || v > hi)) {
+          issues.push(`参数 ${key}=${v} 超出允许范围 [${lo}, ${hi}]`);
+        }
+      }
+      if (rules.colorEnums) {
+        for (const ck of ['color', 'fromColor', 'toColor']) {
+          const cv = (params as any)[ck];
+          if (typeof cv === 'string' && !rules.colorEnums.includes(cv)) {
+            issues.push(`颜色参数 ${ck}=${cv} 不合法`);
+          }
+        }
+      }
+      if (JSON.stringify(params).length > 1024) issues.push('params 超过 1KB');
+    }
+  }
+  return issues;
+}
+
+function isHighValueItem(itemData: any): boolean {
+  if (!itemData || typeof itemData !== 'object') return false;
+  if (typeof itemData.effectCode === 'string' && itemData.effectCode.trim()) return true;
+  if (typeof itemData.effectScript === 'string' && itemData.effectScript.trim()) return true;
+  if (itemData.highValue === true) return true;
+  return HIGH_VALUE_RARITIES.includes(String(itemData.rarity || '').toLowerCase());
+}
+
+function bumpHarvestDaily(userId: string, gameId: string, dailyLimit: number): { ok: boolean; count: number } {
+  const day = new Date().toISOString().slice(0, 10);
+  const id = `${userId}:${gameId}:${day}`;
+  const col = localCollection('item_harvest_daily');
+  const prev = col.get(id);
+  const count = ((prev && prev.count) || 0) + 1;
+  col.set(id, { _id: id, userId, gameId, date: day, count, updatedAt: Date.now() });
+  return { ok: count <= dailyLimit, count };
+}
+
+function checkAndMarkHarvestSeen(userId: string, gameId: string, dupKey: string): boolean {
+  const id = 'hs_' + localSha1(dupKey);
+  const col = localCollection('item_harvest_seen');
+  if (col.has(id)) return false;
+  col.set(id, { _id: id, userId, gameId, key: String(dupKey).slice(0, 300), createdAt: Date.now() });
+  return true;
+}
+
+function signVoucherIntegrity(voucherId: string, userId: string, gameId: string, itemHash: string): string {
+  const secret = process.env.JWT_SECRET || 'dev-secret-do-not-use-in-prod-change-me';
+  return 'v1:' + crypto.createHmac('sha256', secret).update(`${voucherId}|${userId}|${gameId}|${itemHash}`).digest('hex');
+}
+
+function verifyVoucherIntegrity(doc: any): boolean {
+  try {
+    const ig = doc && doc.integrity;
+    if (!ig || ig.v !== 1 || !ig.sig || !ig.userId || !ig.gameId) return false;
+    return signVoucherIntegrity(doc.id, ig.userId, ig.gameId, ig.itemHash || '') === ig.sig;
+  } catch {
+    return false;
+  }
+}
+
+function buildItemVoucher(userId: string, userName: string, gameId: string, schemaName: string, itemData: any, dupKey: string): any {
+  const voucherId = 'vh_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex');
+  const itemHash = localSha1(JSON.stringify(itemData || {}));
+  const highValue = isHighValueItem(itemData);
+  const itemName = String((itemData && itemData.name) || '未命名道具').slice(0, 50);
+  const customData: Record<string, any> = {
+    origin: 'gameplay',
+    gameId,
+    schemaName,
+    harvestId: dupKey,
+    harvestedAt: Date.now(),
+    gameEffect: { schemaName, itemId: String((itemData && itemData.effect) || ''), quantity: 1, itemData: itemData || {} },
+  };
+  if (highValue) {
+    customData.highValue = true;
+    customData.reviewStatus = 'pending';
+  }
+  const voucher: any = {
+    id: voucherId,
+    serialNumber: 'SN' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(2).toString('hex').toUpperCase(),
+    denomination: 0,
+    currentHolderId: userId,
+    currentHolderName: String(userName || '玩家').slice(0, 50),
+    status: 'active',
+    createdAt: Date.now(),
+    createdBy: 'SYSTEM',
+    createdByName: '游戏收获系统',
+    transferCount: 0,
+    sourceType: 'item',
+    metadata: {
+      sourceType: 'item',
+      name: itemName,
+      description: String((itemData && itemData.description) || '游戏内掉落道具').slice(0, 200),
+      category: 'item',
+      tags: ['item_voucher', 'gameplay_harvest', String(gameId).slice(0, 60), String(schemaName).slice(0, 60)],
+      issuer: String(gameId).slice(0, 60),
+      customData,
+    },
+    integrity: { v: 1, mintedBy: 'server', userId, gameId, itemHash, mintedAt: Date.now() },
+  };
+  voucher.integrity.sig = signVoucherIntegrity(voucherId, userId, gameId, itemHash);
+  return voucher;
+}
+
+/** 注册 __item / __market 本地隧道路由（dev 双实现，逻辑与云函数对齐） */
+function registerItemMarketTunnels(router: Router): void {
+  // ---------- POST /__item/mint ----------
+  router.post('/__item/mint', express.json({ limit: '1mb' }), async (req: Request, res: Response) => {
+    const auth = extractAuthInfo(req);
+    if (!auth.userId) return res.status(401).json({ success: false, error: '未登录：道具铸造需要 Bearer token' });
+    if (!localRateCheck(auth.userId)) return res.status(429).json({ success: false, error: '操作过于频繁', code: 'rate_limit' });
+    const { gameId, schemaName, itemData, harvestId, userName } = req.body || {};
+    if (!gameId || !schemaName) return res.status(400).json({ success: false, error: 'missing gameId or schemaName' });
+    const issues = validateItemData(schemaName, itemData);
+    if (issues.length) return res.status(400).json({ success: false, error: `道具校验未通过: ${issues.join('; ')}`, code: 'invalid' });
+    const dupKey = harvestId ? `${gameId}:${String(harvestId)}` : `${gameId}:${localSha1(JSON.stringify(itemData || {}))}`;
+    if (!checkAndMarkHarvestSeen(auth.userId, gameId, dupKey)) {
+      return res.status(409).json({ success: false, error: '该道具已提取过，请勿重复提取', code: 'duplicate' });
+    }
+    const ITEM_DAILY_LIMIT = await getLocalRule('item_harvest.daily_limit');
+    const daily = bumpHarvestDaily(auth.userId, gameId, ITEM_DAILY_LIMIT);
+    if (!daily.ok) {
+      return res.status(429).json({ success: false, error: `今日在该游戏的道具提取次数已达上限（${ITEM_DAILY_LIMIT} 个）`, code: 'daily_limit', data: { remaining: 0 } });
+    }
+    const voucher = buildItemVoucher(auth.userId, userName, gameId, schemaName, itemData, dupKey);
+    localCollection('vouchers').set(voucher.id, voucher);
+    logger.info({ voucherId: voucher.id, userId: auth.userId, gameId }, '[item] mint 成功（本地）');
+    return res.json({ success: true, data: { voucher, remaining: Math.max(0, ITEM_DAILY_LIMIT - daily.count) } });
+  });
+
+  // ---------- POST /__item/update ----------
+  router.post('/__item/update', express.json({ limit: '1mb' }), (req: Request, res: Response) => {
+    const auth = extractAuthInfo(req);
+    if (!auth.userId) return res.status(401).json({ success: false, error: '未登录' });
+    if (!localRateCheck(auth.userId)) return res.status(429).json({ success: false, error: '操作过于频繁' });
+    const { voucherId, patch } = req.body || {};
+    if (!voucherId || !patch || typeof patch !== 'object') return res.status(400).json({ success: false, error: 'missing voucherId or patch' });
+    const ALLOWED_PATCH = ['status', 'currentHolderId', 'currentHolderName', 'frozenAt', 'lastTransferAt', 'transferCount', 'reviewStatus', 'reviewNote', 'reviewedAt', 'reviewedBy'];
+    const clean: Record<string, any> = {};
+    for (const k of ALLOWED_PATCH) if (k in patch) clean[k] = patch[k];
+    if (Object.keys(clean).length === 0) return res.status(400).json({ success: false, error: 'patch 中无可迁移字段' });
+    if ('reviewStatus' in clean && !authIsAdmin(auth)) return res.status(403).json({ success: false, error: 'reviewStatus 变更仅管理员可执行' });
+    if ('status' in clean && !['active', 'frozen', 'redeemed', 'destroyed', 'expired'].includes(clean.status)) {
+      return res.status(400).json({ success: false, error: 'status 值非法' });
+    }
+    const col = localCollection('vouchers');
+    const doc = col.get(String(voucherId));
+    if (!doc) return res.status(404).json({ success: false, error: '凭证不存在（以云端账本为准）', code: 'not_found' });
+    if (!authIsAdmin(auth) && doc.currentHolderId && doc.currentHolderId !== auth.userId) {
+      return res.status(403).json({ success: false, error: '不是该凭证的当前持有者' });
+    }
+    col.set(String(voucherId), { ...doc, ...clean, updatedAt: Date.now() });
+    return res.json({ success: true, data: { id: String(voucherId) } });
+  });
+
+  // ---------- POST /__item/sync ----------
+  router.post('/__item/sync', express.json({ limit: '1mb' }), async (req: Request, res: Response) => {
+    const auth = extractAuthInfo(req);
+    if (!auth.userId) return res.status(401).json({ success: false, error: '未登录' });
+    const { collection, doc } = req.body || {};
+    if (collection !== 'vouchers' && collection !== 'voucher_transactions') {
+      return res.status(400).json({ success: false, error: 'collection 必须是 vouchers 或 voucher_transactions' });
+    }
+    if (!doc || !doc.id) return res.status(400).json({ success: false, error: 'missing doc.id' });
+    const docLimit = collection === 'vouchers' ? MAX_VOUCHER_DOC : MAX_TX_DOC;
+    if (JSON.stringify(doc).length > docLimit) {
+      return res.status(413).json({ success: false, error: `${collection} 文档超过 ${Math.floor(docLimit / 1024)}KB 限制` });
+    }
+    // 平台备货（platform_pool / SYSTEM 等平台账户持有）不属于玩家日常提取，
+    // 不受玩家级频控约束（客户端全量兜底一次可推 200+ 条，20/分钟必 429）
+    const PLATFORM_HOLDER_IDS = new Set(['platform_pool', 'SYSTEM', 'system', 'PLATFORM_POOL']);
+    const isPlatformStocking = PLATFORM_HOLDER_IDS.has(String(doc.currentHolderId || '')) || PLATFORM_HOLDER_IDS.has(String(doc.currentHolderId || '').toLowerCase());
+    // 交易是审计日志（幂等 id），放宽到 300/分钟——客户端兜底一次可推 100 条，20/分钟必 429 轰炸
+    const txSync = collection === 'voucher_transactions';
+    if (!localRateCheck(auth.userId, isPlatformStocking || txSync ? 300 : 20)) return res.status(429).json({ success: false, error: '同步过于频繁，请稍后再试' });
+    const col = localCollection(collection);
+    if (collection === 'vouchers') {
+      const existing = col.get(String(doc.id)) || null;
+      if (existing && existing.integrity && existing.integrity.mintedBy === 'server') {
+        const ALLOWED = ['status', 'currentHolderId', 'currentHolderName', 'frozenAt', 'lastTransferAt', 'transferCount'];
+        const merged: any = { ...existing };
+        for (const k of ALLOWED) if (k in doc) merged[k] = doc[k];
+        merged.updatedAt = Date.now();
+        col.set(String(doc.id), merged);
+        return res.json({ success: true, data: { id: String(doc.id), protected: true } });
+      }
+      const isNew = !existing;
+      const isItem = doc.sourceType === 'item' || (doc.metadata && doc.metadata.sourceType === 'item');
+      if (isNew && isItem) {
+        const cd = (doc.metadata && doc.metadata.customData) || {};
+        const itemData = (cd.gameEffect && cd.gameEffect.itemData) || null;
+        // schemaName 的唯一用途是校验 itemData 的效果合法性；平台模板凭证（plt-*，
+        // 铸自道具工坊/seed）没有 itemData，强制要求 schemaName 会让合法凭证全部 400
+        if (itemData) {
+          const schemaName = cd.schemaName || (cd.gameEffect && cd.gameEffect.schemaName) || '';
+          if (!schemaName) {
+            logger.warn({ userId: auth.userId, voucherId: String(doc.id), holder: doc.currentHolderId, templateId: cd.itemTemplateId }, '[item] sync 拒绝：道具凭证缺少 schemaName');
+            return res.status(400).json({ success: false, error: '道具凭证缺少 schemaName' });
+          }
+          const issues = validateItemData(schemaName, itemData);
+          if (issues.length) {
+            logger.warn({ userId: auth.userId, voucherId: String(doc.id), holder: doc.currentHolderId, templateId: cd.itemTemplateId, issues }, '[item] sync 拒绝：道具凭证校验未通过');
+            return res.status(400).json({ success: false, error: `道具凭证校验未通过: ${issues.join('; ')}` });
+          }
+        }
+        // 平台备货（铸造进 platform_pool/SYSTEM 的初始库存）不属于玩家日常提取，
+        // 不扣玩家 item_harvest.daily_limit 额度（否则 616 张库存被 10/日 闸死）
+        if (isPlatformStocking) {
+          logger.info({ userId: auth.userId, voucherId: String(doc.id), holder: doc.currentHolderId, templateId: cd.itemTemplateId }, '[item] sync 平台备货入库（免玩家级提取限额）');
+        } else {
+          const dupKey = cd.harvestId || `sync:${doc.id}`;
+          if (!checkAndMarkHarvestSeen(auth.userId, cd.gameId || 'unknown', String(dupKey))) {
+            logger.warn({ userId: auth.userId, voucherId: String(doc.id) }, '[item] sync 拒绝：幂等重复');
+            return res.status(409).json({ success: false, error: '该道具已提取过（幂等）', code: 'duplicate' });
+          }
+          const ITEM_DAILY_LIMIT = await getLocalRule('item_harvest.daily_limit');
+          const daily = bumpHarvestDaily(auth.userId, cd.gameId || 'unknown', ITEM_DAILY_LIMIT);
+          if (!daily.ok) {
+            logger.warn({ userId: auth.userId, voucherId: String(doc.id), gameId: cd.gameId, limit: ITEM_DAILY_LIMIT }, '[item] sync 拒绝：今日提取次数达上限');
+            return res.status(429).json({ success: false, error: '今日提取次数已达上限', code: 'daily_limit' });
+          }
+        }
+      }
+    }
+    col.set(String(doc.id), doc);
+    return res.json({ success: true, data: { id: String(doc.id) } });
+  });
+
+  // ---------- POST /__item/verify ----------
+  router.post('/__item/verify', express.json({ limit: '1mb' }), (req: Request, res: Response) => {
+    const auth = extractAuthInfo(req);
+    if (!auth.userId) return res.status(401).json({ success: false, error: '未登录' });
+    const ids = (req.body && Array.isArray(req.body.voucherIds)) ? req.body.voucherIds.slice(0, 50) : [];
+    const col = localCollection('vouchers');
+    const results = ids.map((vid: string) => {
+      const doc = col.get(String(vid)) || null;
+      return {
+        id: String(vid),
+        exists: !!doc,
+        currentHolderId: doc ? doc.currentHolderId : undefined,
+        status: doc ? doc.status : undefined,
+        reviewStatus: (doc && doc.metadata && doc.metadata.customData) ? doc.metadata.customData.reviewStatus : undefined,
+        mintedBy: (doc && doc.integrity) ? doc.integrity.mintedBy : 'client',
+        signatureValid: (doc && doc.integrity) ? verifyVoucherIntegrity(doc) : null,
+      };
+    });
+    return res.json({ success: true, data: { results } });
+  });
+
+  // ---------- POST /__item/purchase ----------
+  router.post('/__item/purchase', express.json({ limit: '1mb' }), (req: Request, res: Response) => {
+    const auth = extractAuthInfo(req);
+    if (!auth.userId) return res.status(401).json({ success: false, error: '未登录' });
+    const doc = req.body && req.body.doc;
+    if (!doc || !doc.id) return res.status(400).json({ success: false, error: 'missing doc.id' });
+    if (JSON.stringify(doc).length > MAX_TX_DOC) {
+      return res.status(413).json({ success: false, error: 'purchases 文档超过 8KB 限制' });
+    }
+    if (!localRateCheck(auth.userId)) return res.status(429).json({ success: false, error: '同步过于频繁，请稍后再试' });
+    localCollection('purchases').set(String(doc.id), doc);
+    return res.json({ success: true, data: { id: String(doc.id) } });
+  });
+
+  // ---------- GET /__item/harvest-limit ----------
+  router.get('/__item/harvest-limit', async (req: Request, res: Response) => {
+    const auth = extractAuthInfo(req);
+    if (!auth.userId) return res.status(401).json({ success: false, error: '未登录' });
+    const gameId = String(req.query.gameId || '');
+    if (!gameId) return res.status(400).json({ success: false, error: 'missing gameId' });
+    const ITEM_DAILY_LIMIT = await getLocalRule('item_harvest.daily_limit');
+    const day = new Date().toISOString().slice(0, 10);
+    const rec = localCollection('item_harvest_daily').get(`${auth.userId}:${gameId}:${day}`);
+    const count = (rec && rec.count) || 0;
+    return res.json({ success: true, data: { remaining: Math.max(0, ITEM_DAILY_LIMIT - count), limit: ITEM_DAILY_LIMIT } });
+  });
+
+  // ---------- POST /__market/list ----------
+  router.post('/__market/list', express.json({ limit: '1mb' }), (req: Request, res: Response) => {
+    const auth = extractAuthInfo(req);
+    if (!auth.userId) return res.status(401).json({ success: false, error: '未登录：市场写入需要 Bearer token' });
+    const listing = req.body && req.body.listing;
+    if (!listing || !listing.id || !listing.voucherId || !listing.sellerId) {
+      return res.status(400).json({ success: false, error: 'missing listing.id / voucherId / sellerId' });
+    }
+    if (listing.sellerId !== auth.userId) return res.status(403).json({ success: false, error: '上架者身份与 token 不一致' });
+    if (typeof listing.price !== 'number' || !(listing.price > 0)) return res.status(400).json({ success: false, error: '价格必须大于 0' });
+    const voucher = localCollection('vouchers').get(String(listing.voucherId)) || null;
+    if (!voucher) return res.status(400).json({ success: false, error: '被挂凭证不存在（云端为准）', code: 'voucher_missing' });
+    if (voucher.currentHolderId !== listing.sellerId) return res.status(403).json({ success: false, error: '被挂凭证不属于你', code: 'holder_mismatch' });
+    if (voucher.status === 'redeemed' || voucher.status === 'destroyed') return res.status(400).json({ success: false, error: '该凭证已被使用/销毁，无法上架' });
+    const reviewStatus = (voucher.metadata && voucher.metadata.customData) ? voucher.metadata.customData.reviewStatus : undefined;
+    if (reviewStatus === 'pending') return res.status(403).json({ success: false, error: '高价值道具审核中，暂不能上架' });
+    if (reviewStatus === 'rejected') return res.status(403).json({ success: false, error: '该道具未通过平台审核，不能上架' });
+    localCollection('market_listings').set(String(listing.id), { ...listing, status: 'active', serverVerifiedAt: Date.now() });
+    return res.json({ success: true, data: { id: String(listing.id) } });
+  });
+
+  // ---------- POST /__market/buy ----------
+  router.post('/__market/buy', express.json({ limit: '1mb' }), (req: Request, res: Response) => {
+    const auth = extractAuthInfo(req);
+    if (!auth.userId) return res.status(401).json({ success: false, error: '未登录' });
+    const { listingId, buyerId, buyerName, paymentTxIds } = req.body || {};
+    if (!listingId || !buyerId) return res.status(400).json({ success: false, error: 'missing listingId or buyerId' });
+    if (buyerId !== auth.userId) return res.status(403).json({ success: false, error: '买家身份与 token 不一致' });
+    const lcol = localCollection('market_listings');
+    const listing = lcol.get(String(listingId)) || null;
+    if (!listing) return res.status(404).json({ success: false, error: '挂牌不存在', code: 'not_found' });
+    if (listing.status !== 'active') {
+      return res.status(409).json({ success: false, error: listing.status === 'sold' ? '该商品已售出' : '该商品已下架', code: 'not_active' });
+    }
+    if (listing.sellerId === buyerId) return res.status(400).json({ success: false, error: '不能购买自己的商品' });
+    lcol.set(String(listingId), {
+      ...listing,
+      status: 'sold',
+      soldAt: Date.now(),
+      buyerId,
+      buyerName: String(buyerName || '').slice(0, 50),
+      paymentTxIds: Array.isArray(paymentTxIds) ? paymentTxIds.slice(0, 10).map(String) : [],
+      soldAtServer: Date.now(),
+    });
+    const purId = 'pur_' + String(listingId);
+    localCollection('purchases').set(purId, {
+      _id: purId, id: purId, listingId: String(listingId), voucherId: listing.voucherId,
+      itemName: listing.itemName, price: listing.price, currency: listing.currency,
+      sellerId: listing.sellerId, sellerName: listing.sellerName, buyerId,
+      buyerName: String(buyerName || '').slice(0, 50), purchasedAt: Date.now(),
+    });
+    return res.json({ success: true, data: { listingId: String(listingId), status: 'sold' } });
+  });
+
+  // ---------- POST /__market/unlist ----------
+  router.post('/__market/unlist', express.json({ limit: '1mb' }), (req: Request, res: Response) => {
+    const auth = extractAuthInfo(req);
+    if (!auth.userId) return res.status(401).json({ success: false, error: '未登录' });
+    const { listingId, userId } = req.body || {};
+    if (!listingId || !userId) return res.status(400).json({ success: false, error: 'missing listingId or userId' });
+    if (userId !== auth.userId) return res.status(403).json({ success: false, error: '下架者身份与 token 不一致' });
+    const lcol = localCollection('market_listings');
+    const listing = lcol.get(String(listingId)) || null;
+    if (!listing) return res.status(404).json({ success: false, error: '挂牌不存在', code: 'not_found' });
+    if (listing.sellerId !== userId) return res.status(403).json({ success: false, error: '只能下架自己的商品' });
+    if (listing.status !== 'active') return res.status(409).json({ success: false, error: '商品已售出或已下架', code: 'not_active' });
+    lcol.set(String(listingId), { ...listing, status: 'cancelled', cancelledAt: Date.now() });
+    return res.json({ success: true, data: { listingId: String(listingId), status: 'cancelled' } });
+  });
+
+  // ---------- 道具凭证点赞/点倒赞：__vote（与云函数 __vote 对齐） ----------
+  //   GET  /__vote?gameId= — 该游戏全部道具投票聚合 + 当前用户投票（游客可读，无 mine）
+  //   POST /__vote { gameId, targetId, vote: 'up'|'down'|'cancel' } — 身份取自 token；
+  //     每用户每目标一票（确定性 ID vote_{targetId}_{userId} 覆盖写），cancel 删除自己的票
+  const aggregateVotes = (gameId: string, userId?: string) => {
+    const counts: Record<string, { up: number; down: number }> = {};
+    const mine: Record<string, 'up' | 'down'> = {};
+    for (const doc of localCollection('voucher_votes').values()) {
+      if (doc.gameId !== gameId) continue;
+      const t = String(doc.targetId || '');
+      if (!t) continue;
+      if (!counts[t]) counts[t] = { up: 0, down: 0 };
+      if (doc.vote === 'up') counts[t].up += 1;
+      else if (doc.vote === 'down') counts[t].down += 1;
+      if (userId && doc.userId === userId) mine[t] = doc.vote;
+    }
+    return { counts, mine };
+  };
+
+  router.get('/__vote', (req: Request, res: Response) => {
+    const gameId = String(req.query.gameId || '');
+    if (!gameId) return res.status(400).json({ success: false, error: 'missing gameId' });
+    const auth = extractAuthInfo(req);
+    return res.json({ success: true, data: aggregateVotes(gameId, auth.userId) });
+  });
+
+  router.post('/__vote', express.json({ limit: '64kb' }), (req: Request, res: Response) => {
+    const auth = extractAuthInfo(req);
+    if (!auth.userId) return res.status(401).json({ success: false, error: '未登录：投票需要 Bearer token' });
+    if (!localRateCheck(auth.userId)) return res.status(429).json({ success: false, error: '操作过于频繁', code: 'rate_limit' });
+    const { targetId, gameId, vote } = req.body || {};
+    if (!targetId || !gameId || !['up', 'down', 'cancel'].includes(vote)) {
+      return res.status(400).json({ success: false, error: 'missing/invalid targetId, gameId or vote' });
+    }
+    const col = localCollection('voucher_votes');
+    const id = `vote_${String(targetId)}_${auth.userId}`;
+    if (vote === 'cancel') {
+      col.delete(id);
+    } else {
+      col.set(id, {
+        _id: id,
+        targetId: String(targetId),
+        gameId: String(gameId),
+        userId: auth.userId,
+        vote,
+        updatedAt: Date.now(),
+      });
+    }
+    return res.json({ success: true, data: aggregateVotes(String(gameId), auth.userId) });
+  });
 }
 
 // ==================== 方案 E：注入型扩展（文件分发层加载时注入） ====================
@@ -217,8 +724,10 @@ function applyContentLoaderToHtml(html: string, enabled: boolean): string {
   if (!enabled || !html || html.indexOf(CONTENT_LOADER_MARKER) >= 0) return html;
   const block = '\n' + CONTENT_LOADER_MARKER + '\n' + CONTENT_LOADER_SNIPPET + '\n';
   const lower = html.toLowerCase();
-  const bodyIdx = lower.lastIndexOf('</body>');
-  return bodyIdx >= 0 ? html.slice(0, bodyIdx) + block + html.slice(bodyIdx) : html + block;
+  // 注入到 </head> 前：loader 定义必须先于游戏内 AllinONE_ContentLoader.on() 注册代码执行（时序安全）；
+  // loader 仅定义全局对象 + 注册 message 监听，无 DOM 依赖，head 阶段执行安全。
+  const headIdx = lower.lastIndexOf('</head>');
+  return headIdx >= 0 ? html.slice(0, headIdx) + block + html.slice(headIdx) : html + block;
 }
 
 /** 判断内容是否看起来像 base64 编码 */
@@ -271,17 +780,28 @@ export function createGamesPublicRouter(
   // 根据用户 ID 签发 JWT，使前端能够调用认证 API（如游戏文件上传）。
   router.post('/dev-token', (req: Request, res: Response) => {
     try {
-      const { userId } = req.body;
+      const { userId, role } = req.body;
       if (!userId || typeof userId !== 'string') {
         return res.status(400).json({ success: false, error: 'Missing userId' });
       }
-      const token = signToken({ userId, role: 'player' });
+      // 🆕 角色随签发写入 JWT（合约隧道 requireAdmin 依赖）；白名单防越权注入
+      const safeRole = ['player', 'admin', 'platform', 'developer'].includes(String(role)) ? String(role) : 'player';
+      const token = signToken({ userId, role: safeRole });
       res.json({ success: true, data: { token } });
     } catch (error: any) {
       logger.error({ err: error }, '[games] dev-token error');
       res.status(500).json({ success: false, error: 'Token generation failed' });
     }
   });
+
+  // ----------------------------------------------------------
+  // 道具凭证安全隧道（B2/B4 本地双实现，与云函数 __item / __market 对齐）
+  //   POST /__item/mint | /__item/update | /__item/sync | /__item/verify
+  //   GET  /__item/harvest-limit?gameId=
+  //   POST /__market/list | /__market/buy | /__market/unlist
+  // 身份从 JWT 解析（与云函数一致，绝不信 body）。
+  // ----------------------------------------------------------
+  registerItemMarketTunnels(router);
 
   // ----- GET /（游戏列表，公开；未通过审核的游戏不对外展示） -----
   router.get('/', async (req: Request, res: Response) => {
@@ -306,6 +826,105 @@ export function createGamesPublicRouter(
     } catch (e: any) {
       logger.error({ err: e }, '[games] list error');
       res.status(500).json({ success: false, error: isProduction ? 'Internal server error' : e.message });
+    }
+  });
+
+  // ----- GET /users（users 集合只读同步，钱包/分账余额跨端可见；须 Bearer token） -----
+  // ⚠️ 必须注册在 GET /:id 之前，否则 'users' 会被当 gameId 截胡（前端 loadFromBackend('users')
+  // 永远 404 → WalletSkill 回退 localStorage 旧值 → 服务端分账的钱在钱包 UI 不可见）。
+  router.get('/users', async (req: Request, res: Response) => {
+    try {
+      const auth = extractAuthInfo(req);
+      if (!auth.userId) {
+        return res.status(401).json({ success: false, error: '未登录：users 只读同步需要 Bearer token' });
+      }
+      const skip = Math.max(0, parseInt(String(req.query.skip || '0'), 10) || 0);
+      const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || '200'), 10) || 200));
+      if (useMemoryDB) {
+        const all = await memoryDB.listUsers();
+        return res.json({ success: true, data: { list: all.slice(skip, skip + limit), total: all.length } });
+      }
+      if (pool) {
+        const result = await pool.query(
+          `SELECT * FROM users ORDER BY updated_at DESC OFFSET $1 LIMIT $2`,
+          [skip, limit],
+        );
+        return res.json({ success: true, data: { list: result.rows } });
+      }
+      return res.json({ success: true, data: { list: [] } });
+    } catch (e: any) {
+      logger.error({ err: e }, '[games] users list error');
+      res.status(500).json({ success: false, error: isProduction ? 'Internal server error' : e.message });
+    }
+  });
+
+  // ----- GET /transactions（钱包流水只读同步；须 Bearer token；勿放 GET /:id 之后） -----
+  // 消费方：WalletSkill 服务端流水回退 + 平台金库报表（platformTreasuryService）聚合三方分成收益。
+  router.get('/transactions', async (req: Request, res: Response) => {
+    try {
+      const auth = extractAuthInfo(req);
+      if (!auth.userId) {
+        return res.status(401).json({ success: false, error: '未登录：transactions 只读同步需要 Bearer token' });
+      }
+      const skip = Math.max(0, parseInt(String(req.query.skip || '0'), 10) || 0);
+      const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || '200'), 10) || 200));
+      if (useMemoryDB) {
+        const all = await memoryDB.listTransactions();
+        return res.json({ success: true, data: { list: all.slice(skip, skip + limit), total: all.length } });
+      }
+      if (pool) {
+        const result = await pool.query(
+          `SELECT * FROM transactions ORDER BY timestamp DESC OFFSET $1 LIMIT $2`,
+          [skip, limit],
+        );
+        return res.json({ success: true, data: { list: result.rows } });
+      }
+      return res.json({ success: true, data: { list: [] } });
+    } catch (e: any) {
+      logger.error({ err: e }, '[games] transactions list error');
+      res.status(500).json({ success: false, error: isProduction ? 'Internal server error' : e.message });
+    }
+  });
+
+  // ----- GET /:collection（只读同步白名单；必须注册在 GET /:id 之前，否则被当 gameId 截胡 → 404） -----
+  // 与云函数 SYNC_COLLECTIONS GET 分支对齐。只读：写入仍走 __item/* / __market/* 唯一入口。
+  // 2026-10-17：补齐本地实现——此前 GET /vouchers 等全部 404，跨浏览器恢复与服务端池验证通道断裂。
+  const SYNC_READ_COLLECTIONS = new Set([
+    // 凭证 / 模板 / 购买 / 流水
+    'vouchers', 'voucher_templates', 'purchases', 'voucher_transactions',
+    // 提案 / 治理
+    'proposals', 'vote_thresholds', 'penalty_logs',
+    // 市场
+    'market_listings',
+    // 钱包 / 背包
+    'inventories',
+    // 兑换码
+    'redeem_hosted_items', 'redeem_codes', 'redeem_purchases',
+    // 平台配置 / 商店
+    'platform_treasury', 'game_stores', 'platform_config', 'store_products',
+    // 扩展凭证
+    'extension_vouchers',
+    // 奖池 / 绑定 / 奖励（PlatformBindingService / UserPoolService）
+    'user_pools', 'platform_bindings', 'reward_records', 'user_reward_limits',
+  ]);
+  router.get('/:collection', async (req: Request, res: Response, next: Function) => {
+    const collection = String(req.params.collection || '');
+    if (!SYNC_READ_COLLECTIONS.has(collection)) return next(); // 非白名单 → 交给 GET /:id（游戏详情）
+    try {
+      const auth = extractAuthInfo(req);
+      if (!auth.userId) {
+        return res.status(401).json({ success: false, error: `未登录：${collection} 只读同步需要 Bearer token` });
+      }
+      const skip = Math.max(0, parseInt(String(req.query.skip || '0'), 10) || 0);
+      const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '200'), 10) || 200));
+      const col = localCollection(collection);
+      const all = Array.from(col.values()).sort((a: any, b: any) => (b.createdAt || b.updatedAt || 0) - (a.createdAt || a.updatedAt || 0));
+      return res.json({ success: true, data: { list: all.slice(skip, skip + limit), skip, limit } });
+    } catch (e) {
+      // 集合不存在/读取失败：返回空列表而非 500，避免前端轮询刷屏（与云函数对齐）
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.warn(`[sync] GET ${collection} 失败: ${msg}`);
+      return res.json({ success: false, error: msg, data: { list: [], skip: 0, limit: 200 } });
     }
   });
 

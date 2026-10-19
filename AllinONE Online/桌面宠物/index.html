@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>桌宠小伙伴 · Desktop Pet</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- 桌面场景装饰（Electron 透明模式下自动隐藏） -->
+  <div id="scene" aria-hidden="true">
+    <div class="cloud cloud-1"></div>
+    <div class="cloud cloud-2"></div>
+    <div class="cloud cloud-3"></div>
+    <div id="ground"></div>
+  </div>
+
+  <!-- 宠物本体（位置由脚本控制） -->
+  <div id="pet" aria-label="桌面宠物">
+    <div id="speech-bubble" class="hidden"></div>
+    <div id="pet-sprite"></div>
+  </div>
+
+  <!-- 底部快捷工具栏 -->
+  <nav id="toolbar" aria-label="快捷操作">
+    <div id="skill-actions"></div>
+    <span class="toolbar-divider"></span>
+    <button id="btn-desktop" class="tool-btn" title="进入桌面宠物模式（透明 / 置顶 / 穿透）" aria-label="进入桌面宠物模式">🖥️</button>
+    <button id="btn-settings" class="tool-btn" title="设置" aria-label="设置">⚙️</button>
+  </nav>
+
+  <!-- 状态面板 -->
+  <aside id="stats-panel" aria-label="宠物状态">
+    <button class="stats-title" id="stats-toggle" title="展开 / 收起">🐱 状态 <span class="stats-caret">▾</span></button>
+    <div class="stats-body">
+      <div class="stat-row" data-stat="satiety">
+        <span class="stat-icon">🍚</span><span class="stat-name">饱食</span>
+        <div class="stat-bar"><div class="stat-fill"></div></div>
+        <span class="stat-num">80</span>
+      </div>
+      <div class="stat-row" data-stat="mood">
+        <span class="stat-icon">😊</span><span class="stat-name">心情</span>
+        <div class="stat-bar"><div class="stat-fill"></div></div>
+        <span class="stat-num">80</span>
+      </div>
+      <div class="stat-row" data-stat="energy">
+        <span class="stat-icon">⚡</span><span class="stat-name">精力</span>
+        <div class="stat-bar"><div class="stat-fill"></div></div>
+        <span class="stat-num">90</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 设置面板 -->
+  <aside id="settings-panel" class="hidden" aria-label="设置">
+    <header class="settings-head">
+      <h2>⚙️ 设置</h2>
+      <button id="settings-close" aria-label="关闭设置">×</button>
+    </header>
+
+    <section class="settings-group">
+      <h3>宠物形象</h3>
+      <div class="appearance-options">
+        <button class="appearance-option selected" data-pet="cat" id="btn-pet-cat">
+          <span class="app-emoji">🐱</span><span class="app-name">橘小猫</span>
+        </button>
+        <button class="appearance-option" data-pet="custom" id="btn-pet-custom">
+          <span class="app-emoji" id="custom-preview">🖼️</span><span class="app-name">自定义图片</span>
+        </button>
+      </div>
+      <p class="settings-tip">选择「自定义图片」上传一张图片，即可自动生成专属桌宠。</p>
+    </section>
+
+    <section class="settings-group">
+      <h3>语音</h3>
+      <label class="switch-row">
+        <span>朗读语音（浏览器本地合成）</span>
+        <span class="switch"><input type="checkbox" id="opt-tts" checked /><i></i></span>
+      </label>
+      <label class="range-row">
+        <span>语速</span>
+        <input type="range" id="opt-rate" min="0.6" max="1.6" step="0.1" value="1" />
+        <span class="rate-value" id="rate-value">1.0x</span>
+      </label>
+    </section>
+
+    <section class="settings-group">
+      <h3>🎤 自定义语音包</h3>
+      <div id="voicepack-list"><p class="settings-tip">加载中…</p></div>
+      <p class="settings-tip">录制（≤15 秒，自动归一化音量）或上传音频（≤2MB、≤20 秒），绑定后事件触发优先播放你的声音。支持 WAV / MP3 / OGG / FLAC / M4A / WEBM，全部本地存储。</p>
+    </section>
+
+    <section class="settings-group">
+      <h3>技能模块</h3>
+      <div id="skill-list"><p class="settings-tip">技能加载中…</p></div>
+      <p class="settings-tip">开关立即生效。新增技能只需按统一接口注册一个文件即可，无需改动核心代码（见 README）。</p>
+    </section>
+
+    <section class="settings-group" id="desktop-group">
+      <h3>🖥 桌面宠物模式</h3>
+      <div class="desktop-guide" id="desktop-guide">
+        <div id="desktop-guide-text">
+          浏览器窗口受安全限制，无法做到「透明 / 始终置顶 / 点击穿透桌面」，
+          这三件事只能由桌面组件完成。点下面的按钮即可一键切换过去。
+        </div>
+        <div class="desktop-actions">
+          <button id="btn-desktop-launch" class="primary">进入桌面宠物模式</button>
+          <button id="btn-fullscreen">浏览器全屏（备用）</button>
+          <button id="btn-quit-desktop" class="danger" hidden>退出桌面宠物</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-group">
+      <h3>数据</h3>
+      <button id="btn-reset" class="danger-btn">重置宠物数据</button>
+    </section>
+  </aside>
+
+  <!-- 宠物右键菜单（仅桌面模式可用） -->
+  <div id="ctx-menu" class="hidden" role="menu" aria-label="宠物右键菜单">
+    <button class="ctx-item" data-act="settings">⚙️ 打开设置</button>
+    <button class="ctx-item" data-act="hide">👁 隐藏 / 显示宠物</button>
+    <div class="ctx-sep"></div>
+    <button class="ctx-item danger" data-act="quit">🚪 退出桌面宠物</button>
+  </div>
+
+  <!-- 通知 -->
+  <div id="toast" class="hidden"></div>
+
+  <!-- 文件上传（隐藏） -->
+  <input type="file" id="upload-input" accept="image/*" hidden />
+
+  <noscript><p style="padding:2rem;">需要启用 JavaScript 才能运行桌宠。</p></noscript>
+
+  <!-- 核心与模块（普通脚本顺序加载，双击即用，无构建依赖） -->
+  <script src="js/core.js"></script>
+  <script src="js/speech.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/skills.js"></script>
+  <script src="js/pet-svg.js"></script>
+  <script src="js/pet-image.js"></script>
+  <script src="js/pet-rig.js"></script>
+  <!-- 内置技能模块：新增技能在此追加一行，或由启动目录动态引入 -->
+  <script src="js/skills/skill-greet.js"></script>
+  <script src="js/skills/skill-click-respond.js"></script>
+  <script src="js/skills/skill-chat.js"></script>
+  <script src="js/skills/skill-remind.js"></script>
+  <script src="js/skills/skill-feed.js"></script>
+  <script src="js/skills/skill-sleep.js"></script>
+  <script src="js/skills/skill-walk.js"></script>
+  <script src="js/skills/skill-pat.js"></script>
+  <script src="js/skills/skill-voicepack.js"></script>
+  <!-- 可选技能：每日单词（默认关闭，在设置 → 技能模块里开启） -->
+  <script src="js/word-parser.js"></script>
+  <script src="js/wordlist.js"></script>
+  <script src="js/skills/skill-word.js"></script>
+  <!-- AllinONE 平台接入桥：扩展加载 / 内容工坊 / 道具双通道 / 道具提取 / 奖励上报 -->
+  <script src="js/a1g-bridge.js"></script>
+  <!-- 主程序装配 -->
+  <script src="js/main.js"></script>
+</body>
+</html>

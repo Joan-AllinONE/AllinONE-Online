@@ -25,9 +25,10 @@ import type {
   ListingStatus,
   ListingArtwork,
 } from '@/types/marketplace';
-import { MARKET_COMMISSION_RATE } from '@/types/marketplace';
+import { getRuleValue, ensureRulesReady } from './platformRulesService';
 import { platformTreasuryService } from '@/services/platformTreasuryService';
-import { saveBatchToBackend, loadFromBackend } from './backendSync';
+import { loadFromBackend } from './backendSync';
+import { marketList, marketBuy, marketUnlist, verifyVoucherForCirculation } from './itemTunnelService';
 import { track } from './analytics';
 
 // ==================== 存储键 ====================
@@ -76,17 +77,13 @@ function saveListings(listings: MarketListing[]): void {
   } catch { /* ignore */ }
 }
 
-/** 将挂牌数据同步到 CloudBase — 通过写入队列保证零丢失+重试 */
-function syncListingsToCloud(listings: MarketListing[]): void {
-  const DAY = 86400000;
-  const now = Date.now();
-  // 同步活跃挂牌 + 7天内售出 + 24小时内下架的
-  const toSync = listings.filter(l =>
-    l.status === 'active' ||
-    (l.soldAt && l.soldAt > now - 7 * DAY) ||
-    (l.cancelledAt && l.cancelledAt > now - DAY)
-  );
-  saveBatchToBackend('market_listings', toSync as any[]).catch(() => {});
+/**
+ * 🆕 B4：market_listings 公开集合同步写已被云端摘除（READ_ONLY 403）。
+ * 云端挂牌写入的唯一入口是 __market/list、/__market/buy、/__market/unlist
+ * （各业务动作内显式调用，服务端核对凭证后才落库）；本地 localStorage 仍为展示缓存。
+ */
+function syncListingsToCloud(_listings: MarketListing[]): void {
+  // no-op（保留函数签名避免改动调用点；历史批量同步已废弃）
 }
 
 function generateId(): string {
@@ -109,19 +106,22 @@ function releaseLock(): void {
 
 class MarketplaceService {
   /**
-   * 📤 上架道具凭证
+   * 📤 上架道具凭证（🆕 B4/B5 服务端化）
    *
    * 1. 校验凭证可上架（ITEM 类型 + ACTIVE 状态 + 持有者一致 + 未已兑换 + 未重复挂牌）
-   * 2. 冻结凭证（VoucherService.freezeVoucher）
-   * 3. 创建 MarketListing
+   * 2. 🆕 服务端流通校验（__item/verify：云端存在 + 持有者 + 审核状态）——
+   *    本地伪造凭证在云端不存在，上架直接被拒
+   * 3. 冻结凭证（VoucherService.freezeVoucher）
+   * 4. 创建 MarketListing（本地缓存）+ 🆕 __market/list 服务端写入（服务端再次核对后落库；
+   *    服务端拒绝则回滚冻结与本地挂牌）
    */
-  listItem(
+  async listItem(
     voucherId: string,
     sellerId: string,
     sellerName: string,
     price: number,
     currency: 'gameCoins' | 'aCoins'
-  ): ListItemResult {
+  ): Promise<ListItemResult> {
     // 1. 获取凭证
     const userVouchers = voucherService.getUserVouchers(sellerId);
     const voucher = userVouchers.find(v => v.id === voucherId);
@@ -129,10 +129,16 @@ class MarketplaceService {
       return { success: false, message: '凭证不存在或不属于你' };
     }
 
-    // 2. 校验
+    // 2. 校验（本地规则）
     const validation = this.validateForListing(voucher, sellerId);
     if (!validation.ok) {
       return { success: false, message: validation.reason };
+    }
+
+    // 2.5 🆕 服务端流通校验（云端为准；伪造凭证/非持有者/审核拦截；非云端环境自动放行）
+    const circCheck = await verifyVoucherForCirculation(voucherId, sellerId);
+    if (!circCheck.ok) {
+      return { success: false, message: circCheck.reason };
     }
 
     // 3. 冻结凭证
@@ -148,18 +154,31 @@ class MarketplaceService {
     const customData = meta.customData || {};
 
     // 5. 创建挂牌
-    // 作品类凭证（如 perler-artwork）：快照作品数据，市场卡片跨浏览器可渲染
+    // 作品类凭证（如 perler-artwork / gushi-powerup 成品）：快照作品数据，市场卡片跨浏览器可渲染
     let artwork: ListingArtwork | undefined;
     try {
       const p = (customData.gameEffect?.itemData?.params || {}) as Record<string, any>;
-      const w = parseInt(p.w, 10);
-      const h = parseInt(p.h, 10);
-      if (
-        w > 0 && w <= 59 && h > 0 && h <= 59 &&
-        Array.isArray(p.palette) && p.palette.length > 0 &&
-        typeof p.cells === 'string' && p.cells.length === w * h
-      ) {
-        artwork = { w, h, palette: p.palette, cells: p.cells };
+      // 缅川公盘成品（gushi-powerup）：确定性视觉参数，平台侧 GushiProductArt 重绘
+      const seedNum = parseInt(p.seed, 10);
+      if (typeof p.craft === 'string' && p.craft.trim() && typeof p.gem === 'string' && Number.isFinite(seedNum)) {
+        const sizeNum = Number(p.size);
+        artwork = {
+          kind: 'gushi',
+          craft: p.craft,
+          gem: p.gem,
+          seed: seedNum,
+          size: Number.isFinite(sizeNum) && sizeNum > 0 ? sizeNum : 1,
+        };
+      } else {
+        const w = parseInt(p.w, 10);
+        const h = parseInt(p.h, 10);
+        if (
+          w > 0 && w <= 59 && h > 0 && h <= 59 &&
+          Array.isArray(p.palette) && p.palette.length > 0 &&
+          typeof p.cells === 'string' && p.cells.length === w * h
+        ) {
+          artwork = { kind: 'perler', w, h, palette: p.palette, cells: p.cells };
+        }
       }
     } catch { /* 非作品类凭证，忽略 */ }
 
@@ -188,6 +207,24 @@ class MarketplaceService {
     const listings = loadListings();
     listings.push(listing);
     saveListings(listings);
+
+    // 🆕 B4：服务端写入挂牌（云端唯一入口）。服务端再次核对凭证（存在+持有者+审核状态）。
+    // 失败分级：400/403=业务拒绝（伪造/非持有者/审核拦截）→ 回滚阻断；
+    // 404/5xx/0=服务不可用 → 降级放行（本地挂牌继续，不阻断正常玩家）
+    const server = await marketList(listing as unknown as Record<string, any>);
+    if (!server.success) {
+      const status = server.status ?? 0;
+      const isBusinessReject = status === 400 || status === 403;
+      if (isBusinessReject) {
+        try {
+          saveListings(loadListings().filter(l => l.id !== listing.id));
+          voucherService.unfreezeVoucher(voucherId, sellerId, sellerName, '上架被平台拒绝，回滚托管');
+        } catch { /* 回滚尽力而为 */ }
+        console.warn('[Marketplace] 服务端拒绝挂牌:', server.error);
+        return { success: false, message: server.error || '上架失败：平台校验未通过' };
+      }
+      console.warn(`[Marketplace] 挂牌服务不可用（HTTP ${status}），本地挂牌继续:`, server.error);
+    }
 
     console.log(`[Marketplace] 上架成功: ${listing.itemName} @ ${price} ${currency}`);
 
@@ -239,7 +276,17 @@ class MarketplaceService {
         return { success: false, listingId, message: '凭证状态异常，无法交易' };
       }
 
-      const commission = Math.round(listing.price * MARKET_COMMISSION_RATE * 100) / 100;
+      // 🆕 B5：购买前服务端校验（云端为准：凭证存在+未使用+审核状态）；
+      // 校验服务不可达时放行（伪造凭证进不了云端，风险可控）
+      const circCheck = await verifyVoucherForCirculation(listing.voucherId, listing.sellerId);
+      if (!circCheck.ok) {
+        return { success: false, listingId, message: circCheck.reason };
+      }
+
+      // 佣金率读取规则注册中心（治理门控修改；本地 precheck 与云端 __market/buy 同源）
+      await ensureRulesReady();
+      const commissionRate = getRuleValue('market.commission_rate');
+      const commission = Math.round(listing.price * commissionRate * 100) / 100;
       const sellerReceives = listing.price - commission;
       const paymentTxIds: string[] = [];
 
@@ -351,6 +398,14 @@ class MarketplaceService {
       listings[idx] = listing;
       saveListings(listings);
 
+      // 🆕 B4：云端原子成交（__market/buy：置 sold + 写 purchases 快照；服务端核对
+      // active 状态防双卖，身份取自 token）。失败仅告警——本地交易已完成，
+      // 下次打开市场页云端数据会以此为准拉齐（云端为准合并策略）
+      const buyServer = await marketBuy(listingId, buyerId, buyerName, paymentTxIds);
+      if (!buyServer.success) {
+        console.warn('[Marketplace] 云端成交写入失败（本地已完成）:', buyServer.error);
+      }
+
       console.log(`[Marketplace] 交易成功: ${listing.itemName}, 买家=${buyerName}, 卖家收到=${sellerReceives}`);
 
       // 📊 数据中心埋点：市场交易
@@ -383,9 +438,9 @@ class MarketplaceService {
   }
 
   /**
-   * 📥 下架
+   * 📥 下架（🆕 B4 服务端化：先 __market/unlist 云端裁决，成功才解冻退凭证）
    */
-  delistItem(listingId: string, userId: string): { success: boolean; message: string } {
+  async delistItem(listingId: string, userId: string): Promise<{ success: boolean; message: string }> {
     const listings = loadListings();
     const idx = listings.findIndex(l => l.id === listingId);
 
@@ -394,6 +449,19 @@ class MarketplaceService {
 
     if (listing.sellerId !== userId) return { success: false, message: '只能下架自己的商品' };
     if (listing.status !== 'active') return { success: false, message: `商品已${listing.status === 'sold' ? '售出' : '取消'}` };
+
+    // 🆕 云端裁决（服务端核对卖家身份后置 cancelled）。
+    // 失败分级：403=业务拒绝（非卖家）→ 阻断；404（云端无此挂牌，如存量本地挂牌）/
+    // 5xx/0（服务不可用）→ 降级放行本地下架流程
+    const server = await marketUnlist(listingId, userId);
+    if (!server.success) {
+      const status = server.status ?? 0;
+      const isBusinessReject = status === 400 || status === 403 || status === 409;
+      if (isBusinessReject) {
+        return { success: false, message: server.error || '下架失败，请稍后再试' };
+      }
+      console.warn(`[Marketplace] 下架服务不可用（HTTP ${status}），本地下架继续:`, server.error);
+    }
 
     // 解冻凭证
     try {

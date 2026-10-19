@@ -9,6 +9,7 @@ import type {
   PermissionConfig,
 } from './types';
 import { PresetTemplateId } from './types';
+import { getRuleValue } from '@/services/platformRulesService';
 
 /**
  * 平台通用币模板 (A币标准配置)
@@ -106,7 +107,8 @@ export const PLATFORM_CURRENCY_TEMPLATE: VoucherTemplate = {
         },
         recycleLogic: {
           mode: 'percentage',
-          percentage: 0.5,
+          // 平台级费率读取规则注册中心（governance 门控修改）
+          percentage: getRuleValue('voucher.recycle_daily_pct'),
           destination: 'treasury',
         },
         limits: {
@@ -125,7 +127,8 @@ export const PLATFORM_CURRENCY_TEMPLATE: VoucherTemplate = {
         },
         recycleLogic: {
           mode: 'percentage',
-          percentage: 2,
+          // 平台级费率读取规则注册中心（governance 门控修改）
+          percentage: getRuleValue('voucher.exchange_fee_pct'),
           destination: 'burn',
         },
         limits: {
@@ -144,7 +147,8 @@ export const PLATFORM_CURRENCY_TEMPLATE: VoucherTemplate = {
         },
         recycleLogic: {
           mode: 'percentage',
-          percentage: 0.5,
+          // 平台级费率读取规则注册中心（governance 门控修改）
+          percentage: getRuleValue('voucher.transfer_fee_pct'),
           destination: 'platform',
         },
         limits: {},

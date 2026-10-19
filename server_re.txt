@@ -1,0 +1,296 @@
+[JWT] WARNING: Using default dev secret — NOT for production use
+[contract] 本地 cron tick 已启动（每 60s）: http://127.0.0.1:3000/api/v1/games/__contract/tick
+[23:30:23] [32mINFO[39m (8340): [36mAllinONE 服务器已启动[39m
+    [35mport[39m: "3000"
+    [35mdbMode[39m: "内存数据库"
+    [35mredeemCodeCount[39m: 0
+    [35mredeemUsedCount[39m: 0
+[23:30:23] [33mWARN[39m (8340): [36m使用内存数据库（数据将在重启后丢失）[39m
+[23:30:27] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__wallet/platform/adjust"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 47
+[23:30:27] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__wallet/platform/adjust"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 6
+[23:30:27] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__wallet/platform/adjust"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 5
+[23:30:27] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__contract/templates"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 7
+[contract] ⚠️ 未配置 CONTRACT_SIGNING_KEY，回退（生产必须独立配置）
+[23:30:28] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/deploy"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 28
+[23:30:28] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 17
+[23:30:28] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 9
+[contract] ⚠️ 未配置 CONTRACT_SIGNING_KEY，回退（生产必须独立配置）
+[contract] ⚠️ 未配置 CONTRACT_SIGNING_KEY，回退（生产必须独立配置）
+[contract] ⚠️ 未配置 CONTRACT_SIGNING_KEY，回退（生产必须独立配置）
+[contract:group-buy] 履约凭证已铸造：3 份（ctr_mv8qta26_5b4a158d）
+[contract] ⚠️ 未配置 CONTRACT_SIGNING_KEY，回退（生产必须独立配置）
+[contract] ⚠️ 未配置 CONTRACT_SIGNING_KEY，回退（生产必须独立配置）
+[23:30:28] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 13
+[23:30:28] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__contract/detail?id=ctr_mv8qta26_5b4a158d"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 5
+[23:30:28] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__contract/verify?id=ctr_mv8qta26_5b4a158d"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 32
+[23:30:28] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__wallet/platform/balance"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 9
+[23:30:28] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/deploy"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 12
+[23:30:28] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 9
+[23:30:28] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 409
+    [35mdurationMs[39m: 5
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__contract/detail?id=ctr_mv8qta6u_6f00fb3f"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__wallet/platform/balance"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[contract] ⚠️ 未配置 CONTRACT_SIGNING_KEY，回退（生产必须独立配置）
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/deploy"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 6
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 7
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__contract/detail?id=ctr_mv8qtb5v_41e4295b"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__wallet/platform/balance"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__wallet/platform/balance"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+    [35muserId[39m: "u_init"
+[contract] ⚠️ 未配置 CONTRACT_SIGNING_KEY，回退（生产必须独立配置）
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/deploy"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/review"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 7
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 7
+[23:30:29] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 5
+[contract] ⚠️ 未配置 CONTRACT_SIGNING_KEY，回退（生产必须独立配置）
+[contract] ⚠️ 未配置 CONTRACT_SIGNING_KEY，回退（生产必须独立配置）
+[contract] ⚠️ 未配置 CONTRACT_SIGNING_KEY，回退（生产必须独立配置）
+[contract:gso] ⚠️ 发行方账户不存在（game-game_gso_smoke），份额调减跳过——后续销售仍按原比例入账
+[23:30:31] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 5
+[23:30:31] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__contract/detail?id=ctr_mv8qtb7c_db4ad629"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[23:30:31] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__wallet/platform/balance"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[23:30:31] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/revenue"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[contract:treasury-payout] ctr_mv8qtb7c_db4ad629 rows=3 plan=ctr_mv8qtb7c_db4ad629:tick:ctr_mv8qtb7c_db4ad629:settlement-weekly:2962
+[contract:treasury-payout] row 0: u_a +28 → paid after=48 updatedAt=1792020631372 now=1792020631372
+[contract:treasury-payout] row 1: u_b +28 → paid after=48 updatedAt=1792020631372 now=1792020631372
+[contract:treasury-payout] row 2: u_init +34 → paid after=2994 updatedAt=1792020631372 now=1792020631372
+[23:30:31] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/tick"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 6
+[23:30:31] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__wallet/platform/balance"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[23:30:32] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__wallet/platform/balance"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[23:30:32] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/rules/propose"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 9
+[23:30:32] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/rules/activate"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 5
+[23:30:32] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/rules/propose"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[23:30:32] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/rules/activate"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[23:30:32] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__contract/rules"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 2
+[23:30:32] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/invoke"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 3
+[23:30:32] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/rules/propose"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 5
+[23:30:33] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/rules/activate"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[23:30:33] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__contract/rules"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 1
+[23:30:33] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/rules/propose"
+    [35mstatusCode[39m: 403
+    [35mdurationMs[39m: 2
+[23:30:33] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__item/harvest-limit?gameId=smoke-rule-game"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[23:30:33] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/rules/propose"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 4
+[23:30:33] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/rules/activate"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 6
+[23:30:33] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "GET"
+    [35murl[39m: "/api/v1/games/__item/harvest-limit?gameId=smoke-rule-game"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 3
+[23:30:33] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/rules/propose"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 6
+[23:30:33] [32mINFO[39m (8340): [36mrequest completed[39m
+    [35mmethod[39m: "POST"
+    [35murl[39m: "/api/v1/games/__contract/admin/rules/activate"
+    [35mstatusCode[39m: 200
+    [35mdurationMs[39m: 6

@@ -1,0 +1,8 @@
+{
+  "name": "圣剑·斩",
+  "effect": "holy_sword_slash",
+  "params": { "radius": 3 },
+  "description": "挥剑横扫，斩杀身边 3 格内的所有敌人（板栗仔），每个 +50 分。纯道具 JSON 实现，无需修改游戏源码。",
+  "icon": "⚔️",
+  "effectCode": "function(params){\n  if (game.state !== 'play') return { message: '⚠️ 请先按 Enter 开始游戏再使用道具', error: true };\n  var T = 32;\n  var R = (params && params.radius ? params.radius : 3) * T;\n  var px = player.x + player.w/2, py = player.y + player.h/2;\n  var kills = 0;\n  for (var i = enemies.length - 1; i >= 0; i--){\n    var e = enemies[i];\n    if (e.ghost) continue;\n    var ex = e.x + e.w/2, ey = e.y + e.h/2;\n    var dx = ex - px, dy = ey - py;\n    if (dx*dx + dy*dy <= R*R){\n      e.flat = 30;\n      api.addScore(50);\n      kills++;\n      for (var k = 0; k < 7; k++){\n        particles.push({ x: ex, y: ey, vx: (Math.random()*2-1)*4, vy: -6 + (Math.random()*2-1)*3, t: 0 });\n      }\n    }\n  }\n  console.log('[圣剑] 斩杀 ' + kills + ' 个敌人');\n  return { message: '⚔️ 圣剑斩杀 ' + kills + ' 个敌人！' };\n}"
+}

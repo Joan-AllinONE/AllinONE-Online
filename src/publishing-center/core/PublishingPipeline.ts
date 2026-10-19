@@ -23,6 +23,7 @@ import {
   UploadedFile,
 } from '../types';
 import { SkillInitializer, type SkillInitializationResult } from './SkillInitializer';
+import { getRuleValue } from '../../services/platformRulesService';
 import { getApiBase } from '@/services/apiBase';
 import { savePublishedGame, saveGameFiles, type PublishedGame, type RedeemItemConfig } from '@/services/publishedGameService';
 import { submitGameForReview } from '@/services/gameReviewService';
@@ -424,7 +425,7 @@ export class PublishingPipeline {
       },
       platform: {
         type: config.gameType,
-        entryPoint: config.analysisResult.fileStructure.entryPoints[0],
+        entryPoint: this.pickEntryPoint(config.files, config.analysisResult?.fileStructure?.entryPoints),
         fullscreen: true,
         mobileOptimized: true,
         offlineSupport: false,
@@ -484,7 +485,7 @@ export class PublishingPipeline {
 
     // ===== 注入 AllinONE 协议层（复用公共方法，本地预览同源）=====
     if (config.files && config.files.length > 0 && config.gameId) {
-      const entryPoint = config.analysisResult?.fileStructure?.entryPoints?.[0] || 'index.html';
+      const entryPoint = this.pickEntryPoint(config.files, config.analysisResult?.fileStructure?.entryPoints);
       config.files = this.injectProtocolIntoFiles(config.files, config.gameId, {
         entryPoint,
         protocolMode,
@@ -506,6 +507,28 @@ export class PublishingPipeline {
    * @param opts      entryPoint / protocolMode / redeemItems
    * @returns 注入后的文件副本（不修改入参）
    */
+  /**
+   * 选择游戏入口文件。iframe 必须加载 HTML，入口永远是 .html/.htm。
+   * 优先级：分析结果中的 HTML 入口 > 文件列表根目录 index.html > 文件列表任意 index.html > 文件列表任意 HTML > 分析结果首项 > 'index.html'。
+   * 历史 bug：ZIP 内 js/main.js 因命名含 "main" 被识别为入口且文件顺序排在 index.html 之前，
+   * entryPoint 被存成 JS 文件 → iframe 加载 JS 白屏（如「桌面宠物」）。
+   */
+  private pickEntryPoint(files: UploadedFile[] | undefined, entryPoints: string[] | undefined): string {
+    const eps = entryPoints || [];
+    const htmlFromAnalysis = eps.find(p => /\.html?$/i.test((p || '').replace(/\\/g, '/')));
+    if (htmlFromAnalysis) return htmlFromAnalysis;
+
+    const normPaths = (files || [])
+      .map(f => (f.path || f.name || '').replace(/\\/g, '/'))
+      .filter(Boolean);
+    const indexHtml = normPaths.find(p => /(^|\/)index\.html?$/i.test(p))
+      || normPaths.find(p => /\.html?$/i.test(p) && p.split('/').filter(Boolean).length === 1)
+      || normPaths.find(p => /\.html?$/i.test(p));
+    if (indexHtml) return indexHtml;
+
+    return eps[0] || 'index.html';
+  }
+
   public injectProtocolIntoFiles(
     files: UploadedFile[],
     gameId: string,
@@ -615,7 +638,7 @@ export class PublishingPipeline {
     }
 
     const totalFiles = files.length;
-    const rawEntryPoint = config.analysisResult.fileStructure.entryPoints[0] || 'index.html';
+    const rawEntryPoint = this.pickEntryPoint(files, config.analysisResult?.fileStructure?.entryPoints);
 
     // ── 0. 路径标准化：去除 ZIP 公共根目录前缀 ──
     // 例：ZIP 中所有文件都在 "zuma/" 下，去掉前缀后路径变为 "dist/index.html"
@@ -786,7 +809,8 @@ export class PublishingPipeline {
     // 获取当前发布者信息
     const publisherId = config.publisherId || 'admin';
     const publisherName = config.publisherName || '平台管理员';
-    const revenueSharePercent = config.revenueSharePercent ?? 10;
+    // 分成默认值读取规则注册中心（settlement.revenue_share_percent，治理门控修改）
+    const revenueSharePercent = config.revenueSharePercent ?? getRuleValue('settlement.revenue_share_percent');
 
     // 获取托管模式信息（由 stepDeploy 设置）
     const hostingType = context.data.get('hostingType') || 'inline';
@@ -804,7 +828,7 @@ export class PublishingPipeline {
       version: '1.0.0',
       skills: initializedSkills,
       skillConfigs: skillConfigs,
-      entryPoint: context.data.get('normalizedEntryPoint') || config.analysisResult.fileStructure.entryPoints[0] || 'index.html',
+      entryPoint: context.data.get('normalizedEntryPoint') || this.pickEntryPoint(config.files, config.analysisResult?.fileStructure?.entryPoints) || 'index.html',
       fileCount: config.analysisResult.fileStructure.totalFiles,
       size: config.analysisResult.fileStructure.estimatedSize,
       cdnUrl: cdnUrl,
@@ -928,10 +952,29 @@ export class PublishingPipeline {
     var GAME_ID = ${JSON.stringify(gameId)};
     var ITEMS = ${itemsJson};
 
+    // ===== 通道令牌接收（B1 防刷） =====
+    // 平台 establishChannel 时经 PROTOCOL:INIT 下发 channelToken，
+    // 所有上行消息必须透传（token 不匹配会被平台丢弃）。
+    if (!window.AllinONE.__CHANNEL_TOKEN_LISTENER__) {
+      window.AllinONE.__CHANNEL_TOKEN_LISTENER__ = true;
+      window.addEventListener('message', function(event) {
+        try {
+          var d = event.data;
+          if (d && d.type === 'PROTOCOL:INIT' && d.config && d.config.params && d.config.params.channelToken) {
+            window.AllinONE.__CHANNEL_TOKEN__ = d.config.params.channelToken;
+          }
+        } catch (e) {}
+      });
+    }
+    function __upPayload(msg) {
+      try { msg.channelToken = window.AllinONE.__CHANNEL_TOKEN__ || undefined; } catch (e) {}
+      return msg;
+    }
+
     // ===== 协议就绪信号 =====
     function sendReady() {
       if (!window.parent) return;
-      window.parent.postMessage({
+      window.parent.postMessage(__upPayload({
         type: 'PROTOCOL:READY',
         protocolVersion: '1.0.0',
         mode: 'integrated',
@@ -939,7 +982,7 @@ export class PublishingPipeline {
         supportedActions: ['start', 'pause', 'resume', 'redeem'],
         supportedSchemas: ${JSON.stringify(redeemItems.map(i => i.effectType).filter(Boolean))},
         timestamp: Date.now(),
-      }, '*');
+      }), '*');
     }
 
     // 立即发送 + 延迟重试（应对 iframe 加载时机问题）
@@ -1158,10 +1201,10 @@ export class PublishingPipeline {
         showStatus('\\u6b63\\u5728\\u9a8c\\u8bc1\\u5151\\u6362\\u7801...', 'loading');
 
         // 向平台发送兑换请求
-        window.parent.postMessage({
+        window.parent.postMessage(__upPayload({
           type: 'REDEEM_ITEM',
           data: { code: code.toUpperCase(), gameId: GAME_ID }
-        }, '*');
+        }), '*');
       }
 
       console.log('[AllinONE] Mode B \\u5151\\u6362\\u6761\\u5df2\\u6ce8\\u5165, \\u9053\\u5177: ' + ITEMS.length + ' \\u79cd');
@@ -2137,6 +2180,25 @@ export class PublishingPipeline {
   var GAME_ID = ${JSON.stringify(gameId)};
   var ITEMS = ${itemsJson};
 
+  // ===== 通道令牌接收（B1 防刷） =====
+  // 平台 establishChannel 时经 PROTOCOL:INIT 下发 channelToken，上行消息必须透传。
+  if (!window.AllinONE) window.AllinONE = {};
+  if (!window.AllinONE.__CHANNEL_TOKEN_LISTENER__) {
+    window.AllinONE.__CHANNEL_TOKEN_LISTENER__ = true;
+    window.addEventListener('message', function(event) {
+      try {
+        var d = event.data;
+        if (d && d.type === 'PROTOCOL:INIT' && d.config && d.config.params && d.config.params.channelToken) {
+          window.AllinONE.__CHANNEL_TOKEN__ = d.config.params.channelToken;
+        }
+      } catch (e) {}
+    });
+  }
+  function __upPayload(msg) {
+    try { msg.channelToken = window.AllinONE.__CHANNEL_TOKEN__ || undefined; } catch (e) {}
+    return msg;
+  }
+
   // ===== 创建兑换条 UI =====
   var styles = document.createElement('style');
   styles.textContent = [
@@ -2243,10 +2305,10 @@ export class PublishingPipeline {
     bar.classList.add('loading');
     showStatus('正在验证兑换码...', 'loading');
 
-    window.parent.postMessage({
+    window.parent.postMessage(__upPayload({
       type: 'REDEEM_ITEM',
       data: { code: code.toUpperCase(), gameId: GAME_ID }
-    }, '*');
+    }), '*');
   }
 
   // ===== 监听平台返回 =====

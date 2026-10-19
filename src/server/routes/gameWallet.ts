@@ -88,6 +88,8 @@ export function createGameWalletRouter(
           algorithmVouchers: u ? Number(u.algorithmVouchers) || 0 : 0,
           lastUpdated: u ? u.updatedAt || Date.now() : Date.now(),
         },
+        exists: !!u, // 区分「钱包文档不存在」与「余额为 0」：前端据此触发服务端注册礼发放
+        pid: process.pid,
       },
     });
   });

@@ -224,6 +224,11 @@ class VoucherItemService {
     return loadTemplates().filter(t => t.gameId === gameId && t.isActive);
   }
 
+  /** 全平台在架道具模板（拼团 skuId 履约下拉用，2026-10-15） */
+  getAllActiveItemTemplates(): ItemVoucherTemplate[] {
+    return loadTemplates().filter(t => t.isActive);
+  }
+
   /**
    * 获取单个道具模板
    */
@@ -449,6 +454,132 @@ class VoucherItemService {
   }
 
   /**
+   * 🆕 2026-10-18 拼团合约交割闭环：为合约转移给玩家的道具凭证补挂兑换码。
+   * 与购买流程（purchaseItemTemplate）完全同源——同一托管道具（hostedItem）、
+   * 同一 IV-XXXXXXXX 码格式、同一购买记录结构，游戏侧核销（verify/use）无需任何改动。
+   * 幂等：凭证已有兑换码或已有购买记录则直接复用。
+   * @returns 兑换码（无法生成时 undefined）
+   */
+  async ensureRedeemCodeForVoucher(voucher: Voucher, userId: string, userName?: string): Promise<string | undefined> {
+    try {
+      if (!voucher) return undefined;
+      const cd = (voucher.metadata?.customData || {}) as Record<string, any>;
+      if (!cd.itemTemplateId) return undefined; // 非道具模板凭证（A币面额等）不生成
+      // 幂等①：已有购买记录直接复用
+      const existingPurchase = loadPurchases().find(p => p.voucherId === voucher.id && p.redeemCode);
+      if (existingPurchase?.redeemCode) return existingPurchase.redeemCode;
+
+      const templates = loadTemplates();
+      const template = templates.find(t => t.id === cd.itemTemplateId);
+      const gameId = String(template?.gameId || cd.gameId || '');
+      const itemName = String(template?.name || voucher.metadata?.name || '道具');
+      if (!gameId) {
+        console.warn('[VoucherItemService] 交割凭证缺少 gameId，无法生成兑换码:', voucher.id);
+        return undefined;
+      }
+
+      // 找/建托管道具（与购买流程同源；模板缺失时从凭证 metadata 兜底构建）
+      const hostedItems = redeemCodeService.getHostedItems(gameId);
+      let hostedItem = hostedItems.find(h => h.name === itemName && h.gameId === gameId);
+      if (!hostedItem) {
+        const ge: any = template?.gameEffect || cd.gameEffect || {};
+        hostedItem = await redeemCodeService.createHostedItem({
+          gameId,
+          name: itemName,
+          description: String(template?.description || voucher.metadata?.description || ''),
+          type: ((template as any)?.itemType === 'permanent' ? ItemType.PERMANENT : ItemType.CONSUMABLE) as ItemType,
+          codeConfig: {
+            prefix: 'IV-',
+            length: 8,
+            charset: 'alphanumeric',
+            caseSensitive: false,
+            singleUse: true,
+          },
+          initialInventory: 0,
+          pricing: {
+            price: template?.pricing?.price ?? (Number(voucher.denomination) || 0),
+            currency: template?.pricing?.currency || 'ACOIN',
+          },
+          gameEffect: {
+            itemId: ge.itemId || ge.schemaName || 'ugc-item',
+            quantity: Number(ge.quantity) || 1,
+            metadata: ge.metadata,
+            schemaName: ge.schemaName,
+            itemData: ge.itemData,
+          },
+        });
+      }
+
+      // 生成唯一 IV-XXXXXXXX 码（与购买流程同一字符集，SOLD + soldTo）
+      const allCodes = redeemCodeService.getAllCodes();
+      const existingCodes = new Set(allCodes.map(c => c.code.toUpperCase()));
+      const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let redeemCodeStr: string | undefined;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const randomPart = Array.from({ length: 8 }, () =>
+          CHARS[Math.floor(Math.random() * CHARS.length)]
+        ).join('');
+        const testCode = `IV-${randomPart}`;
+        if (!existingCodes.has(testCode.toUpperCase())) {
+          const newCode: RedeemCode = {
+            id: `code-${generateUUID().slice(0, 8)}`,
+            code: testCode,
+            gameId,
+            itemId: hostedItem.id,
+            status: RedeemCodeStatus.SOLD,
+            createdAt: new Date().toISOString(),
+            soldAt: new Date().toISOString(),
+            soldTo: userId,
+            verifyCount: 0,
+          };
+          allCodes.push(newCode);
+          existingCodes.add(testCode.toUpperCase());
+          localStorage.setItem('allinone_redeem_codes', JSON.stringify(allCodes));
+          redeemCodeStr = testCode;
+          break;
+        }
+      }
+      if (!redeemCodeStr) return undefined;
+
+      // 购买记录（PlatformGameStore 按 voucherId 匹配显示兑换码；savePurchases 会同步服务端）
+      const purchase: ItemVoucherPurchase = {
+        id: `purchase-${generateUUID().slice(0, 8)}`,
+        userId,
+        userName: userName || '玩家',
+        templateId: String(cd.itemTemplateId),
+        voucherId: voucher.id,
+        gameId,
+        quantity: 1,
+        price: template?.pricing?.price ?? (Number(voucher.denomination) || 0),
+        currency: template?.pricing?.currency || 'ACOIN',
+        status: 'pending',
+        paidAt: Date.now(),
+        redeemCode: redeemCodeStr,
+        note: `拼团合约交割（${voucher.metadata?.kind === 'group-buy-receipt' ? 'gbr 履约' : '合约履约'}）`,
+      };
+      const purchases = loadPurchases();
+      purchases.push(purchase);
+      savePurchases(purchases);
+
+      // 回写到凭证本地缓存（下行同步来的凭证在服务端没有此字段，本地补齐显示）
+      try {
+        const { VoucherDatabase } = await import('../voucher-system/storage/VoucherDatabase');
+        const target = VoucherDatabase.getInstance().getVoucherById(voucher.id);
+        if (target) {
+          (target as any).redeemCode = redeemCodeStr;
+          VoucherDatabase.getInstance().updateVoucher(target as any);
+        }
+      } catch { /* 显示回写失败不影响兑换码发放 */ }
+
+      console.log(`[VoucherItem] 合约交割凭证已补挂兑换码: ${redeemCodeStr} → ${voucher.id}`);
+      return redeemCodeStr;
+    } catch (e) {
+      console.warn('[VoucherItemService] 合约交割凭证生成兑换码失败（不影响持有）:', e);
+      return undefined;
+    }
+  }
+
+  /**
    * 获取平台池中指定模板的道具凭证数量
    */
   getPoolItemVoucherCount(templateId: string): number {
@@ -612,16 +743,20 @@ class VoucherItemService {
           return { success: false, message: spendResult.error?.message || '支付失败' };
         }
 
-        // 🆕 记录收入到游戏开发者账户
-        await gameDeveloperService.recordPurchaseRevenue({
+        // 🆕 游戏币支付：服务端三方即时分账（gameCoins 为平台通用货币，wallet.spend 已扣玩家余额）
+        // 注意：wallet.spend 已扣款、道具即将发放——分账失败不阻断购买（玩家无责），
+        // 但必须显式感知并在控制台留痕（平台账目缺口需人工补账），不得静默吞掉。
+        const splitResult = await gameDeveloperService.settleGameCoinsSplit({
           gameId: request.gameId,
-          gameName: template.gameName || '游戏',
           amount: price,
-          itemName: template.name,
-          templateId: request.templateId,
           buyerId: request.userId,
           buyerName: request.userName,
+          itemName: template.name,
+          templateId: request.templateId,
         });
+        if (!splitResult.success) {
+          console.error('[VoucherItem] ⚠️ 游戏币三方分账失败（玩家已付款、道具照发，平台账目需补账）:', splitResult.message);
+        }
       } else {
         // 用户选了凭证支付但模板未启用凭证 → 明确报错，不静默降级扣游戏币
         return { success: false, message: `「${template.name}」未启用凭证支付，请切换为游戏币支付后重试` };
@@ -1726,9 +1861,30 @@ class VoucherItemService {
    * 在应用启动时调用一次，监听 proposal-auto-execute 事件
    */
   initAutoExecuteListener(): void {
-    window.addEventListener('proposal-auto-execute', ((e: CustomEvent) => {
+    window.addEventListener('proposal-auto-execute', (async (e: CustomEvent) => {
       const { proposal } = e.detail as { proposal: GameProposal };
       console.log(`[VoucherItem] 🔧 自动执行提案: ${proposal.title} (${proposal.proposalType})`);
+
+      // 🆕 三方分成配置提案：先写入游戏分成配置（校验失败则提案执行失败）
+      if (proposal.revenueSharing) {
+        const rsResult = await gameDeveloperService.applyRevenueSharingConfig({
+          gameId: proposal.gameId,
+          gameName: proposal.gameName,
+          config: {
+            gameShare: proposal.revenueSharing.gameShare,
+            platformShare: proposal.revenueSharing.platformShare,
+            creatorShare: proposal.revenueSharing.creatorShare || 0,
+            creatorId: proposal.revenueSharing.creatorId,
+            creatorName: proposal.revenueSharing.creatorName,
+          },
+          proposalId: proposal.id,
+        });
+        if (!rsResult.success) {
+          console.error(`[VoucherItem] ❌ 三方分成配置校验失败: ${rsResult.message}`);
+          gameProposalService.markExecutionFailed(proposal.id, rsResult.message);
+          return;
+        }
+      }
 
       const result = this.executeProposalByType(proposal);
 
@@ -1738,8 +1894,43 @@ class VoucherItemService {
         console.error(`[VoucherItem] ❌ 自动执行失败: ${proposal.title} - ${result.message}`);
         gameProposalService.markExecutionFailed(proposal.id, result.message);
       }
-    }) as EventListener);
+    }) as unknown as EventListener);
     console.log('[VoucherItem] 自动执行监听器已注册');
+
+    // 🆕 启动自愈：扫描历史 PASSED 且带分成配置的提案，重新应用配置（幂等覆盖）。
+    // 背景：initAutoExecuteListener 此前从未被调用（定义了但无调用方），期间通过的提案
+    // dispatch 事件无人接听 → applyRevenueSharingConfig 从未执行 → 服务端账户无配置。
+    // 事件只在投票 finalize 时触发一次，页面刷新后不会重放，故必须启动时补偿。
+    void (async () => {
+      try {
+        const proposals = gameProposalService.getProposals();
+        const pending = proposals.filter(
+          p => p.status === ProposalStatus.PASSED && p.revenueSharing
+        );
+        for (const p of pending) {
+          try {
+            const r = await gameDeveloperService.applyRevenueSharingConfig({
+              gameId: p.gameId,
+              gameName: p.gameName,
+              config: {
+                gameShare: p.revenueSharing!.gameShare,
+                platformShare: p.revenueSharing!.platformShare,
+                creatorShare: p.revenueSharing!.creatorShare || 0,
+                creatorId: p.revenueSharing!.creatorId,
+                creatorName: p.revenueSharing!.creatorName,
+              },
+              proposalId: p.id,
+            });
+            console.log(`[VoucherItem] ♻️ 历史提案分成配置补偿 (${p.id}): ${r.success ? '已应用' : r.message}`);
+          } catch (err) {
+            console.warn(`[VoucherItem] 历史提案分成补偿失败 (${p.id}):`, err);
+          }
+        }
+        if (pending.length > 0) {
+          console.log(`[VoucherItem] 启动自愈完成：检查 ${pending.length} 个 PASSED 提案的分成配置`);
+        }
+      } catch { /* 自愈失败不阻塞启动 */ }
+    })();
   }
 }
 

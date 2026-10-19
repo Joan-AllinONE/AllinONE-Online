@@ -14,6 +14,8 @@ import type {
 } from '../types';
 import { VoucherStatus, TransactionType } from '../types';
 import { saveVoucherToBackend, loadCollectionFromBackend } from '../../services/voucherBackend';
+import { isCloudHosting } from '../../services/backendSync';
+import { SEED_DATA_TAG } from '../../utils/seedTestData';
 
 // 存储键名（模拟表名）
 const STORAGE_KEYS = {
@@ -51,10 +53,92 @@ export class VoucherDatabase {
   private cloudSyncDirtyVouchers = new Set<string>();
   private cloudSyncDirtyTransactions = new Set<string>();
   private cloudSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 已确认推送到服务端的凭证/交易 id（兜底全量同步只推未推送过的，防止每次防抖重复轰炸 429）
+   *  持久化到 localStorage 并带 24h TTL：刷新页面不再重推全部凭证；超时后自动允许重推（兼容服务端清库） */
+  private cloudSyncedIds = new Set<string>();
+  private cloudSyncedAt = new Map<string, number>();
+  private static readonly SYNCED_IDS_KEY = 'voucher_system_cloud_synced_ids';
+  private static readonly SYNCED_IDS_TTL = 24 * 60 * 60 * 1000;
   private readonly CLOUD_SYNC_DELAY = 2000; // 2s 防抖窗口
+
+  /** 从 localStorage 恢复已推送记录（TTL 过期的丢弃，允许重推） */
+  private loadSyncedIds(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(VoucherDatabase.SYNCED_IDS_KEY);
+      if (!raw) return;
+      const obj = JSON.parse(raw) as Record<string, number>;
+      const now = Date.now();
+      for (const [id, ts] of Object.entries(obj)) {
+        if (typeof ts === 'number' && now - ts < VoucherDatabase.SYNCED_IDS_TTL) {
+          this.cloudSyncedIds.add(id);
+          this.cloudSyncedAt.set(id, ts);
+        }
+      }
+    } catch { /* 损坏则忽略，重新全量同步 */ }
+  }
+
+  /** 持久化已推送记录（限流 300 条防 localStorage 膨胀） */
+  private persistSyncedIds(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const now = Date.now();
+      const obj: Record<string, number> = {};
+      for (const [id, ts] of this.cloudSyncedAt) {
+        if (now - ts < VoucherDatabase.SYNCED_IDS_TTL) obj[id] = ts;
+      }
+      localStorage.setItem(VoucherDatabase.SYNCED_IDS_KEY, JSON.stringify(obj));
+    } catch { /* 容量不足等忽略 */ }
+  }
+
+  /** 标记推送成功（内存 + 持久化） */
+  private markSynced(id: string): void {
+    this.cloudSyncedIds.add(id);
+    this.cloudSyncedAt.set(id, Date.now());
+    this.persistSyncedIds();
+  }
+
+  /**
+   * 下行同步（2026-10-17 交易闭环最后一环）：服务端是账本（云端即账本铁律），
+   * 合约履约/商店发货等在服务端把凭证转移给本人，但客户端从未拉取 →
+   * 用户在浏览器永远"看不到"已到账的道具。此方法拉取 currentHolderId=本人
+   * 的服务端凭证并合并入本地缓存。冲突策略：本地更新时间更新则保留本地（本地可能有
+   * 未推送的变更），否则以服务端为准。拉回的凭证标记已同步防回推。
+   * @returns 合并的凭证数
+   */
+  async pullMyVouchersFromBackend(myUserId: string): Promise<number> {
+    if (typeof window === 'undefined' || !myUserId) return 0;
+    try {
+      const rows = await loadCollectionFromBackend<any>('vouchers');
+      if (!Array.isArray(rows) || rows.length === 0) return 0;
+      let merged = 0;
+      for (const doc of rows) {
+        if (!doc || String(doc.currentHolderId || '') !== myUserId) continue;
+        const id = String(doc.id || doc._id || '');
+        if (!id) continue;
+        const local = this.voucherCache.get(id);
+        const serverTs = Number(doc.updatedAt || doc.lastTransferAt || 0);
+        const localTs = Number(local && (local.updatedAt || (local as any).lastTransferAt) || 0);
+        if (local && localTs > serverTs) continue; // 本地较新（可能有未推送变更），保留本地
+        this.voucherCache.set(id, doc as Voucher);
+        this.voucherDirty = true;
+        this.markSynced(id); // 服务端来的不需要再推回
+        merged++;
+      }
+      if (merged > 0) {
+        console.log(`[VoucherDatabase] 下行同步：从服务端合并 ${merged} 张本人凭证`);
+        this.schedulePersist();
+      }
+      return merged;
+    } catch (e: any) {
+      console.warn('[VoucherDatabase] 下行同步失败:', e?.message || e);
+      return 0;
+    }
+  }
 
   private constructor() {
     this.initCache();
+    this.loadSyncedIds();
   }
 
   /**
@@ -574,11 +658,25 @@ export class VoucherDatabase {
 
   // ==================== CloudBase 双写（通过写入队列） ====================
 
+  /** 测试数据守卫（方案 A 环境隔离）：prod（云端真实库）绝不推送 seed 标识的测试凭证 */
+  private isSeedVoucher(v: any): boolean {
+    const tags = v?.metadata?.tags;
+    return Array.isArray(tags) && tags.includes(SEED_DATA_TAG);
+  }
+
   private syncVouchersToCloud(): void {
     if (typeof window === 'undefined') return;
     // Bug 013 修复：写入改走 gamesApi 云函数（admin SDK，无浏览器端 auth 限制）
     // 不再使用 writeQueue（CloudBase JS SDK 浏览器端 auth 已损坏，线上永落库）
-    const dirty = Array.from(this.cloudSyncDirtyVouchers);
+    const prodGuard = isCloudHosting();
+    const dirty = Array.from(this.cloudSyncDirtyVouchers).filter(id => {
+      const v = this.voucherCache.get(id);
+      if (prodGuard && v && this.isSeedVoucher(v)) {
+        console.debug(`[VoucherDatabase] 线上环境跳过测试凭证 ${id} 的云同步（防污染真实数据）`);
+        return false;
+      }
+      return true;
+    });
     this.cloudSyncDirtyVouchers.clear();
     if (dirty.length === 0) {
       this.scheduleCloudSyncFallback();
@@ -587,7 +685,15 @@ export class VoucherDatabase {
     for (const id of dirty) {
       const v = this.voucherCache.get(id);
       if (v) {
-        saveVoucherToBackend('vouchers', v as any).catch(() => {});
+        saveVoucherToBackend('vouchers', v as any).then((r: { success?: boolean; error?: string }) => {
+          if (!r || !r.success) {
+            console.warn(`[VoucherDatabase] 凭证 ${id} 同步到服务端失败:`, r?.error || '未知错误');
+          } else {
+            this.markSynced(id);
+          }
+        }).catch((err: any) => {
+          console.warn(`[VoucherDatabase] 凭证 ${id} 同步请求异常:`, err?.message || err);
+        });
       }
     }
     this.scheduleCloudSyncFallback();
@@ -604,7 +710,15 @@ export class VoucherDatabase {
     for (const id of dirty) {
       const tx = this.transactionCache.get(id);
       if (tx) {
-        saveVoucherToBackend('voucher_transactions', tx as any).catch(() => {});
+        saveVoucherToBackend('voucher_transactions', tx as any).then((r: { success?: boolean; error?: string }) => {
+          if (!r || !r.success) {
+            console.warn(`[VoucherDatabase] 交易 ${id} 同步到服务端失败:`, r?.error || '未知错误');
+          } else {
+            this.markSynced(id);
+          }
+        }).catch((err: any) => {
+          console.warn(`[VoucherDatabase] 交易 ${id} 同步请求异常:`, err?.message || err);
+        });
       }
     }
     this.scheduleCloudSyncFallback();
@@ -617,17 +731,37 @@ export class VoucherDatabase {
   private scheduleCloudSyncFallback(): void {
     if (this.cloudSyncTimer) clearTimeout(this.cloudSyncTimer);
     this.cloudSyncTimer = setTimeout(() => {
-      // 全量兜底：仅在没有脏标记且有缓存数据时才全量同步
+      // 全量兜底：仅在没有脏标记且存在未推送过的数据时才同步（已推送的不再重复轰炸）
+      // 线上环境过滤 seed 测试凭证（防污染真实数据）
+      const prodGuard = isCloudHosting();
       if (this.cloudSyncDirtyVouchers.size === 0 && this.voucherCache.size > 0) {
-        const vouchers = Array.from(this.voucherCache.values()).slice(0, 200); // 限制 200 条兜底
+        const vouchers = Array.from(this.voucherCache.values())
+          .filter(v => !this.cloudSyncedIds.has(v.id) && !(prodGuard && this.isSeedVoucher(v)))
+          .slice(0, 200);
         for (const v of vouchers) {
-          saveVoucherToBackend('vouchers', v as any).catch(() => {});
+          saveVoucherToBackend('vouchers', v as any).then((r: { success?: boolean; error?: string }) => {
+            if (!r || !r.success) {
+              console.warn(`[VoucherDatabase] 兜底同步凭证 ${v.id} 失败:`, r?.error || '未知错误');
+            } else {
+              this.markSynced(v.id);
+            }
+          }).catch((err: any) => {
+            console.warn(`[VoucherDatabase] 兜底同步凭证 ${v.id} 请求异常:`, err?.message || err);
+          });
         }
       }
       if (this.cloudSyncDirtyTransactions.size === 0 && this.transactionCache.size > 0) {
-        const txs = Array.from(this.transactionCache.values()).slice(0, 100);
+        const txs = Array.from(this.transactionCache.values()).filter(t => !this.cloudSyncedIds.has(t.id)).slice(0, 100);
         for (const tx of txs) {
-          saveVoucherToBackend('voucher_transactions', tx as any).catch(() => {});
+          saveVoucherToBackend('voucher_transactions', tx as any).then((r: { success?: boolean; error?: string }) => {
+            if (!r || !r.success) {
+              console.warn(`[VoucherDatabase] 兜底同步交易 ${tx.id} 失败:`, r?.error || '未知错误');
+            } else {
+              this.markSynced(tx.id);
+            }
+          }).catch((err: any) => {
+            console.warn(`[VoucherDatabase] 兜底同步交易 ${tx.id} 请求异常:`, err?.message || err);
+          });
         }
       }
       this.cloudSyncTimer = null;

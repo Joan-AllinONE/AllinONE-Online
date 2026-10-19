@@ -7,6 +7,7 @@ import { platformBindingService, GameType, TriggerMode, type PlatformBindingConf
 import { AuthContext } from '@/contexts/authContext';
 import { isCloudBaseReady } from '@/services/cloudbase';
 import { writeQueue, type QueueStatus } from '@/services/writeQueue';
+import { fetchAnalytics } from '@/services/analytics';
 import { Coins, CheckCircle, AlertCircle, X, Bug, Wifi, WifiOff, Database, Activity, RefreshCw } from 'lucide-react';
 
 interface GameCard {
@@ -95,6 +96,40 @@ const statusText = {
   maintenance: '维护中'
 };
 
+// ==================== 数据中心实时数据（GET /api/v1/analytics） ====================
+
+/** 概览 KPI（口径同 src/server/analytics/analyticsStore.ts OverviewMetrics） */
+interface PlatformOverview {
+  dau: number;
+  mau: number;
+  totalPlayers: number;
+  totalGamePlays: number;
+  avgSessionMs: number;
+  totalRevenueACoins: number;
+  totalRevenueGameCoins: number;
+}
+
+/** 趋势点（trends 接口，用于取「今日游戏次数」） */
+interface TrendPoint {
+  date: string;
+  dau: number;
+  gamePlays: number;
+  revenueACoins: number;
+  revenueGameCoins: number;
+}
+
+/** 数字格式化：空值/非法值统一显示占位符 */
+const fmtNum = (n: number | null | undefined): string =>
+  typeof n === 'number' && isFinite(n) ? n.toLocaleString('zh-CN') : '—';
+
+/** 毫秒时长 → 「x分x秒」 */
+const fmtDuration = (ms: number | null | undefined): string => {
+  if (typeof ms !== 'number' || !isFinite(ms) || ms <= 0) return '—';
+  const m = Math.floor(ms / 60000);
+  const s = Math.round((ms % 60000) / 1000);
+  return m > 0 ? `${m}分${s}秒` : `${s}秒`;
+};
+
 export default function GameCenter() {
   const { currentUser } = useContext(AuthContext);
   const [publishedGames, setPublishedGames] = useState<GameCard[]>([]);
@@ -143,6 +178,43 @@ export default function GameCenter() {
     return () => window.removeEventListener('games-list-updated', onGamesUpdated);
   }, []);
   
+  // ==================== 数据中心实时数据（全网统计） ====================
+  const [platformStats, setPlatformStats] = useState<{
+    overview: PlatformOverview | null;
+    todayGamePlays: number | null;
+    lastUpdated: number | null;
+  }>({ overview: null, todayGamePlays: null, lastUpdated: null });
+
+  const loadPlatformStats = useCallback(async () => {
+    try {
+      const [ov, tr] = await Promise.all([
+        fetchAnalytics<PlatformOverview>('overview'),
+        fetchAnalytics<TrendPoint[]>('trends?days=7'),
+      ]);
+      // 防御性归一化（铁律）：旧云函数 __analytics 桩曾把 {events:[...]} 对象当 data 返回，
+      // 非预期形状直接置空，绝不进渲染
+      const overviewData =
+        ov && typeof ov === 'object' && !Array.isArray(ov) ? ov : null;
+      const trendArr: TrendPoint[] = Array.isArray(tr) ? tr : [];
+      // 最后一个点即今天
+      const todayPoint = trendArr[trendArr.length - 1];
+      setPlatformStats({
+        overview: overviewData,
+        todayGamePlays: todayPoint ? Number(todayPoint.gamePlays) || 0 : null,
+        lastUpdated: Date.now(),
+      });
+    } catch {
+      // 数据中心不可达时静默失败，展示占位符，不影响页面
+    }
+  }, []);
+
+  // 首次加载 + 每 60s 自动刷新（实时性）
+  useEffect(() => {
+    loadPlatformStats();
+    const timer = setInterval(loadPlatformStats, 60000);
+    return () => clearInterval(timer);
+  }, [loadPlatformStats]);
+
   // 奖励提示状态
   const [rewardToast, setRewardToast] = useState<{
     show: boolean;
@@ -453,13 +525,23 @@ export default function GameCenter() {
                 <i className="fa-solid fa-rocket"></i>
                 发布游戏
               </Link>
-              <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                <i className="fa-solid fa-coins text-yellow-500"></i>
-                <span>全网算力: <span className="font-semibold text-blue-600 dark:text-blue-400">1,234</span></span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                <i className="fa-solid fa-gem text-purple-500"></i>
-                <span>全网游戏币: <span className="font-semibold text-purple-600 dark:text-purple-400">5,678</span></span>
+              {/* 全网实时数据（来源：数据中心埋点聚合，60s 自动刷新） */}
+              <div className="hidden lg:flex items-center gap-4 text-sm text-slate-600 dark:text-slate-300" title={`数据中心实时统计 · 更新于 ${platformStats.lastUpdated ? new Date(platformStats.lastUpdated).toLocaleTimeString('zh-CN') : '—'}`}>
+                <div className="flex items-center gap-1.5">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span>今日活跃: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtNum(platformStats.overview?.dau)}</span></span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <i className="fa-solid fa-gamepad text-blue-500"></i>
+                  <span>累计游戏: <span className="font-semibold text-blue-600 dark:text-blue-400">{fmtNum(platformStats.overview?.totalGamePlays)}</span></span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <i className="fa-solid fa-users text-purple-500"></i>
+                  <span>全网玩家: <span className="font-semibold text-purple-600 dark:text-purple-400">{fmtNum(platformStats.overview?.totalPlayers)}</span></span>
+                </div>
               </div>
             </div>
           </div>
@@ -467,9 +549,9 @@ export default function GameCenter() {
       </header>
 
       <main className="container mx-auto px-4 md:px-6 py-8">
-        {/* Stats Section */}
+        {/* Stats Section（数据中心实时数据） */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-md"
@@ -479,13 +561,13 @@ export default function GameCenter() {
                 <i className="fa-solid fa-gamepad text-blue-600 dark:text-blue-400 text-xl"></i>
               </div>
               <div>
-                <div className="text-2xl font-bold text-slate-900 dark:text-white">12</div>
+                <div className="text-2xl font-bold text-slate-900 dark:text-white">{fmtNum(platformStats.todayGamePlays)}</div>
                 <div className="text-sm text-slate-500 dark:text-slate-400">今日游戏次数</div>
               </div>
             </div>
           </motion.div>
 
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
@@ -493,16 +575,16 @@ export default function GameCenter() {
           >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                <i className="fa-solid fa-trophy text-green-600 dark:text-green-400 text-xl"></i>
+                <i className="fa-solid fa-users text-green-600 dark:text-green-400 text-xl"></i>
               </div>
               <div>
-                <div className="text-2xl font-bold text-slate-900 dark:text-white">856</div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">今日获得算力</div>
+                <div className="text-2xl font-bold text-slate-900 dark:text-white">{fmtNum(platformStats.overview?.totalPlayers)}</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">全网玩家</div>
               </div>
             </div>
           </motion.div>
 
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -510,16 +592,16 @@ export default function GameCenter() {
           >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                <i className="fa-solid fa-star text-purple-600 dark:text-purple-400 text-xl"></i>
+                <i className="fa-solid fa-clock text-purple-600 dark:text-purple-400 text-xl"></i>
               </div>
               <div>
-                <div className="text-2xl font-bold text-slate-900 dark:text-white">4.8</div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">平均游戏评分</div>
+                <div className="text-2xl font-bold text-slate-900 dark:text-white">{fmtDuration(platformStats.overview?.avgSessionMs)}</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">平均游戏时长</div>
               </div>
             </div>
           </motion.div>
 
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
@@ -527,11 +609,11 @@ export default function GameCenter() {
           >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
-                <i className="fa-solid fa-fire text-orange-600 dark:text-orange-400 text-xl"></i>
+                <i className="fa-solid fa-coins text-orange-600 dark:text-orange-400 text-xl"></i>
               </div>
               <div>
-                <div className="text-2xl font-bold text-slate-900 dark:text-white">7</div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">连续游戏天数</div>
+                <div className="text-2xl font-bold text-slate-900 dark:text-white">{fmtNum(platformStats.overview?.totalRevenueACoins)}</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">累计A币流通</div>
               </div>
             </div>
           </motion.div>

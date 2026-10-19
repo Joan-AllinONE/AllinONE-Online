@@ -1,0 +1,14 @@
+# 我的单词表（# 开头是注释行，会被自动跳过）
+# 每行「单词 中文」就行，序号、冒号、逗号、竖线都认
+1. abandon 放弃，抛弃
+2. benefit 益处；受益
+3. capable 有能力的
+4. decade 十年
+5. elegant 优雅的
+6. fortune 财富；运气
+7. genuine 真正的，真诚的
+8. habitat 栖息地
+9. immense 巨大的
+10. journey 旅程
+11. keen 热切的，敏锐的
+12. luxury 奢侈，奢侈品

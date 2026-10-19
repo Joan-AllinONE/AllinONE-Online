@@ -1,0 +1,58 @@
+{
+  "schemaName": "lf2-item",
+  "description": "小斗士2 (Little Fighter 2 / F.LF) 道具 —— 支持增益/召唤/武器类的 UGC 创作系统",
+  "aiPrompt": "小斗士2(LF2)是一款2D横版多人动作格斗游戏，玩家操作角色（Davis、Deep、John、Henry、Rudolf、Louis、Firen、Freeze、Dennis、Woody、Bandit 等）在场景中战斗，可使用拳脚、跳跃、特殊攻击，并能拾取武器（棍、锄、石、木箱、冰剑等）。道具有助于让玩家更强：获得无敌、补充生命/内力、发放武器、召唤队友或敌人。请创作符合格斗世界观的增益类道具，不要破坏游戏平衡或制造无法结束的对局。",
+  "availableEffects": [
+    "invincible",
+    "give_weapon",
+    "heal",
+    "restore_mp",
+    "spawn_enemy",
+    "spawn_ally",
+    "super_mode"
+  ],
+  "effectRules": [
+    "invincible: 仅对【使用道具的玩家】生效的短暂无敌（不被伤害、不被击退）。参数 duration 单位秒(建议 5-30)，不填则持续开启直到再次关闭。⚠️ 平台预设实现当前会误将无敌加到全场所有角色（含敌人），属平台 Effect Engine bug；请改用 effectCode 版『定向无敌』或等平台修复后使用预设。",
+    "give_weapon: 给玩家发放一把武器。参数 weapon 可为名称(stick/hoe/stone/wooden_box/ice_sword)或数字id(100/101/150/151/213)。",
+    "heal: 立即回复生命值。参数 amount 为回复量(建议 10-100，不超过 hp_bound)。",
+    "restore_mp: 立即回复内力(MP)，用于释放特殊攻击。参数 amount 为回复量(建议 10-100)。",
+    "spawn_enemy: 召唤敌方AI角色。参数 id(角色名,默认 bandit)、count(数量1-5)、hp(血量,默认100)。",
+    "spawn_ally: 召唤友方AI队友(同队伍)。参数 id(角色名,默认 davis)、count(数量1-3)、hp(血量,默认100)。",
+    "super_mode: 一键超级状态：满血、满内力、无敌、并装备冰剑(ice_sword)。无参数。⚠️ 其无敌部分同样受平台预设 bug 影响（会波及全场），如需仅自身无敌请改用『定向无敌』effectCode。"
+  ],
+  "constraints": {
+    "maxInvincibleDuration": 60,
+    "maxHeal": 100,
+    "maxMp": 100,
+    "maxSpawnCount": 5,
+    "maxSpawnHp": 300,
+    "weaponIds": [100, 101, 150, 151, 213],
+    "characterIds": { "deep": 1, "john": 2, "henry": 4, "rudolf": 5, "louis": 6, "firen": 7, "freeze": 8, "dennis": 9, "woody": 10, "davis": 11, "bandit": 30 }
+  },
+  "forbidden": [
+    "invincible 持续时间不要超过 60 秒",
+    "heal/restore_mp 单次不要超过 100",
+    "spawn_enemy / spawn_ally 单次数量不要超过 5",
+    "不要创建能直接秒杀全部敌人、让对局无法进行的道具",
+    "不要使用 effectCode 访问 window/document/fetch 等受限对象（沙箱已禁用）"
+  ],
+  "effectCodeEnabled": true,
+  "effectCodeSignature": "function(params)",
+  "effectCodeReturns": "{ message: string, error?: boolean }",
+  "effectCodeSandbox": {
+    "game": "F.LF 控制桥 (window.myGame)。以下方法均已暴露，可在 effectCode 中安全调用：game.getPlayers() / game.giveWeapon(char, id) / game.setInvincible(char, on) / game.heal(char, amount) / game.restoreMp(char, amount) / game.spawn(opts) / game.getMatch() / game.comboTag / game.performSpecial(char, comboToken)。game 作为沙箱全局变量注入，函数签名写 function(params) 即可，无需声明 game 参数。",
+    "Math": "JS Math",
+    "JSON": "JS JSON",
+    "console": "JS console"
+  },
+  "allowCustomEffectNames": true,
+  "effectCodeNote": "自定义效果名（如 demon_summon / cast_bisha / fireball_volley / smart_special 等）允许使用，平台不会因 effect 不在 availableEffects 而拒绝。effectCode 建议用 try/catch 包裹，并优先做 API 存在性校验（if (typeof game.spawn !== 'function') return { error: true, message: '沙箱未开放该方法' }），出错时返回 { error: true, message: '原因' } 以便定位。注意：沙箱未声明 setTimeout/setInterval，请勿依赖定时器做持续逻辑。",
+  "presetItems": [
+    { "name": "定向无敌", "effect": "directed_invincible", "params": { "duration": 15 }, "description": "仅使用者15秒无敌（绕过平台预设bug，敌人不受影响）", "icon": "🛡️", "effectCode": "function(params) {\n  try {\n    if (typeof game === 'undefined' || !game) return { error: true, message: '控制桥未就绪' };\n    if (typeof game.getPlayers !== 'function' || typeof game.setInvincible !== 'function') return { error: true, message: '沙箱未开放所需方法' };\n    var players = game.getPlayers();\n    if (!players.length) return { error: true, message: '暂无玩家' };\n    var p = players[0];\n    var dur = (params && params.duration) ? params.duration : 15;\n    game.setInvincible(p, true);\n    if (typeof setTimeout === 'function') {\n      setTimeout(function() { game.setInvincible(p, false); }, dur * 1000);\n    }\n    return { message: '🛡️ 定向无敌 ' + dur + ' 秒（仅使用者）' };\n  } catch (e) {\n    return { error: true, message: '定向无敌异常: ' + (e && e.message ? e.message : e) };\n  }\n}" },
+    { "name": "神兵棍", "effect": "give_weapon", "params": { "weapon": "stick" }, "description": "获得木棍", "icon": "⚔️" },
+    { "name": "急救包", "effect": "heal", "params": { "amount": 50 }, "description": "回复50点生命", "icon": "💚" },
+    { "name": "内力泉", "effect": "restore_mp", "params": { "amount": 80 }, "description": "回复80点内力", "icon": "🔵" },
+    { "name": "援军", "effect": "spawn_ally", "params": { "id": "davis", "count": 1 }, "description": "召唤1名队友", "icon": "🤝" },
+    { "name": "超级战士", "effect": "super_mode", "params": {}, "description": "满血满内力+无敌+冰剑", "icon": "🌟" }
+  ]
+}

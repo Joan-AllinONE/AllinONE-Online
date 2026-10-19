@@ -32,6 +32,15 @@ import type { SkillGatewayInterface, SkillContext } from '@/skills/types';
 
 // ==================== 类型定义 ====================
 
+/**
+ * 🆕 防刷加固（B1）：channelToken 强制校验开关。
+ * - false（灰度期，当前）：上行消息缺失 channelToken 仅告警放行 —— 兼容存量已发布
+ *   游戏（其注入 SDK / 游戏手写 postMessage 不携带 token）；token 不匹配仍直接丢弃。
+ * - true（强制期，B6 切换）：缺失 token 的上行消息一律丢弃。
+ * 切换前提：已发布游戏重新发布（新注入 SDK 会透传 token）后，控制台改此常量。
+ */
+const CHANNEL_TOKEN_ENFORCED = false;
+
 export interface ProtocolEngineConfig {
   /** Schema 注册中心 */
   schemaRegistry?: SchemaRegistry;
@@ -48,6 +57,10 @@ export interface ProtocolEngineConfig {
 interface GameChannel {
   state: ProtocolChannelState;
   source: MessagePort | Window;
+  /** 🆕 通道令牌：establishChannel 时生成，经 PROTOCOL:INIT 下发，游戏侧上行必须透传（灰度期缺失仅告警） */
+  token?: string;
+  /** 🆕 游戏 iframe origin（http/https src 可推导时）；下行 targetOrigin 用，推导不出回退 '*'（opaque origin 场景） */
+  origin?: string;
 }
 
 // ==================== ProtocolEngine 类 ====================
@@ -87,6 +100,19 @@ export class ProtocolEngine {
     }
   ): Promise<void> {
     const mode = options?.mode || 'inject';
+
+    // 🆕 防刷加固（B1）：生成一次性通道令牌。游戏侧从 PROTOCOL:INIT.config.params
+    // 读取并在上行消息中透传（注入 SDK 已实现透传；存量游戏不带 token → 灰度告警放行）。
+    const channelToken = this.generateChannelToken();
+
+    // 🆕 推导 iframe origin（供下行 targetOrigin 收紧；blob/srcdoc 等 opaque origin 回退 '*'）
+    let iframeOrigin: string | undefined;
+    try {
+      if (iframe.src && /^https?:/i.test(iframe.src)) {
+        iframeOrigin = new URL(iframe.src).origin;
+      }
+    } catch { /* keep undefined */ }
+
     const config: GameProtocolConfig = {
       mode,
       gameId,
@@ -97,6 +123,7 @@ export class ProtocolEngine {
         timeout: 30000,
         heartbeat: 5000,
         debug: this.config.debug,
+        channelToken,
       },
     };
 
@@ -113,7 +140,9 @@ export class ProtocolEngine {
         lastHeartbeat: Date.now(),
         skills: config.skills,
       },
-      source: iframe.contentWindow || iframe,
+      source: (iframe.contentWindow || iframe) as Window,
+      token: channelToken,
+      origin: iframeOrigin,
     };
 
     this.channels.set(gameId, channel);
@@ -179,40 +208,59 @@ export class ProtocolEngine {
 
   /**
    * 处理从游戏 iframe 发来的上行消息
+   *
+   * 🆕 防刷加固（B1）：
+   * 1. 通道匹配只信任 event.source —— 旧实现优先信任消息体 gameId，父页面控制台
+   *    一行 window.postMessage({type:'GAME_EVENT', gameId:...}) 即可伪造
+   *    ITEM_HARVEST 直接铸造凭证（V2 漏洞）。现在 event.source 必须是已注册
+   *    通道的 iframe contentWindow，否则一律丢弃。
+   * 2. PROTOCOL:READY 不再允许凭空注册通道（V3 漏洞：伪造 READY 污染能力白名单）。
+   * 3. channelToken 校验：token 不匹配一律丢弃；缺失在灰度期（CHANNEL_TOKEN_ENFORCED=false）
+   *    仅告警放行，B6 切强制后丢弃。
    */
   private async handleIncomingMessage(event: MessageEvent): Promise<void> {
     const message = event.data as GameToPlatformMessage;
     if (!message || !message.type) return;
 
-    // 找到匹配的游戏通道（通过 event.source 或消息内容中的 gameId）
+    // ① 通道匹配：只认 event.source，忽略消息体中的 gameId（不可信）
     let channel: GameChannel | undefined;
-    if ('gameId' in message && message.gameId) {
-      channel = this.channels.get(message.gameId);
-    } else {
-      // 通过 source 匹配
-      for (const [id, ch] of this.channels) {
-        if (ch.source === event.source) {
-          channel = ch;
-          break;
-        }
+    for (const [, ch] of this.channels) {
+      if (ch.source === event.source) {
+        channel = ch;
+        break;
       }
     }
-
-    // 对 PROTOCOL:READY 消息，即使未找到通道也允许处理
-    if (!channel && message.type !== 'PROTOCOL:READY') {
+    if (!channel) {
+      // 含 PROTOCOL:READY —— 未注册来源的 READY 一律丢弃，不允许凭空注册
+      this.log(`丢弃未注册来源的上行消息: type=${(message as any).type}`);
       return;
     }
 
-    // 更新心跳
-    if (channel) {
-      channel.state.lastHeartbeat = Date.now();
+    // ② channelToken 校验
+    if (channel.token) {
+      const msgToken = (message as any).channelToken;
+      if (typeof msgToken === 'string' && msgToken) {
+        if (msgToken !== channel.token) {
+          this.log(`丢弃 token 不匹配的上行消息: type=${(message as any).type}, gameId=${channel.state.gameId}`);
+          return;
+        }
+      } else if (CHANNEL_TOKEN_ENFORCED) {
+        this.log(`丢弃缺失 channelToken 的上行消息（强制模式）: type=${(message as any).type}`);
+        return;
+      } else {
+        // 灰度期：存量游戏不带 token，告警放行
+        console.warn(`[ProtocolEngine] 上行消息缺失 channelToken（灰度期放行，存量游戏需重新发布后 B6 切强制）: type=${(message as any).type}, gameId=${channel.state.gameId}`);
+      }
     }
+
+    // 更新心跳
+    channel.state.lastHeartbeat = Date.now();
 
     // 统一处理消息
     try {
       switch (message.type) {
         case 'PROTOCOL:READY':
-          await this.handleReady(message, event);
+          await this.handleReady(message, channel);
           break;
         case 'PROTOCOL:ACTION_RESULT':
           this.handleActionResult(message);
@@ -236,46 +284,45 @@ export class ProtocolEngine {
 
   /**
    * 处理协议就绪消息
+   *
+   * 🆕 防刷加固（B1）：
+   * - 通道已在 establishChannel 建立，此处只更新既有通道，不再凭空注册；
+   * - gameId 以通道自身的为准（不信任消息体）；
+   * - 能力声明（supportedSchemas）只允许「从空设置为非空」一次，
+   *   此后不允许扩大白名单（伪造 READY 无法解锁更多 schema）。
    */
   private async handleReady(
     message: GameToPlatformMessage & { type: 'PROTOCOL:READY' },
-    event: MessageEvent
+    channel: GameChannel
   ): Promise<void> {
-    const { gameId, mode, supportedActions, supportedSchemas } = message;
+    const { mode, supportedActions, supportedSchemas } = message;
+    const gameId = channel.state.gameId;
 
-    // 注册/更新通道
-    const existing = this.channels.get(gameId);
-    if (existing) {
-      existing.state.status = 'connected';
-      existing.state.mode = mode;
-      existing.state.supportedActions = supportedActions;
-      existing.state.supportedSchemas = supportedSchemas;
-      existing.state.lastHeartbeat = Date.now();
-      existing.source = event.source as Window;
-    } else {
-      this.channels.set(gameId, {
-        state: {
-          gameId,
-          mode,
-          status: 'connected',
-          protocolVersion: message.protocolVersion,
-          supportedActions,
-          supportedSchemas,
-          connectedAt: Date.now(),
-          lastHeartbeat: Date.now(),
-          skills: [],
-        },
-        source: event.source as Window,
-      });
+    // 更新既有通道
+    channel.state.status = 'connected';
+    channel.state.mode = mode;
+    if (Array.isArray(supportedActions)) {
+      channel.state.supportedActions = supportedActions;
+    }
+    channel.state.lastHeartbeat = Date.now();
+
+    // 能力声明：仅允许从空到非空设置一次，此后拒绝扩大
+    if (Array.isArray(supportedSchemas) && supportedSchemas.length > 0) {
+      const prev = channel.state.supportedSchemas || [];
+      if (prev.length === 0) {
+        channel.state.supportedSchemas = supportedSchemas.slice();
+        this.schemaRegistry.declareGameCapabilities(gameId, supportedSchemas);
+      } else {
+        const added = supportedSchemas.filter(s => !prev.includes(s));
+        if (added.length > 0) {
+          this.log(`忽略扩大能力声明的 READY（gameId=${gameId}，被拒新增: ${added.join(', ')}）`);
+        }
+      }
     }
 
-    // 声明游戏能力到 SchemaRegistry
-    if (supportedSchemas.length > 0) {
-      this.schemaRegistry.declareGameCapabilities(gameId, supportedSchemas);
-    }
-
-    this.log(`游戏就绪: ${gameId} (mode=${mode}, schemas=${supportedSchemas.length})`);
-    this.emit(ProtocolEvents.READY, { gameId, mode, supportedSchemas });
+    const declaredCount = (channel.state.supportedSchemas || []).length;
+    this.log(`游戏就绪: ${gameId} (mode=${mode}, schemas=${declaredCount})`);
+    this.emit(ProtocolEvents.READY, { gameId, mode, supportedSchemas: channel.state.supportedSchemas });
   }
 
   /**
@@ -465,13 +512,29 @@ export class ProtocolEngine {
   private sendMessage(channel: GameChannel, message: PlatformToGameMessage): boolean {
     try {
       if ('postMessage' in channel.source) {
-        channel.source.postMessage(message, { targetOrigin: '*' } as any);
+        // 🆕 B1：targetOrigin 尽力收紧——http(s) iframe 用推导出的 origin；
+        // blob/srcdoc 等 opaque origin 场景 postMessage 只能用 '*'。
+        const targetOrigin = channel.origin || '*';
+        channel.source.postMessage(message, { targetOrigin } as any);
         return true;
       }
     } catch (error) {
       console.error('[ProtocolEngine] 发送消息失败:', error);
     }
     return false;
+  }
+
+  /**
+   * 🆕 生成通道令牌（B1）：128bit 随机 hex，经 PROTOCOL:INIT 下发。
+   */
+  private generateChannelToken(): string {
+    try {
+      const buf = new Uint8Array(16);
+      crypto.getRandomValues(buf);
+      return Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch {
+      return `tk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}${Math.random().toString(36).slice(2, 12)}`;
+    }
   }
 
   private log(...args: any[]): void {

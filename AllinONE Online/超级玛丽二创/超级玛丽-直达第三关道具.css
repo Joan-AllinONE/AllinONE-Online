@@ -1,0 +1,43 @@
+/* =====================================================================
+ *  超级玛丽改造6 —— 「直达第三关道具」样式（可选增强）
+ *  ==============================================================
+ *  提交注入模式时一并上传本文件，平台会自动以 <link> 注入（CSS 内 url()
+ *  相对本文件自身解析）。主要用于验证「注入 CSS 资产」链路：
+ *    - body 夜色 + canvas 夜光外框（视觉可明确看出 CSS 已生效）
+ *    - 「⚡ 直达第三关」按钮增强（发光/呼吸动画）
+ *  不上传本文件时，按钮仍有脚本内联的基础样式，功能不受影响。
+ * ===================================================================== */
+html,
+body {
+  background: #05060f !important;
+}
+
+canvas {
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 2px rgba(80, 110, 220, 0.55),
+    0 0 42px rgba(80, 110, 220, 0.35),
+    0 8px 32px rgba(0, 0, 0, 0.55);
+}
+
+#allinone-go-l3 {
+  background: linear-gradient(180deg, #ffe28a, #f8a200) !important;
+  color: #0e1230 !important;
+  border-color: #9a6a00 !important;
+  animation: allinone-l3-pulse 1.6s ease-in-out infinite;
+}
+
+#allinone-go-l3:hover {
+  animation-play-state: paused;
+  box-shadow: 0 0 22px rgba(248, 162, 0, 0.9) !important;
+}
+
+@keyframes allinone-l3-pulse {
+  0%,
+  100% {
+    box-shadow: 0 4px 14px rgba(248, 162, 0, 0.45);
+  }
+  50% {
+    box-shadow: 0 4px 26px rgba(248, 162, 0, 0.9);
+  }
+}

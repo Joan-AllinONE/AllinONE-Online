@@ -68,6 +68,7 @@ export default function QuestCard({
   // 创建者操作：关闭/删除（仅创建者可见）
   const isOwner = !!quest.createdBy && quest.createdBy === getCurrentUserId();
   const [adminBusy, setAdminBusy] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   /** 关闭任务（创建者专属） */
@@ -130,6 +131,16 @@ export default function QuestCard({
         </div>
 
         <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 line-clamp-1">{quest.title}</h3>
+        {/* 任务编号（可复制）：供组团合约（team-quest）关联任务广场任务 */}
+        <button
+          type="button"
+          title="点击复制任务编号，可在发起组团合约时关联此任务"
+          onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(quest.id).catch(() => {}); setCopiedId(true); setTimeout(() => setCopiedId(false), 1500); }}
+          className="mb-3 inline-flex items-center gap-1 text-xs font-mono text-slate-400 hover:text-emerald-500 transition-colors"
+        >
+          <span>#{quest.id}</span>
+          {copiedId && <span className="text-emerald-500">已复制</span>}
+        </button>
         <p className="text-slate-600 dark:text-slate-300 text-sm mb-4 line-clamp-2">{quest.description}</p>
 
         <div className="flex items-center gap-4 mb-4 text-sm text-slate-500 dark:text-slate-400 flex-wrap">

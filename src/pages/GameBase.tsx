@@ -321,10 +321,12 @@ export default function GameBase() {
     { icon: '🏪', label: '交易市场', description: '玩家P2P道具交易', route: '/marketplace' },
     { icon: '🎒', label: '背包', description: '查看我的凭证', route: '/personal-center' },
     { icon: '🎮', label: '游戏世界', description: '探索游戏', route: '/game-center' },
+    { icon: '⚖️', label: '合约中心', description: '拼团·组团·GSO认购', route: '/contracts' },
     { icon: '🎁', label: '活动中心', description: '任务签到赢游戏币', route: '/activity' },
     { icon: '📋', label: '任务广场', description: '接单创作赢报酬', route: '/quests' },
     ...(isAdmin ? [{ icon: '⚙️', label: '平台管理', description: '金库·商店·运营', route: '/platform-admin' }] : []),
     ...(isAdmin ? [{ icon: '🛡️', label: '游戏审核', description: '审核·上架·下架', route: '/game-review' }] : []),
+    ...(isAdmin ? [{ icon: '📜', label: '合约监控台', description: '存证·规则·死信', route: '/contract-admin' }] : []),
   ];
 
   return (

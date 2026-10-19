@@ -30,6 +30,23 @@ export function getCurrentUserId(): string {
 }
 
 /**
+ * 获取当前用户角色（登录时由 Login/CloudBase 写入 allinone_user.role）
+ * 用于 dev-token 签发时把角色写进 JWT（合约隧道的 requireAdmin 依赖此字段）。
+ */
+export function getCurrentUserRole(): string {
+  try {
+    const userStr = localStorage.getItem('allinone_user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      const role = String(user.role || 'player');
+      // 白名单校验，防脏数据注入越权角色
+      return ['player', 'admin', 'platform', 'developer'].includes(role) ? role : 'player';
+    }
+  } catch { /* ignore */ }
+  return 'player';
+}
+
+/**
  * 获取 JWT Token
  *
  * 策略：
@@ -51,7 +68,8 @@ export async function getToken(): Promise<string | null> {
     const resp = await fetch(`${getApiBase()}/dev-token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId }),
+      // 🆕 dev-token 签发带角色（合约隧道 requireAdmin 依赖 JWT role）
+      body: JSON.stringify({ userId, role: getCurrentUserRole() }),
     });
     if (resp.ok) {
       const data = await resp.json();

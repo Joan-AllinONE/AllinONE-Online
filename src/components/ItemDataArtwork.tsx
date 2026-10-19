@@ -11,9 +11,11 @@
  *   - 否则 fallback：名称首字符（与原 UI 完全一致，不影响效果类道具）
  */
 import { useEffect, useMemo, useRef } from 'react';
+import GushiProductArt, { extractGushiCraft, type GushiCraftData } from '@/components/GushiProductArt';
 
 /** 作品数据（palette + base36 cells 紧凑编码，与游戏侧编码约定一致） */
 export interface ArtworkData {
+  kind?: 'perler';
   w: number;
   h: number;
   palette: string[];
@@ -75,9 +77,21 @@ interface ItemDataArtworkProps {
 }
 
 export function ItemDataArtwork({ voucher, itemData, name, className = '' }: ItemDataArtworkProps) {
+  // 缅川公盘成品（gushi-powerup）：确定性程序绘制参数 → 平台重绘
+  const gushi = useMemo<GushiCraftData | null>(() => {
+    const fromItem = extractGushiCraft(itemData);
+    if (fromItem) return fromItem;
+    if (voucher && typeof voucher === 'object') {
+      const v = voucher as Record<string, any>;
+      const ge = v.metadata?.customData?.gameEffect || v.customData?.gameEffect || {};
+      return extractGushiCraft(ge.itemData);
+    }
+    return null;
+  }, [itemData, voucher]);
+  // 拼豆像素作品（perler-artwork）
   const art = useMemo(
-    () => extractArtwork(itemData) || extractArtworkFromVoucher(voucher),
-    [itemData, voucher],
+    () => (!gushi ? extractArtwork(itemData) || extractArtworkFromVoucher(voucher) : null),
+    [gushi, itemData, voucher],
   );
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -109,6 +123,18 @@ export function ItemDataArtwork({ voucher, itemData, name, className = '' }: Ite
     }
   }, [art]);
 
+  if (gushi) {
+    return (
+      <GushiProductArt
+        craft={gushi.craft}
+        gem={gushi.gem}
+        seed={gushi.seed}
+        size={gushi.size}
+        className={className}
+        name={name}
+      />
+    );
+  }
   if (!art) {
     return <div className={className}>{(name || '?').charAt(0) || '?'}</div>;
   }

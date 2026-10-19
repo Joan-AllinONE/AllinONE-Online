@@ -309,13 +309,14 @@ export interface QuestSlotSchema {
   label: string;               // 中文标签
   dataShape: 'object' | 'array' | 'any';  // data 顶层形状
   requiredKeys?: string[];     // data（或数组元素）必填字段
+  allowSingleObject?: boolean; // dataShape='array' 时允许 data 直接为单个对象（如单矿区/单关卡扩展，merge 会落为一条）
   allowedAssetExts?: string[]; // 允许的资源文件扩展名（不含点），缺省=不限制
   hint: string;                // 给玩家的填写提示
 }
 
 /** 内置 slot 注册表（P2）。自定义 slot 不受限（P0 自由扩展），仅不强制校验 */
 export const QUEST_SLOT_SCHEMAS: QuestSlotSchema[] = [
-  { key: 'levels', label: '关卡', dataShape: 'array', requiredKeys: ['id', 'title'], allowedAssetExts: ['json', 'js', 'png', 'jpg', 'mp3'], hint: 'data 为关卡数组，每关 { id, title, layout?, script?, cols?, enemyCols?, ... }；layout 为 15 行字符网格（#地面 B砖 ?金币 M蘑菇 X硬块 (|管道 C金币 F旗杆）或二维数字数组；script 指向 assets 的 .js（暴露 window.MarioLevel.build(api)，api 提供 setT/pipe/stairUp/stairDown/setFlag/setEnemies）；贴图/音效可放 png/jpg/mp3' },
+  { key: 'levels', label: '关卡', dataShape: 'array', requiredKeys: ['id'], allowSingleObject: true, allowedAssetExts: ['json', 'js', 'png', 'jpg', 'mp3'], hint: 'data 为数组（推荐）或单个对象；每条必须含 id，其余字段以该游戏「任务开发说明」为准（如赌石矿区 { id, name, lv, price, green, cap, ... }、超级玛丽关卡 { id, title, layout?, script? ... }）；layout 为 15 行字符网格（# B ? M X ( C F）或二维数字数组；script 指向 assets 的 .js（window.MarioLevel.build(api)）。⚠️ JSON 数据直接粘贴进 data 框；asset 上传的 json 不会被解析进 data，仅作贴图/音效/脚本等随附文件' },
   { key: 'items', label: '道具', dataShape: 'array', requiredKeys: ['id', 'name'], allowedAssetExts: ['json', 'png'], hint: 'data 为道具数组，每个 { id, name, effect?, ... }；图标可用 png' },
   { key: 'skins', label: '皮肤', dataShape: 'array', requiredKeys: ['id', 'name'], allowedAssetExts: ['json', 'png', 'svg', 'css', 'jpg'], hint: 'data 为皮肤数组，每个 { id, name, ... }；皮肤图可用 png/svg/jpg' },
   { key: 'scripts', label: '脚本/能力', dataShape: 'object', requiredKeys: ['name'], allowedAssetExts: ['js', 'mjs', 'json'], hint: 'data 为单个脚本对象 { name, code?, ... }；源码放 assets 的 js 文件' },
@@ -400,8 +401,8 @@ export function validateQuestContent(slot: string, contentPack: any): string[] {
 
   // 独立入口模式：data 不强制结构（内容以 HTML 页面为准）
   if (!hasEntry) {
-    if (schema.dataShape === 'array' && !Array.isArray(data)) {
-      issues.push(`slot "${slot}" 的 data 应为数组`);
+    if (schema.dataShape === 'array' && !Array.isArray(data) && !(schema.allowSingleObject && data && typeof data === 'object')) {
+      issues.push(`slot "${slot}" 的 data 应为数组${schema.allowSingleObject ? '（或单个对象）' : ''}`);
     }
     if (schema.dataShape === 'object' && (typeof data !== 'object' || data === null || Array.isArray(data))) {
       issues.push(`slot "${slot}" 的 data 应为对象`);

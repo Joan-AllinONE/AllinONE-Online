@@ -220,6 +220,10 @@ export interface GameProposal {
     gameShare: number;
     platformShare: number;
     creatorShare?: number;
+    /** 创作者 userId（creatorShare > 0 时必填，执行时写入游戏三方分成配置） */
+    creatorId?: string;
+    /** 创作者名称（展示用） */
+    creatorName?: string;
   };
   
   // 投票记录与结果

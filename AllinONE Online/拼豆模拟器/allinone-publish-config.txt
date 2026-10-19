@@ -1,0 +1,217 @@
+==================================================
+AllinONE 发布配置 · 豆趣工坊·像素熨斗（拼豆模拟器）
+依据《AllinONE 游戏发布完整指南 v3.0》
+==================================================
+
+配套文件：
+- index.html                  已集成三段代码（A 扩展加载器 / B 内容接收器 / C 道具双通道）
+- allinone-sop.json           道具 SOP        → 发布中心「道具 SOP」→ JSON 模式
+- allinone-content-sop.json   内容创作 SOP    → 发布中心「内容创作 SOP」→ 开 enabled
+- content-creation-guide.md   内容创作指南    → 上传（会作为上下文喂给玩家的 AI）
+- task-dev-guide.md           《任务开发说明》→ 发种子任务时上传（devGuide）
+
+
+--------------------------------------------------
+零、v3.0 可扩展性改造（已完成）
+--------------------------------------------------
+改造 1 · 内容数据外置
+  原版图纸仍内置为 PRESETS（爱心 / 笑脸 / 小花，无 _submissionId，属于 base）；
+  新增 extPatterns（数组），由平台把玩家提交的内容包逐条展开追加进来。
+  读取统一走 window.myGame.getExtPatterns()。
+
+改造 2 · 内容应用函数（防御式兜底）
+  a1gNormalizePattern(data)：
+    · 支持两种输入：layout + legend 字符网格，或 grid 二维数组
+    · 颜色只接受 #rgb / #rrggbb，其余（red / #GGG / javascript:...）一律置空
+    · 尺寸钳制 2~59；声明大于实际则补空，小于则截断
+    · 全空图纸判定无效并返回 null
+    · 使用调色板以外的颜色时，游戏自动注册为「扩展色」加入调色板
+  a1gApplyPattern(data, mode, sessionOnly)：mode = trace / fill / challenge
+
+改造 3 · 玩家可见的入口 UI
+  侧栏新增「社区图纸（扩展）」卡片区 + 右上角快速选择下拉框；
+  每张图纸渲染为卡片，带 临摹 / 填充 / 挑战 三个按钮与 EXT 徽章、星级徽章。
+
+改造 4 · 构建 API
+  window.BeadLevel = { build: function(api){} }
+  api 暴露：setBead(c,r,hex) / rect(x0,y0,x1,y1,hex) / fill(hex) / grid / COLS / ROWS
+
+铁律 · 原版与扩展隔离
+  无 ?ext=  → 只保留无 _submissionId 的条目（纯净原版）
+  有 ?ext=  → 原版 + 该 submissionId 的条目（并自动在下拉框选中）
+
+
+--------------------------------------------------
+一、Skills 推荐
+--------------------------------------------------
+游戏类型：休闲 / 创意工具（拼豆模拟器）
+
+  [必选] auth         玩家登录与身份，个性化（收藏/进度/凭证归属）的基础
+  [必选] wallet       道具交易与 ACOIN 结算、任务悬赏报酬发放
+  [推荐] inventory    管理玩家获得的 UGC 道具与兑换道具库存（对应底部 PROPS 栏）
+  [推荐] achievements 图纸挑战 1~3 星成就、创作里程碑展示
+
+说明：本作为纯前端单机创作工具，「我的收藏」存于 localStorage；
+      若后续接入云端收藏，再补 store / cloudstore。
+
+
+--------------------------------------------------
+二、兑换道具配置
+--------------------------------------------------
+| 名称         | 效果类型       | 参数                         | 价格(ACOIN) |
+|--------------|----------------|------------------------------|-------------|
+| 新手礼包     | rainbow_fill   | {}                           | 0（免费）   |
+| 一键填充券   | instant_fill   | {"charges":3}                | 20          |
+| 创意加速包   | scatter_beads  | {"count":30,"hex":"#ff8c1a"} | 30          |
+| 大师熨烫券   | instant_iron   | {"effect":"glossy"}          | 50（×3）    |
+
+描述示例：
+- 新手礼包：新玩家一键获得一幅彩虹拼豆图，快速体验完整流程。
+- 一键填充券 ×3：填充图纸是付费能力，需消耗填充券才能「一键填充」，归零后自动锁定——核心付费点。
+- 创意加速包：随机撒上 30 颗橙色豆，灵感起手不卡壳。
+- 大师熨烫券 ×3：跳过 80% 覆盖判定直接熨烫定型，省去繁琐步骤。
+
+
+--------------------------------------------------
+三、道具 SOP 速查（详见 allinone-sop.json）
+--------------------------------------------------
+- schemaName:        bead-studio-item
+- availableEffects:  instant_fill / rainbow_fill / clear_board / instant_iron /
+                     unlock_symmetry / unlock_color / scatter_beads / reveal_reference
+- effectCodeEnabled: true（沙箱注入 window.myGame，可用 game.rainbowFill() 等）
+- presetItems:       一键填充券 / 彩虹铺豆 / 清板符 / 大师熨烫券 / 对称结晶 / 灵感喷射
+
+
+--------------------------------------------------
+四、内容创作 SOP（详见 allinone-content-sop.json）—— v3.0 新增强制项
+--------------------------------------------------
+enabled: true（必须显式打开，平台才会注入 ContentLoader 并在内容工坊开放入口）
+
+| contentType | slot    | 标签     | modes          |
+|-------------|---------|----------|----------------|
+| map         | levels  | 拼豆图纸 | data / inject  |
+| item        | items   | 配色包   | data           |
+| custom      | skins   | 熨烫纹理 | inject         |
+
+allowedModes: ["data", "inject"]
+已内嵌 sopDocument（简版），另附 content-creation-guide.md（完整版，建议一并上传）
+
+
+--------------------------------------------------
+五、建议的种子任务（发布后发到 /quests）
+--------------------------------------------------
+任务 1（必发，门槛最低）
+  标题：为拼豆工坊画一张 13×13 入门图纸
+  描述：提交一张 13×13 的拼豆图纸，题材为水果 / 表情 / 日常小图标，轮廓清晰、色块成片。
+  type: level    contentSlot: levels
+  reward: { gameCoins: 300 }     reviewMode: developer    maxClaimers: 3
+
+任务 2
+  标题：海洋生物图纸包（5 张 21×21）
+  描述：一次提交 5 张 21×21 图纸，主题为海洋生物（鱼、章鱼、螃蟹、水母、贝壳），
+        统一用蓝色系配色，风格保持一致。data 写成数组多条。
+  type: level    contentSlot: levels
+  reward: { gameCoins: 1200, aCoins: 20 }    reviewMode: community    maxClaimers: 3
+
+任务 3（进阶）
+  标题：用脚本生成一张对称雪花图纸
+  描述：用 window.BeadLevel.build(api) 程序化生成 21×21 六角对称雪花，
+        冷色系渐变。提交 js 脚本 + entryPoint。
+  type: script   contentSlot: levels
+  reward: { gameCoins: 1500, aCoins: 30 }    reviewMode: developer    maxClaimers: 1
+
+任务 4（可选）
+  标题：马卡龙配色包
+  描述：提交一组 6~10 色的马卡龙色系配色包，用于扩展调色板。
+  type: item     contentSlot: items
+  reward: { gameCoins: 400 }     reviewMode: developer    maxClaimers: 3
+
+⚠️ 每个任务都必须上传 task-dev-guide.md 作为 devGuide。
+
+
+--------------------------------------------------
+六、发布前检查清单
+--------------------------------------------------
+可扩展性（v3.0 一票否决）
+[√] 图纸数据已外置（PRESETS 为 base，extPatterns 承接扩展）
+[√] 提供内容应用函数 a1gApplyPattern / a1gNormalizePattern，含防御式兜底
+[√] 提供玩家可见入口 UI（社区图纸卡片区 + 快速选择下拉框）
+[√] 声明 slot：levels（图纸）、items（配色包）、skins（纹理）
+[√] 开放构建 API window.BeadLevel.build，只暴露放豆 / 读网格
+
+代码段 A · 扩展加载器
+[√] API 基址按 hostname 区分 prod / dev
+[√] gameId 三个来源（URL path / ?gameId= / PROTOCOL:INIT）
+[√] 拉取详情接口读取 doc.levels
+[√] 兼容历史嵌套数组，扁平化一层
+[√] 按 ?ext= 过滤：无 ext = 纯净原版
+[√] 有 ?ext= 时自动选中对应扩展
+[√] 资源路径三级回退解析
+[√] 脚本型用 Blob URL + <script> 执行（非裸 eval）
+[√] 全程 try/catch，加载失败降级原版
+
+代码段 B · 内容 loader
+[√] 注册 AllinONE_ContentLoader.on('levels') 与 ('items')
+[√] 同时写入 AllinONE_ContentHandlers，并监听 allinone:content-pack-applied 兜底
+[√] 复用 a1gApplyPattern，未重复实现
+[√] 内容凭证按次生效（sessionOnly 时抑制写草稿），未写入持久化存档
+
+代码段 C · 道具双通道
+[√] UGC 道具栏 CSS + HTML（左上角，避免与游戏居中 Toast 冲突）
+[√] Toast 通知（a1-toast）
+[√] EFFECT_HANDLERS 8 种效果，与 SOP availableEffects 一一对应
+[√] registerDynamicEffect 沙箱引擎 + 黑名单（4000 字符上限）
+[√] 沙箱注入 window.myGame
+[√] 监听 EXTENSION_VOUCHER（通道 1）
+[√] 监听 allinone-item-redeemed / allinone:item-redeemed（通道 2）
+[√] 效果名解析排除占位 'custom'，从 detail.itemId 取真值
+[√] 同一道具去重
+
+发布中心配置
+[ ] 打包 index.html 为 ZIP 上传
+[ ] AI 分析结果确认（类型 / 框架 / 入口 index.html）
+[ ] Skills：auth + wallet（+ inventory + achievements）
+[ ] 配置 4 个兑换道具
+[ ] 道具 SOP 粘贴 allinone-sop.json
+[ ] 内容创作 SOP 粘贴 allinone-content-sop.json 且 enabled: true
+[ ] 上传 content-creation-guide.md
+[ ] 封面与简介
+[ ] 一键发布
+
+任务广场
+[ ] 发布 1~4 个种子任务
+[ ] 每个任务上传 task-dev-guide.md（7 节齐全，不含源码）
+[ ] 任务 contentSlot 与代码段 A 读取的字段一致（levels / items）
+
+端到端验证
+[ ] 直接打开 = 纯净原版，看不到任何社区图纸
+[ ] 提交图纸 → 合并 → ?ext= 打开 → 「社区图纸」区能选到并临摹/填充/挑战
+[ ] 内容工坊铸凭证 → 使用 → 本次会话生效，刷新后失效
+[ ] 道具工坊创建道具 → PROPS 栏出现并可用
+[ ] 兑换码兑换 → PROPS 栏出现并可用
+[ ] effectCode 自定义效果可执行
+[ ] 断网 / 接口报错 → 游戏仍能正常打开（降级原版）
+
+
+--------------------------------------------------
+七、本地自测技巧（浏览器控制台）
+--------------------------------------------------
+1. 模拟平台下发道具：
+   window.dispatchEvent(new CustomEvent('allinone:item-redeemed',
+     { detail: { itemId: 'instant_fill', itemName: '一键填充券',
+                 voucherData: { params: { charges: 3 } } } }));
+
+2. 直接授予填充券：
+   window.myGame.grantFill(3)
+
+3. 模拟内容凭证图纸（本次会话生效，不写存档）：
+   window.AllinONE_ContentHandlers.levels({
+     name: '测试小猫',
+     data: { id:'t1', title:'测试小猫', cols:9, rows:9,
+             legend:{ '.':null, 'K':'#3a3a4a', 'P':'#ffb3c6' },
+             layout:['.........','..K...K..','..KK.KK..','.KKKKKKK.',
+                     '.KKKPKKK.','.KKKKKKK.','..KKKKK..','...KKK...','.........'] }
+   });
+
+4. 查看当前图纸统计：
+   window.myGame.patternInfo()   → { base: 3, ext: N, cols, rows }

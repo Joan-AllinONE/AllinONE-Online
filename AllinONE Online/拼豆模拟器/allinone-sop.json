@@ -1,0 +1,55 @@
+{
+  "schemaName": "bead-studio-item",
+  "description": "豆趣工坊·像素熨斗 拼豆模拟器道具 — 支持 UGC 创作的创意增益道具系统",
+  "aiPrompt": "豆趣工坊·像素熨斗 是一款拼豆（熔珠 / fuse bead）模拟器。玩家在网格画布上点击或拖拽放置圆形拼豆来绘制图案，支持调色板选色、撤销/重做、清空、对称轴、吸管取色；上传图片可像素化为高清拼豆图案并支持临摹/填充/挑战三种模式。完成后点击「熨烫定型」将拼豆融合为成品（光面/毛巾/灯芯绒/磨砂四效），可收藏或导出。道具用于辅助创作：铺色、清板、瞬熨、解锁对称/新颜色、灵感喷射、显现参考图等，让玩家更快进入心流、降低挫败感，而非替代创作本身。",
+  "availableEffects": [
+    "instant_fill",
+    "rainbow_fill",
+    "clear_board",
+    "instant_iron",
+    "unlock_symmetry",
+    "unlock_color",
+    "scatter_beads",
+    "reveal_reference"
+  ],
+  "effectRules": [
+    "instant_fill: 一键填充券，授予 N 次「填充」模式使用权（参数 charges=1..3），每次点「填充」消耗 1 张券，归零后填充按钮自动锁定；未持有则无法激活填充模式",
+    "rainbow_fill: 用调色板颜色按 (行+列) 规律铺满整块画布，立即获得一幅彩虹拼豆图",
+    "clear_board: 清空当前画布，便于重新创作（不影响已收藏作品）",
+    "instant_iron: 跳过 80% 覆盖判定，直接熨烫定型为成品；可指定熨烫效果 effect=glossy|towel|corduroy|frosted",
+    "unlock_symmetry: 开启对称模式 mode=none|h|v|center，减少重复摆放",
+    "unlock_color: 解锁一个自定义颜色，参数 hex(如 #ff00aa) 与 name；加入调色板扩展创作空间",
+    "scatter_beads: 在画布上随机撒上 N 颗豆，参数 count(1-400) 与 hex；用于灵感起手",
+    "reveal_reference: 开启半透明参考叠图（仅在临摹/挑战模式下有效）"
+  ],
+  "constraints": {
+    "maxScatter": 400,
+    "validSymModes": ["none","h","v","center"],
+    "validIronEffects": ["glossy","towel","corduroy","frosted"],
+    "coverageBypassOnlyViaInstantIron": true
+  },
+  "forbidden": [
+    "不要创建会清空或覆盖玩家「我的收藏」中已保存作品的效果",
+    "不要绕过平台权限直接操作 localStorage 以外的存储或发起网络请求",
+    "除 instant_iron 外，其他效果不应自动将画布标记为已熨烫",
+    "不要创建用于直接复制他人作品版权内容的效果",
+    "unlock_color 的颜色必须通过平台调色板规范，禁止注入脚本"
+  ],
+  "effectCodeEnabled": true,
+  "effectCodeSignature": "function(params)",
+  "effectCodeReturns": "{ message: string }",
+  "effectCodeSandbox": {
+    "game": "豆趣工坊游戏实例(window.myGame)：rainbowFill() / clear() / instantIron(effect) / setSymmetry(mode) / unlockColor(hex,name) / scatter(count,hex) / revealReference() / info() / toast(msg) / grantFill(n)",
+    "Math": "JS Math",
+    "JSON": "JS JSON",
+    "console": "JS console"
+  },
+  "presetItems": [
+    { "name": "一键填充券", "effect": "instant_fill", "params": { "charges": 3 }, "description": "授予 3 次一键填充次数（填充图纸必需道具）", "icon": "🎟" },
+    { "name": "彩虹铺豆", "effect": "rainbow_fill", "params": {}, "description": "一键生成彩虹拼豆图", "icon": "🌈" },
+    { "name": "清板符", "effect": "clear_board", "params": {}, "description": "清空当前画板重新创作", "icon": "🧹" },
+    { "name": "大师熨烫券", "effect": "instant_iron", "params": { "effect": "glossy" }, "description": "跳过覆盖判定直接熨烫定型", "icon": "🔥" },
+    { "name": "对称结晶", "effect": "unlock_symmetry", "params": { "mode": "center" }, "description": "开启中心对称摆放", "icon": "🔁" },
+    { "name": "灵感喷射", "effect": "scatter_beads", "params": { "count": 20, "hex": "#ffd23f" }, "description": "随机撒上 20 颗豆起手", "icon": "✨" }
+  ]
+}

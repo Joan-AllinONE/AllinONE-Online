@@ -1,0 +1,8 @@
+{
+  "name": "羽翼之翼",
+  "effect": "wing_fly",
+  "params": { "seconds": 5 },
+  "description": "为玛丽插上一双翅膀，飞行 5 秒！飞行期间按住跳跃键振翅上升，松开则缓缓滑降，可轻松越过管道与深坑。计时结束自动恢复正常重力落地。",
+  "icon": "🪽",
+  "effectCode": "function(params) {\n  if (api.getState && api.getState() !== 'play') return { error: true, message: '⚠️ 请先按 Enter 开始游戏再使用道具' };\n  var secs = (params && params.seconds) ? params.seconds : 5;\n  if (secs > 10) secs = 10;\n  var frames = Math.round(secs * 60);\n  if (api.startFly) api.startFly(frames);\n  else if (game) game.flyTimer = frames;\n  return { message: '🪽 羽翼展开！飞行 ' + secs + ' 秒，按住跳跃键上升' };\n}"
+}

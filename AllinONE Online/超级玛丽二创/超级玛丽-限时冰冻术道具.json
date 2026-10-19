@@ -1,0 +1,8 @@
+{
+  "name": "限时冰冻术",
+  "effect": "start_weapon",
+  "params": { "weapon": "ice", "seconds": 10 },
+  "description": "装备冰晶法杖 10 秒，按住 X / Z 键发射冰锥，命中敌人将其冻结约 3 秒（静止且无害，每个 +20 分）。冻结中的敌人可被踩踏或再次攻击消灭。到期自动收手。",
+  "icon": "❄️",
+  "effectCode": "function(params){\n  if (game.state !== 'play') return { message: '⚠️ 请先按 Enter 开始游戏再使用道具', error: true };\n  var sec = (params && params.seconds) ? params.seconds : 10;\n  var w = (params && params.weapon) ? params.weapon : 'ice';\n  var r = api.startWeapon(w, sec * 60);\n  if (r && r.applied === false) return { message: '⚠️ ' + (r.reason || '使用失败'), error: true };\n  return { message: '❄️ 冰冻术已装备！按住 X/Z 发射冰锥，剩余 ' + sec + ' 秒' };\n}"
+}

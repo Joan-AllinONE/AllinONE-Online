@@ -561,7 +561,9 @@ export class GameCodeAnalyzer {
   // ==================== 辅助方法 ====================
 
   private analyzeFileStructure(): FileStructureInfo {
-    const entryPoints: string[] = [];
+    // HTML 入口与代码入口分开收集：iframe 必须加载 HTML，最终入口列表中 HTML 永远排在 JS/TS 之前
+    const htmlEntryPoints: string[] = [];
+    const codeEntryPoints: string[] = [];
     const htmlFiles: string[] = [];
     const jsFiles: string[] = [];
     const tsFiles: string[] = [];
@@ -592,7 +594,7 @@ export class GameCodeAnalyzer {
         const content = this.fileContents.get(path) || '';
         // 更宽松的入口文件检测
         if (content.includes('<script') || content.includes('<canvas') || content.includes('<body') || content.includes('<html')) {
-          entryPoints.push(path);
+          htmlEntryPoints.push(path);
           console.log('[GameCodeAnalyzer] 发现HTML入口:', path);
         }
       } else if (ext === 'js' || ext === 'mjs') {
@@ -600,7 +602,7 @@ export class GameCodeAnalyzer {
         // 检测常见的入口文件名
         const lowerName = file.name.toLowerCase();
         if (lowerName.includes('main') || lowerName.includes('index') || lowerName.includes('start') || lowerName.includes('app') || lowerName.includes('game')) {
-          entryPoints.push(path);
+          codeEntryPoints.push(path);
           console.log('[GameCodeAnalyzer] 发现JS入口:', path);
         }
       } else if (ext === 'ts' || ext === 'tsx') {
@@ -608,7 +610,7 @@ export class GameCodeAnalyzer {
         // TypeScript 文件也可能是入口
         const lowerName = file.name.toLowerCase();
         if (lowerName.includes('main') || lowerName.includes('index') || lowerName.includes('start') || lowerName.includes('app') || lowerName.includes('game')) {
-          entryPoints.push(path);
+          codeEntryPoints.push(path);
           console.log('[GameCodeAnalyzer] 发现TS入口:', path);
         }
       }
@@ -621,21 +623,21 @@ export class GameCodeAnalyzer {
     }
 
     // 如果没有找到入口文件，但有 HTML 文件，将第一个 HTML 作为入口
-    if (entryPoints.length === 0 && htmlFiles.length > 0) {
-      entryPoints.push(htmlFiles[0]);
+    if (htmlEntryPoints.length === 0 && codeEntryPoints.length === 0 && htmlFiles.length > 0) {
+      htmlEntryPoints.push(htmlFiles[0]);
       console.log('[GameCodeAnalyzer] 使用第一个HTML作为入口:', htmlFiles[0]);
     }
 
     // 如果还是没有，将第一个 JS 文件作为入口
-    if (entryPoints.length === 0 && jsFiles.length > 0) {
-      entryPoints.push(jsFiles[0]);
+    if (htmlEntryPoints.length === 0 && codeEntryPoints.length === 0 && jsFiles.length > 0) {
+      codeEntryPoints.push(jsFiles[0]);
       console.log('[GameCodeAnalyzer] 使用第一个JS作为入口:', jsFiles[0]);
     }
 
     // 如果还是没有，只要有任何文件，使用第一个文件作为入口
-    if (entryPoints.length === 0 && this.files.size > 0) {
+    if (htmlEntryPoints.length === 0 && codeEntryPoints.length === 0 && this.files.size > 0) {
       const firstFile = Array.from(this.files.keys())[0];
-      entryPoints.push(firstFile);
+      codeEntryPoints.push(firstFile);
       console.log('[GameCodeAnalyzer] 使用第一个文件作为入口:', firstFile);
     }
 
@@ -669,9 +671,21 @@ export class GameCodeAnalyzer {
     }
     console.log('[GameCodeAnalyzer] isModular:', isModular);
 
+    // 入口排序：iframe 必须加载 HTML —— HTML 入口（index.html 优先、浅层级优先）永远排在 JS/TS 之前。
+    // 历史 bug：ZIP 内 js/main.js 因命名含 "main" 被识别为入口且文件顺序排在 index.html 之前，
+    // entryPoint[0] 被存成 JS 文件 → iframe 加载 JS 白屏（如「桌面宠物」）。
+    const rankEntryPoint = (p: string): number => {
+      const norm = p.replace(/\\/g, '/');
+      const depth = norm.split('/').filter(Boolean).length;
+      if (/(^|\/)index\.html?$/i.test(norm)) return depth === 1 ? 0 : 1;
+      if (/\.html?$/i.test(norm)) return depth === 1 ? 2 : 3;
+      return 4;
+    };
     const result = {
       totalFiles,
-      entryPoints: [...new Set(entryPoints)],
+      entryPoints: [...new Set([...htmlEntryPoints, ...codeEntryPoints])].sort(
+        (a, b) => rankEntryPoint(a) - rankEntryPoint(b) || a.localeCompare(b)
+      ),
       htmlFiles,
       jsFiles,
       tsFiles,

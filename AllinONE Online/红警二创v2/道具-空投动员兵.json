@@ -1,0 +1,8 @@
+{
+  "name": "空投动员兵",
+  "effect": "airdrop_conscript_ec",
+  "params": { "fallTicks": 45, "impactDamage": 90, "impactRadius": 256 },
+  "description": "给己方动员兵(conscript)开启空降能力：框选动员兵后右键点击敌方目标，他们从天而降砸到敌人头顶，落地时对周围敌军造成范围伤害（空降本身就是攻击）。基于引擎 airdropMod + airdrop 命令实现，按归属方 owner 生效，不影响敌方单位；纯 effectCode 无法直接拦截右键移动指令，需经此引擎命令接管。",
+  "icon": "🪂",
+  "effectCode": "function(params){var game=arguments[0];if(!game||!game.world)return{error:true,message:'游戏未启动'};var g=game;var fallTicks=(params&&params.fallTicks)||45;var impactDamage=(params&&params.impactDamage)||90;var impactRadius=(params&&params.impactRadius)||256;g.emit({kind:'airdropMod',owner:g.localPlayerId,typeId:'conscript',fallTicks:fallTicks,impactDamage:impactDamage,impactRadius:impactRadius});return{message:'🪂 动员兵空降已就绪！框选动员兵 → 右键点击敌方目标，他们从天而降砸击（落地造成范围伤害）'};}"
+}

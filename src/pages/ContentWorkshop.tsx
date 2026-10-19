@@ -10,18 +10,20 @@
  * - 可选上架 remix 版（?ext= 版本切换，走审核）
  */
 
-import React, { useState, useEffect, useContext, useCallback } from 'react';
+import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import {
   ArrowLeft, Gamepad2, Sparkles, Rocket, CheckCircle, Loader2,
   UploadCloud, FileCode2, Boxes, AlertTriangle, Info, Coins, Layers, Store,
+  Upload, Clipboard, Check, ChevronDown, ChevronUp, FileText,
 } from 'lucide-react';
-import { getPublishedGames, type PublishedGame } from '@/services/publishedGameService';
+import { getPublishedGames, refreshGameDetail, type PublishedGame } from '@/services/publishedGameService';
 import { voucherItemService } from '@/services/voucherItemService';
 import { AuthContext } from '@/contexts/authContext';
 import {
-  mintContentVoucher, generateContentWithAI, requestRemix,
+  mintContentVoucher, generateContentWithAI, requestRemix, saveContentSop,
   type MintContentResult,
 } from '@/services/contentService';
 import { validateQuestContent } from '@/types/quest';
@@ -159,6 +161,94 @@ const ContentWorkshop: React.FC = () => {
   }, []);
 
   const contentSop: GameContentSop | undefined = selectedGame?.contentSop;
+
+  // ============ 内容创作 SOP（像道具工坊：可上传/复制，跨浏览器同步） ============
+  // 保存通道：saveContentSop → gamesApi 云函数 PATCH /:id（只动 contentSop 字段，字段级合并）
+  // 加载兜底：本地缓存无 SOP 文档时从后端详情补拉（跨浏览器权威数据）
+  const [sopExpanded, setSopExpanded] = useState(false);
+  const [sopSaving, setSopSaving] = useState(false);
+  const [sopCopied, setSopCopied] = useState(false);
+  const sopFileInputRef = useRef<HTMLInputElement>(null);
+  const sopDocument = contentSop?.sopDocument || '';
+
+  // 选中游戏后，本地缓存缺 SOP 文档 → 从后端补拉一次（另一浏览器上传的场景）
+  useEffect(() => {
+    if (!selectedGame || selectedGame.contentSop?.sopDocument) return;
+    let cancelled = false;
+    refreshGameDetail(selectedGame.id)
+      .then(fresh => {
+        if (!cancelled && fresh?.contentSop?.sopDocument) {
+          setSelectedGame(prev => (prev && prev.id === fresh.id ? fresh : prev));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedGame?.id]);
+
+  const handleUploadContentSop = () => {
+    if (sopDocument && !window.confirm('当前已有内容创作 SOP 文档，是否覆盖更新？')) return;
+    sopFileInputRef.current?.click();
+  };
+
+  const handleContentSopFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedGame) return;
+    e.target.value = ''; // 允许同一文件重复上传
+    if (!file.name.endsWith('.md')) {
+      toast.error('请上传 .md 格式的 SOP 文档');
+      return;
+    }
+    let md = '';
+    try {
+      md = await file.text();
+    } catch {
+      toast.error('读取文件失败');
+      return;
+    }
+    if (!md.trim()) {
+      toast.error('文件内容为空');
+      return;
+    }
+    const nextSop: GameContentSop = {
+      ...(contentSop || { enabled: true, contentTypes: [] }),
+      sopDocument: md,
+      updatedAt: Date.now(),
+    };
+    setSopSaving(true);
+    try {
+      const ok = await saveContentSop(selectedGame.id, nextSop);
+      setSelectedGame(prev => (prev ? { ...prev, contentSop: nextSop } : prev));
+      setSopExpanded(true);
+      if (ok) {
+        toast.success('内容创作 SOP 已保存并同步到云端（跨浏览器可读）');
+      } else {
+        toast.error('云端保存失败，SOP 仅本次会话生效，请稍后重试');
+      }
+    } catch (err) {
+      toast.error('保存失败: ' + (err instanceof Error ? err.message : '未知错误'));
+    } finally {
+      setSopSaving(false);
+    }
+  };
+
+  const handleCopyContentSop = async () => {
+    if (!sopDocument) return;
+    try {
+      await navigator.clipboard.writeText(sopDocument);
+      setSopCopied(true);
+      setTimeout(() => setSopCopied(false), 2000);
+    } catch {
+      // clipboard API 不可用（非 https / 权限拒绝）→ execCommand 兜底
+      const ta = document.createElement('textarea');
+      ta.value = sopDocument;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setSopCopied(true);
+      setTimeout(() => setSopCopied(false), 2000);
+    }
+  };
 
   // ============ 创作 ============
 
@@ -465,6 +555,96 @@ ${guide ? '【创作指南】\n' + guide.slice(0, 3000) : ''}
                   ) : null}
                 </div>
               </div>
+            </div>
+
+            {/* 内容创作 SOP 文档（可上传/复制，跨浏览器同步；AI 生成提示词将引用） */}
+            <input
+              ref={sopFileInputRef}
+              type="file"
+              accept=".md"
+              className="hidden"
+              onChange={handleContentSopFileChange}
+            />
+            <div className="border border-slate-800 rounded-2xl overflow-hidden mb-4">
+              <button
+                onClick={() => setSopExpanded(!sopExpanded)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-slate-900 hover:bg-slate-800/70 transition-colors"
+              >
+                <div className="flex items-center gap-2 text-sm text-slate-300">
+                  <FileText className="w-4 h-4 text-violet-400" />
+                  <span>内容创作 SOP 文档</span>
+                  <span className="text-xs text-slate-500 hidden sm:inline">— AI 生成将引用，可复制给外部 AI</span>
+                  {sopDocument && (
+                    <span className="text-xs bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded-full">
+                      {sopSaving ? '保存中...' : '已保存'}
+                    </span>
+                  )}
+                </div>
+                {sopExpanded
+                  ? <ChevronUp className="w-4 h-4 text-slate-500" />
+                  : <ChevronDown className="w-4 h-4 text-slate-500" />}
+              </button>
+              <AnimatePresence>
+                {sopExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-4 py-3 border-t border-slate-800 bg-slate-900/60">
+                      {sopDocument ? (
+                        <>
+                          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                            <span className="text-xs text-slate-500">
+                              将此文档复制到 ChatGPT / Claude 等外部 AI，让它帮你生成合规的内容包 JSON
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={handleUploadContentSop}
+                                disabled={sopSaving}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-50 text-amber-300 border border-amber-500/25 rounded-lg text-xs transition-colors"
+                              >
+                                <Upload className="w-3 h-3" /> 更新文档
+                              </button>
+                              <button
+                                onClick={handleCopyContentSop}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-500/15 hover:bg-violet-500/25 text-violet-300 border border-violet-500/25 rounded-lg text-xs transition-colors"
+                              >
+                                {sopCopied ? (
+                                  <><Check className="w-3 h-3" /> 已复制</>
+                                ) : (
+                                  <><Clipboard className="w-3 h-3" /> 复制 SOP</>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="max-h-64 overflow-y-auto p-3 bg-slate-950/60 rounded-lg border border-slate-800">
+                            <pre className="text-xs text-slate-400 whitespace-pre-wrap font-mono leading-relaxed">
+                              {sopDocument}
+                            </pre>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex flex-col items-center gap-3 py-6">
+                          <p className="text-slate-500 text-sm">该游戏暂未上传内容创作 SOP 文档</p>
+                          <p className="text-xs text-slate-600 text-center max-w-md">
+                            上传后将成为 AI 生成的创作指南（发布中心由游戏方配置的 SOP 同样生效，此处可随时补充或更新）
+                          </p>
+                          <button
+                            onClick={handleUploadContentSop}
+                            disabled={sopSaving}
+                            className="flex items-center gap-1.5 px-4 py-2 bg-violet-500/20 hover:bg-violet-500/35 disabled:opacity-50 text-violet-300 border border-violet-500/30 rounded-lg text-sm transition-colors"
+                          >
+                            <Upload className="w-4 h-4" /> 上传 SOP 文档 (.md)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* 创作标签 */}

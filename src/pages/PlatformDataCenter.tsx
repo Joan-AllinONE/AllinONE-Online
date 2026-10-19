@@ -18,7 +18,7 @@ import {
 } from 'recharts';
 import { useAuth } from '@/contexts/authContext';
 import { fetchAnalytics } from '@/services/analytics';
-import { platformTreasuryService, type TreasuryReport } from '@/services/platformTreasuryService';
+import { platformTreasuryService, type TreasuryReport, type TreasuryTransaction, TREASURY_SOURCE_LABEL } from '@/services/platformTreasuryService';
 import {
   Activity, Users, Gamepad2, Clock, Coins, Wallet, TrendingUp,
   ArrowLeft, RefreshCw, PieChart as PieIcon, BarChart3,
@@ -131,6 +131,13 @@ function Loading({ label }: { label?: string }) {
 
 // ==================== 工具 ====================
 
+function fmtTime(ts: number): string {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function fmtDuration(ms: number): string {
   if (!ms || ms <= 0) return '0分';
   const totalSec = Math.floor(ms / 1000);
@@ -164,6 +171,7 @@ export default function PlatformDataCenter() {
   const [games, setGames] = useState<GameStat[]>([]);
   const [players, setPlayers] = useState<PlayersData | null>(null);
   const [treasury, setTreasury] = useState<TreasuryReport | null>(null);
+  const [treasuryTxs, setTreasuryTxs] = useState<TreasuryTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('dau');
@@ -173,14 +181,17 @@ export default function PlatformDataCenter() {
     setRefreshing(true);
     try {
       const uid = currentUser?.uid || 'admin';
-      const [ov, tr, gm, pl, tr2] = await Promise.all([
+      const [ov, tr, gm, pl, tr2, trTxs] = await Promise.all([
         fetchAnalytics<OverviewData>('overview'),
         fetchAnalytics<TrendData>(`trends?metric=${trendMetric}&days=30`),
         fetchAnalytics<GameStat[]>('by-game'),
         fetchAnalytics<PlayersData>('players'),
         platformTreasuryService.getReport().catch(() => null),
+        platformTreasuryService.getDetailTransactions().catch(() => []),
       ]);
-      setOverview(ov);
+      // 防御性归一化：旧云函数 __analytics 桩曾把对象（{events:[...]}）当 data 返回，
+      // 非数组数据一旦进入渲染（games.map / players.newVsReturning）即 TypeError 白屏。
+      setOverview(ov && typeof ov === 'object' && !Array.isArray(ov) ? ov : null);
 
       // 后端 /trends 返回 TrendPoint[] 数组，需转为趋势图所需的 {date, value} 序列
       const raw: any[] = Array.isArray(tr) ? tr : [];
@@ -193,9 +204,19 @@ export default function PlatformDataCenter() {
       }));
       setTrend({ metric: trendMetric, days: 30, series });
 
-      setGames(gm || []);
-      setPlayers(pl);
+      setGames(Array.isArray(gm) ? gm : []);
+      setPlayers(
+        pl && typeof pl === 'object' && !Array.isArray(pl)
+          ? {
+              ...pl,
+              newVsReturning: pl.newVsReturning ?? { new: 0, returning: 0 },
+              byRole: pl.byRole ?? {},
+              byActivityTier: pl.byActivityTier ?? {},
+            }
+          : null
+      );
       setTreasury(tr2);
+      setTreasuryTxs(Array.isArray(trTxs) ? trTxs : []);
     } catch (e) {
       console.warn('[DataCenter] 加载失败:', e);
     } finally {
@@ -284,6 +305,50 @@ export default function PlatformDataCenter() {
               <StatCard icon={<Coins className="w-4 h-4 text-yellow-400" />} label="A币流通量" value={circulationACoins.toLocaleString()} suffix="A币" color="amber" />
               <StatCard icon={<Wallet className="w-4 h-4 text-emerald-400" />} label="金库 A币 / GC" value={`${treasuryACoins.toLocaleString()} / ${treasuryGC.toLocaleString()}`} color="green" />
               <StatCard icon={<TrendingUp className="w-4 h-4 text-purple-400" />} label="总营收" value={totalRevenue.toLocaleString()} suffix="币" color="purple" />
+            </section>
+
+            {/* 🆕 金库收入明细（每笔） */}
+            <section className="p-5 bg-slate-800/60 rounded-xl border border-slate-700/50">
+              <SectionTitle icon={<Wallet className="w-4 h-4 text-emerald-400" />}>
+                金库收入明细（每笔，最近 {treasuryTxs.length} 条）
+              </SectionTitle>
+              {treasuryTxs.length === 0 ? (
+                <p className="text-sm text-slate-500 py-4 text-center">
+                  暂无收入明细——道具销售三方分成、市场佣金等入账后在此显示
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-slate-500 text-left border-b border-slate-700/40">
+                        <th className="py-2 pr-4 font-normal">时间</th>
+                        <th className="py-2 pr-4 font-normal">来源</th>
+                        <th className="py-2 pr-4 font-normal">说明</th>
+                        <th className="py-2 font-normal text-right">金额</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {treasuryTxs.map(tx => (
+                        <tr key={tx.id} className="border-b border-slate-800/40 hover:bg-slate-800/40 transition-colors">
+                          <td className="py-2 pr-4 text-slate-400 whitespace-nowrap">{fmtTime(tx.timestamp)}</td>
+                          <td className="py-2 pr-4">
+                            <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap ${tx.source === 'three_way_split' ? 'bg-sky-500/15 text-sky-300' : 'bg-slate-700/50 text-slate-300'}`}>
+                              {TREASURY_SOURCE_LABEL[tx.source] || tx.source}
+                            </span>
+                          </td>
+                          <td className="py-2 pr-4 text-slate-300 max-w-md truncate">{tx.description}</td>
+                          <td className="py-2 text-right font-mono font-bold text-green-400 whitespace-nowrap">
+                            +{tx.amount.toLocaleString()}
+                            <span className="ml-1 text-[10px] font-normal text-slate-500">
+                              {tx.currency === 'gameCoins' ? '游戏币' : 'A币'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </section>
 
             {/* 趋势图 */}

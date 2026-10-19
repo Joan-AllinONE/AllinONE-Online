@@ -26,9 +26,12 @@ import { createGameReviewRouter } from './dist/server/server/routes/gameReview.j
 import { createGameDeveloperRouter } from './dist/server/server/routes/gameDeveloper.js';
 import { createAnalyticsPublicRouter, createAnalyticsAuthRouter } from './dist/server/server/routes/analytics.js';
 import { createActivityPublicRouter, createActivityAuthRouter } from './dist/server/server/routes/activity.js';
+import { createLimitedEventTunnelRouter } from './dist/server/server/routes/limitedEvent.js';
 import { createQuestsRouter } from './dist/server/server/routes/quests.js';
 import { createGameWalletRouter } from './dist/server/server/routes/gameWallet.js';
 import { createContentRouter } from './dist/server/server/routes/content.js';
+import { createContractTunnelRouter } from './dist/server/server/routes/contractTunnel.js';
+import { createNotificationsTunnelRouter } from './dist/server/server/routes/notifications.js';
 
 const { Pool } = pg;
 dotenv.config();
@@ -198,6 +201,31 @@ app.use('/api/v1/games/__content', contentRouter);
 // 🌐 游戏审核 __review 隧道（在 gamesPublicRouter 之前，否则 __review 被当 gameId）
 // 审核后台独立管理员登录（REVIEW_ADMIN_USER/REVIEW_ADMIN_PASS），路由内部自行解析 JWT
 app.use('/api/v1/games/__review', gameReviewRouter);
+
+// 🌐 智能合约 __contract 隧道（B1；在 gamesPublicRouter 之前，否则 __contract 被当 gameId）
+const contractTunnelRouter = createContractTunnelRouter(USE_MEMORY_DB, memoryDB, pool, isProduction);
+app.use('/api/v1/games/__contract', contractTunnelRouter);
+
+// 🌐 通知 __notifications 隧道（2026-10-11；私域合约邀请站内信，在 gamesPublicRouter 之前）
+const notificationsTunnelRouter = createNotificationsTunnelRouter(USE_MEMORY_DB, memoryDB);
+app.use('/api/v1/games/__notifications', notificationsTunnelRouter);
+
+// 🌐 限时活动 __event 隧道（E1-E4：时间窗口+功能开关+状态机；在 gamesPublicRouter 之前）
+const limitedEventTunnelRouter = createLimitedEventTunnelRouter(USE_MEMORY_DB, memoryDB, pool, isProduction);
+app.use('/api/v1/games/__event', limitedEventTunnelRouter);
+
+// ⏱️ 本地合约 cron 驱动（2026-10-10）：云函数有 timer trigger，本地 dev 没有——
+// 不补则 GSO 期满结算/退款等 deadline-check 条款永不触发（实测 0.1h 期限不结算）。
+// 每 60s 自调 tick；幂等安全：确定性 triggerId（时间桶）+ saga txId 防双花。
+if (USE_MEMORY_DB) {
+  const TICK_URL = `http://127.0.0.1:${PORT}/api/v1/games/__contract/tick`;
+  const EVENT_TICK_URL = `http://127.0.0.1:${PORT}/api/v1/games/__event/tick`;
+  setInterval(() => {
+    fetch(TICK_URL, { method: 'POST' }).catch(() => {});
+    fetch(EVENT_TICK_URL, { method: 'POST' }).catch(() => {});
+  }, 60_000).unref();
+  console.log(`[contract] 本地 cron tick 已启动（每 60s）: ${TICK_URL} + ${EVENT_TICK_URL}`);
+}
 
 // 🌐 公开路由：游戏文件提供（无需 JWT，必须在 authMiddleware 之前挂载）
 // iframe 内的 <script>/<link> 资源请求不带 Authorization header

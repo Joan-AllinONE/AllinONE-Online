@@ -73,9 +73,16 @@ export type PlatformToGameMessage =
 
 // ==================== 上行消息：游戏 → 平台 ====================
 
+/**
+ * 🆕 B1 防刷：所有上行消息均可携带 channelToken（establishChannel 经
+ * PROTOCOL:INIT.config.params.channelToken 下发，注入 SDK 透传）。
+ * 灰度期缺失仅告警；token 不匹配一律丢弃。
+ */
+type ChannelTokenFields = { channelToken?: string };
+
 export type GameToPlatformMessage =
   /** 协议就绪，游戏声明自身能力 */
-  | {
+  | ({
       type: 'PROTOCOL:READY';
       protocolVersion: string;
       mode: ProtocolMode;
@@ -83,9 +90,9 @@ export type GameToPlatformMessage =
       supportedActions: string[];
       supportedSchemas: string[];
       timestamp: number;
-    }
+    } & ChannelTokenFields)
   /** 上报协议动作结果 */
-  | {
+  | ({
       type: 'PROTOCOL:ACTION_RESULT';
       action: string;
       success: boolean;
@@ -93,30 +100,30 @@ export type GameToPlatformMessage =
       error?: string;
       requestId: string;
       timestamp: number;
-    }
+    } & ChannelTokenFields)
   /** 查询可用 Schema */
-  | {
+  | ({
       type: 'PROTOCOL:SCHEMA_QUERY';
       schemaName: string;
       requestId: string;
       timestamp: number;
-    }
+    } & ChannelTokenFields)
   /** 游戏内事件上报 */
-  | {
+  | ({
       type: 'GAME_EVENT';
       event: string;
       data: any;
       timestamp: number;
-    }
+    } & ChannelTokenFields)
   /** 兑换道具（游戏侧发起） */
-  | {
+  | ({
       type: 'REDEEM_ITEM';
       data: {
         code: string;
         gameId: string;
       };
       timestamp: number;
-    };
+    } & ChannelTokenFields);
 
 // ==================== 协议配置 ====================
 
@@ -139,6 +146,8 @@ export interface GameProtocolConfig {
     heartbeat?: number;
     /** 是否启用调试日志 */
     debug?: boolean;
+    /** 🆕 通道令牌（B1 防刷）：游戏侧上行消息必须透传（灰度期缺失仅告警） */
+    channelToken?: string;
   };
 }
 

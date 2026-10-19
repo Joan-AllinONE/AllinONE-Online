@@ -1,0 +1,60 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.8 [39m[90md:/AllinONE Gaming Platform[39m
+
+ [31m❯[39m src/skills/generator/__tests__/ConfigValidator.test.ts [2m([22m[2m12 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 52[2mms[22m[39m
+       [32m✓[39m 应该验证必填字段[32m 9[2mms[22m[39m
+       [32m✓[39m 应该验证 gameId 格式[32m 1[2mms[22m[39m
+       [32m✓[39m 应该验证货币配置[32m 2[2mms[22m[39m
+       [32m✓[39m 应该验证商品配置[32m 1[2mms[22m[39m
+       [32m✓[39m 应该验证货币ID唯一性[32m 1[2mms[22m[39m
+       [32m✓[39m 应该通过有效配置[32m 3[2mms[22m[39m
+       [32m✓[39m 应该检测功能依赖警告[32m 1[2mms[22m[39m
+[31m       [31m×[31m 应该修复 gameId 格式[39m[32m 17[2mms[22m[39m
+       [32m✓[39m 应该修复货币 ID 格式[32m 2[2mms[22m[39m
+       [32m✓[39m 应该添加默认货币[32m 2[2mms[22m[39m
+       [32m✓[39m 应该生成验证报告[32m 2[2mms[22m[39m
+       [32m✓[39m 应该生成通过报告[32m 1[2mms[22m[39m
+ [32m✓[39m src/contracts/__tests__/isolation.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 211[2mms[22m[39m
+ [32m✓[39m src/contracts/engine/__tests__/ledger.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 58[2mms[22m[39m
+ [32m✓[39m src/contracts/engine/__tests__/canonical.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m src/contracts/engine/__tests__/evaluate.test.ts [2m([22m[2m47 tests[22m[2m)[22m[32m 74[2mms[22m[39m
+ [32m✓[39m src/contracts/engine/__tests__/hash.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m src/contracts/engine/__tests__/execute.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+ [32m✓[39m src/contracts/engine/__tests__/validate.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+ [32m✓[39m src/contracts/acr/__tests__/acrLinter.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+[90mstderr[2m | src/contracts/__tests__/contractInviteNotifications.test.ts
+[22m[39m[JWT] WARNING: Using default dev secret — NOT for production use
+
+[90mstderr[2m | src/contracts/__tests__/whitelist.test.ts
+[22m[39m[JWT] WARNING: Using default dev secret — NOT for production use
+
+ [32m✓[39m src/contracts/__tests__/contractInviteNotifications.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m src/contracts/__tests__/whitelist.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/skills/generator/__tests__/ConfigValidator.test.ts[2m > [22mConfigValidator[2m > [22mautoFix[2m > [22m应该修复 gameId 格式
+[31m[1mAssertionError[22m: expected 'invalid-game-123___' to match /^[a-z][a-z0-9_]*$/[39m
+
+[32m- Expected:[39m
+/^[a-z][a-z0-9_]*$/
+
+[31m+ Received:[39m
+"invalid-game-123___"
+
+[36m [2m❯[22m src/skills/generator/__tests__/ConfigValidator.test.ts:[2m121:28[22m[39m
+    [90m119|[39m       [35mconst[39m fixed [33m=[39m [33mConfigValidator[39m[33m.[39m[34mautoFix[39m(config)[33m;[39m
+    [90m120|[39m
+    [90m121|[39m       [34mexpect[39m(fixed[33m.[39mgameId)[33m.[39m[34mtoMatch[39m([36m/^[a-z][a-z0-9_]*$/[39m)[33m;[39m
+    [90m   |[39m                            [31m^[39m
+    [90m122|[39m     })[33m;[39m
+    [90m123|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m10 passed[39m[22m[90m (11)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m167 passed[39m[22m[90m (168)[39m
+[2m   Start at [22m 09:19:02
+[2m   Duration [22m 28.21s[2m (transform 1.56s, setup 4.22s, import 15.88s, tests 613ms, environment 49.18s)[22m
+

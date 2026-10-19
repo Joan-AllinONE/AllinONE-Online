@@ -844,6 +844,27 @@ export async function refreshGameDetail(gameId: string): Promise<PublishedGame |
   }
 }
 
+/**
+ * 将局部 patch 合并进游戏缓存（内存 + 持久缓存）。
+ * 用途：contentSop / itemSop 等配置字段经 PATCH 落库（gamesApi 云函数）后，
+ * 让 getPublishedGame / getPublishedGames 立即读到新值，UI 无需整页刷新。
+ * 不派发 games-list-updated（调用方自行更新组件 state，避免级联重刷）。
+ */
+export function applyGamePatchToCache(gameId: string, patch: Partial<PublishedGame>): PublishedGame | null {
+  try {
+    const games = _publishedGamesCache || loadGamesFromCache();
+    const idx = games.findIndex((g) => g.id === gameId);
+    if (idx < 0) return null;
+    games[idx] = { ...games[idx], ...patch };
+    _publishedGamesCache = games;
+    // dev 下 saveGamesToCache 短路（后端内存库为唯一权威源），仅内存生效
+    saveGamesToCache(games);
+    return games[idx];
+  } catch {
+    return null;
+  }
+}
+
 // ==================== 业务逻辑 ====================
 
 /**

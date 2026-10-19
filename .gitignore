@@ -25,3 +25,18 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Build/lint/test scratch logs (not source)
+tsc_*.txt
+vite_*.txt
+acr_*.txt
+smoke_*.txt
+server_*.txt
+server_*.err
+build_*.txt
+build_err.txt
+build_log.txt
+check_cf*.txt
+evt_*.txt
+eslint_out.txt
+deploy_log.txt

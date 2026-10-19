@@ -1,5 +1,0 @@
-
-  cloudfunctions\gamesApi\contract-engine.js  100.0kb
-
-Done in 266ms
-[build-engine] OK: cloudfunctions\gamesApi\contract-engine.js (100.0 KB)

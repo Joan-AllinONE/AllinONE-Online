@@ -18,10 +18,12 @@ AllinONE 是一个面向游戏与社区生态的综合平台，提供平台管�
   - 投票决策（提交/投票/否决/生效）
   - 成员管理（角色与权限模拟）
   - 绩效管理（分红权重计算与现金分红执行，含幂等与去重保护）
+  - 平台规则服务（参数/规则集中治理）
 - 资金池与经济系统
   - 收入/支出、类别与货币维度统计
   - 净收入与总价值计算（现金、游戏币、算力、A币、O币）
   - A币/O币分发与分红（模拟），并记录到资金池与钱包
+  - 收益分成（revenueSplit，按规则自动结算）
 - 钱包系统
   - 支持现金、游戏币、算力、A币、O币五种资产
   - 交易记录与统计（今日/周/月/累计）
@@ -30,9 +32,29 @@ AllinONE 是一个面向游戏与社区生态的综合平台，提供平台管�
 - 市场与商店
   - 官方商店购买流程与佣金记录
   - 交易市场模拟（玩家间交易）
+  - 道具工坊 UGC（玩家自创道具并发布到游戏）
+  - 道具市场（道具上架/交易）
+- 智能合约引擎
+  - 链下确定性合约引擎（`src/contracts/`：求值/执行/账本/哈希/校验）
+  - 合约模板：团购（groupBuy）、GSO、团队任务（teamQuest）
+  - 合约中心 / 合约工坊 / 合约后台管理
+  - 合约隧道（itemTunnel）与 AI 桥接（contractAIBridge）
+- 活动系统
+  - 活动引擎（server/eventEngine）：签到、抽奖、任务、排行榜
+  - 限时活动后台（limitedEvent）、事件通知（notifications）
+- 内容创作与发布
+  - 内容工坊（玩家创作并 harvest 到平台）
+  - 任务广场（QuestPlaza，发布/接取任务）
+  - 发布管线与协议引擎（PublishingPipeline / ProtocolChannel / SchemaRegistry / EffectTypeRegistry）
+  - 游戏审核后台（审核上架游戏）
+  - 跨游戏兑换（统一兑换凭证，跨游戏通用）
 - 游戏与社区
   - 游戏中心与个人中心（资产概览、交易记录）
   - 社区奖励（A币/O币奖励与分红演示）
+  - 游戏商店管理（GameStore、开发商面板）
+- 平台数据中心
+  - 数据分析与运营指标可视化
+  - 活动/合约/交易多维统计
 - 其他演示页面
   - 资金池演示、开放经济、团队演示等
 
@@ -48,11 +70,12 @@ AllinONE 是一个面向游戏与社区生态的综合平台，提供平台管�
 - Express 4.21 / JWT 认证 / Helmet 安全头
 - PostgreSQL (生产) / 内存数据库 (开发)
 - pino 结构化日志 / prom-client 监控
-- CloudBase CloudRun 部署
+- CloudBase CloudRun 部署 + CloudBase 后端同步（backendSync / apiBase / cloudSync）
+- 链下合约引擎（TypeScript，确定性求值/执行/账本）
 
 ### 测试
 - Vitest + jsdom
-- 22 个 P0 核心测试（兑换码/凭证支付/凭证服务）
+- 核心测试覆盖：兑换码/凭证支付/凭证服务/合约引擎/活动引擎/收益分成
 - GitHub Actions CI 流水线
 
 ### 安全
@@ -130,32 +153,45 @@ docker run -p 3000:3000 -e JWT_SECRET=xxx -e USE_MEMORY_DB=false allinone-gaming
 src/
   server/                    # 后端服务
     auth/jwt.ts              # JWT 认证模块
-    routes/                  # API 路由（health/inventory/redeem）
+    eventEngine.ts           # 活动引擎（签到/抽奖/任务/排行榜）
+    routes/                  # API 路由（health/inventory/redeem/contractTunnel/limitedEvent/notifications）
     logger.ts                # pino 结构化日志
     requestId.ts             # Request ID 中间件
     metrics.ts               # Prometheus metrics
     memoryDatabase.ts        # 内存数据库适配器
     redeemCodeStore.ts       # 兑换码存储（含双花防护）
+  contracts/                 # 链下确定性合约引擎
+    engine/                  # 求值/执行/账本/哈希/校验 + 测试
+    templates/               # groupBuy / GSO / teamQuest 等合约模板
+    types.ts index.ts
   services/                  # 核心业务服务
     voucherPaymentService.ts # A币支付（含并发锁）
     gameDeveloperService.ts  # 游戏商账户 + 每日结算（幂等）
     marketplaceService.ts    # 交易市场
+    platformRulesService.ts  # 平台规则/参数治理
+    revenueSplit.ts          # 收益分成（含测试）
+    voteService.ts           # 投票治理
+    itemTunnelService.ts     # 道具隧道
+    backendSync.ts           # CloudBase 后端同步
   voucher-system/            # 凭证系统
     services/VoucherService.ts
     storage/VoucherDatabase.ts
+  publishing-center/         # 发布管线与协议引擎
+    standard-sdk/protocol/   # ProtocolClient 等协议通道
   skills/                    # Skill 插件引擎
     auth/ wallet/ inventory/ store/ voucher/ proposal/ game-connector/
   components/ pages/ hooks/ contexts/ types/ utils/
+  pages/                     # 页面（含 ContractCenter/ContractWorkshop/ContractAdmin/EventAdmin/GameStore/ItemWorkshop/ItemMarket 等）
 
 顶层：
-  server.js                  # Express 入口（S4 精简至 ~290 行）
+  server.js                  # Express 入口
   Dockerfile                 # 多阶段构建 + 非 root 用户
   vitest.config.ts           # 测试配置
   tsconfig.server.json       # 服务端 TS 编译
   .github/workflows/test.yml # CI 流水线
   docs/api.md                # API 文档
-  docs/adr/                  # 架构决策记录 (×5)
-  docs/runbooks/             # 运维 Runbook (×3)
+  docs/adr/                  # 架构决策记录
+  docs/runbooks/             # 运维 Runbook
 ```
 
 ## 安全基线
